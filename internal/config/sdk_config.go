@@ -6,6 +6,15 @@ package config
 
 // SDKConfig represents the application's configuration, loaded from a YAML file.
 type SDKConfig struct {
+	// ContextCompression optionally compresses eligible historical tool outputs inline.
+	// The original client payload remains available to model routers and request telemetry.
+	ContextCompression ContextCompressionConfig `yaml:"context-compression" json:"context-compression"`
+	// ProxyPools defines reusable named outbound proxy selections.
+	ProxyPools []ProxyPool `yaml:"proxy-pools,omitempty" json:"-"`
+
+	// ModelGroups defines client-visible models backed by ordered fallback targets.
+	ModelGroups []ModelGroup `yaml:"model-groups,omitempty" json:"model-groups,omitempty"`
+
 	// ProxyURL is the URL of an optional proxy server to use for outbound requests.
 	ProxyURL string `yaml:"proxy-url" json:"proxy-url"`
 
@@ -61,6 +70,31 @@ type SDKConfig struct {
 	// NonStreamKeepAliveInterval controls how often blank lines are emitted for non-streaming responses.
 	// <= 0 disables keep-alives. Value is in seconds.
 	NonStreamKeepAliveInterval int `yaml:"nonstream-keepalive-interval,omitempty" json:"nonstream-keepalive-interval,omitempty"`
+}
+
+// ContextCompressionConfig configures the single inline request compression engine.
+// TARE executable identity fields are intentionally excluded from JSON management surfaces.
+type ContextCompressionConfig struct {
+	Engine      string               `yaml:"engine" json:"engine"`
+	MinBytes    int                  `yaml:"min-bytes,omitempty" json:"min-bytes,omitempty"`
+	RawCapBytes int                  `yaml:"raw-cap-bytes,omitempty" json:"raw-cap-bytes,omitempty"`
+	TARE        TAREStructuralConfig `yaml:"tare-structural,omitempty" json:"-"`
+}
+
+// TAREStructuralConfig contains only bounded process and verified-identity settings.
+type TAREStructuralConfig struct {
+	BinaryPath        string   `yaml:"binary-path,omitempty" json:"-"`
+	SHA256            string   `yaml:"sha256,omitempty" json:"-"`
+	AllowedVersions   []string `yaml:"allowed-versions,omitempty" json:"-"`
+	ManifestID        string   `yaml:"manifest-id,omitempty" json:"-"`
+	ProcessTimeoutMS  int      `yaml:"process-timeout-ms,omitempty" json:"-"`
+	QueueTimeoutMS    int      `yaml:"queue-timeout-ms,omitempty" json:"-"`
+	InputLimitBytes   int      `yaml:"input-limit-bytes,omitempty" json:"-"`
+	StdoutLimitBytes  int      `yaml:"stdout-limit-bytes,omitempty" json:"-"`
+	StderrLimitBytes  int      `yaml:"stderr-limit-bytes,omitempty" json:"-"`
+	GlobalConcurrency int      `yaml:"global-concurrency,omitempty" json:"-"`
+	CacheEntries      int      `yaml:"cache-entries,omitempty" json:"-"`
+	CacheBytes        int      `yaml:"cache-bytes,omitempty" json:"-"`
 }
 
 // ClaudeCodeConfig configures Claude Code compatibility behavior.

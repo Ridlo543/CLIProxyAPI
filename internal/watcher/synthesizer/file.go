@@ -160,6 +160,15 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) ([
 	if p, ok := metadata["proxy_url"].(string); ok {
 		proxyURL = p
 	}
+	proxyPool := ""
+	if p, ok := metadata["proxy_pool"].(string); ok {
+		proxyPool = strings.TrimSpace(p)
+	} else if p, ok := metadata["proxy-pool"].(string); ok {
+		proxyPool = strings.TrimSpace(p)
+	}
+	if proxyPool != "" && (ctx.Config == nil || !ctx.Config.HasProxyPool(proxyPool)) {
+		return nil, fmt.Errorf("auth file %s: unknown proxy pool %q", filepath.Base(fullPath), proxyPool)
+	}
 
 	prefix := ""
 	if rawPrefix, ok := metadata["prefix"].(string); ok {
@@ -193,6 +202,7 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) ([
 			coreauth.AttributeSourceBackend: coreauth.AuthSourceFile,
 		},
 		ProxyURL:  proxyURL,
+		ProxyPool: proxyPool,
 		Metadata:  metadata,
 		CreatedAt: now,
 		UpdatedAt: now,

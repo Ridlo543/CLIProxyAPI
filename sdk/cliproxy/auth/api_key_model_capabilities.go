@@ -113,6 +113,42 @@ func attachResolvedAPIKeyModelInfo(routing *apiKeyModelRoutingSnapshot, req clip
 	return req
 }
 
+// attachResolvedOAuthModelInfo binds the selected credential's exact OAuth
+// alias capability to this attempt instead of consulting aggregate registry metadata.
+func (m *Manager) attachResolvedOAuthModelInfo(req cliproxyexecutor.Request, auth *Auth, upstreamModel string, result OAuthModelAliasResult) cliproxyexecutor.Request {
+	if auth != nil && auth.AuthKind() == AuthKindAPIKey {
+		return req
+	}
+	req = clearResolvedModelInfo(req)
+	if auth == nil {
+		return req
+	}
+	if result.thinking == nil {
+		return req
+	}
+	resolved := strings.TrimSpace(thinking.ParseSuffix(upstreamModel).ModelName)
+	if resolved == "" {
+		resolved = strings.TrimSpace(thinking.ParseSuffix(result.UpstreamModel).ModelName)
+	}
+	modelInfo := modelconfig.ResolveModelInfo(resolved, strings.TrimSpace(auth.Provider), result.thinking)
+	metadata := make(map[string]any, len(req.Metadata)+1)
+	maps.Copy(metadata, req.Metadata)
+	metadata[resolvedAPIKeyModelInfoMetadataKey] = modelInfo
+	req.Metadata = metadata
+	return req
+}
+
+func clearResolvedModelInfo(req cliproxyexecutor.Request) cliproxyexecutor.Request {
+	if _, exists := req.Metadata[resolvedAPIKeyModelInfoMetadataKey]; !exists {
+		return req
+	}
+	metadata := make(map[string]any, len(req.Metadata)-1)
+	maps.Copy(metadata, req.Metadata)
+	delete(metadata, resolvedAPIKeyModelInfoMetadataKey)
+	req.Metadata = metadata
+	return req
+}
+
 func lookupAPIKeyModelCapability(routing *apiKeyModelRoutingSnapshot, auth *Auth, routeModel, upstreamModel string) (*registry.ModelInfo, bool) {
 	if !isConfiguredModelRoutingAuth(auth) || routing == nil {
 		return nil, false

@@ -78,6 +78,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.Pprof.Addr = DefaultPprofAddr
 	cfg.RemoteManagement.PanelGitHubRepository = DefaultPanelGitHubRepository
 	cfg.CredentialInFlight = DefaultCredentialInFlightConfig()
+	cfg.ContextCompression.applyDefaults()
 	if err = yaml.Unmarshal(data, &cfg); err != nil {
 		if optional {
 			// In cloud deploy mode, if YAML parsing fails, return empty config instead of error.
@@ -86,6 +87,11 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 			return cfgOptional, nil
 		}
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+	cfg.ContextCompression.applyDefaults()
+	cfg.ContextCompression.applyBundledTAREFallback()
+	if errValidate := cfg.ContextCompression.Validate(); errValidate != nil {
+		return nil, errValidate
 	}
 
 	cfg.CredentialConcurrency = cfg.CredentialConcurrency.WithDefaults()
@@ -98,6 +104,14 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	if errValidate := cfg.ValidateCredentialWeights(); errValidate != nil {
 		return nil, errValidate
 	}
+	if errValidate := cfg.NormalizeProxyPools(); errValidate != nil {
+		return nil, errValidate
+	}
+	modelGroups, errModelGroups := NormalizeModelGroups(cfg.ModelGroups)
+	if errModelGroups != nil {
+		return nil, errModelGroups
+	}
+	cfg.ModelGroups = modelGroups
 
 	// Hash remote management key if plaintext is detected (nested)
 	// We consider a value to be already hashed if it looks like a bcrypt hash ($2a$, $2b$, or $2y$ prefix).

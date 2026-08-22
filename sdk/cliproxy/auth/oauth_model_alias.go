@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
 )
 
@@ -21,6 +22,7 @@ type oauthModelAliasEntry struct {
 	upstreamModel string
 	configAlias   string
 	forceMapping  bool
+	thinking      *registry.ThinkingSupport
 }
 
 type oauthModelAliasTable struct {
@@ -33,6 +35,7 @@ type OAuthModelAliasResult struct {
 	UpstreamModel string // resolved upstream model name (empty if no mapping found)
 	ForceMapping  bool   // whether to rewrite model name in responses
 	OriginalAlias string // client-visible model for response rewrite; only applied when ForceMapping is true (see rewriteForceMappedResponse / wrapStreamResult)
+	thinking      *registry.ThinkingSupport
 }
 
 func compileOAuthModelAliasTable(aliases map[string][]internalconfig.OAuthModelAlias) *oauthModelAliasTable {
@@ -65,6 +68,7 @@ func compileOAuthModelAliasTable(aliases map[string][]internalconfig.OAuthModelA
 				upstreamModel: name,
 				configAlias:   alias,
 				forceMapping:  entry.ForceMapping,
+				thinking:      entry.Thinking,
 			}
 		}
 		if len(rev) > 0 {
@@ -361,6 +365,7 @@ func resolveUpstreamModelFromAliases(aliases []internalconfig.OAuthModelAlias, r
 					UpstreamModel: preserveResolvedModelSuffix(original, requestResult),
 					ForceMapping:  entry.ForceMapping,
 					OriginalAlias: oauthModelAliasForceMappingResponseModel(alias),
+					thinking:      entry.Thinking,
 				}
 			}
 			originalAlias := requestedModel
@@ -371,6 +376,7 @@ func resolveUpstreamModelFromAliases(aliases []internalconfig.OAuthModelAlias, r
 				UpstreamModel: preserveResolvedModelSuffix(original, requestResult),
 				ForceMapping:  entry.ForceMapping,
 				OriginalAlias: originalAlias,
+				thinking:      entry.Thinking,
 			}
 		}
 	}
@@ -429,6 +435,7 @@ func resolveUpstreamModelFromAliasTable(m *Manager, auth *Auth, requestedModel, 
 				UpstreamModel: preserveResolvedModelSuffix(targetModel, requestResult),
 				ForceMapping:  entry.forceMapping,
 				OriginalAlias: oauthModelAliasForceMappingResponseModel(entry.configAlias),
+				thinking:      entry.thinking,
 			}
 		}
 
@@ -449,6 +456,7 @@ func resolveUpstreamModelFromAliasTable(m *Manager, auth *Auth, requestedModel, 
 			UpstreamModel: upstreamModel,
 			ForceMapping:  entry.forceMapping,
 			OriginalAlias: originalAlias,
+			thinking:      entry.thinking,
 		}
 	}
 

@@ -7,13 +7,16 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/sdk/proxyutil"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
@@ -327,4 +330,27 @@ func (h *Handler) PutProxyURL(c *gin.Context) {
 func (h *Handler) DeleteProxyURL(c *gin.Context) {
 	h.cfg.ProxyURL = ""
 	h.persist(c)
+}
+
+// GetProxyPools returns sanitized named-pool configuration and runtime health.
+func (h *Handler) GetProxyPools(c *gin.Context) {
+	h.mu.Lock()
+	manager := h.authManager
+	h.mu.Unlock()
+	if manager == nil {
+		c.JSON(http.StatusOK, []coreauth.ProxyPoolStatus{})
+		return
+	}
+	statuses := manager.ProxyPoolStatuses()
+	for i := range statuses {
+		for j := range statuses[i].URLs {
+			if strings.EqualFold(strings.TrimSpace(statuses[i].URLs[j]), "direct") {
+				statuses[i].URLs[j] = "direct"
+			} else {
+				statuses[i].URLs[j] = proxyutil.Redact(statuses[i].URLs[j])
+			}
+		}
+	}
+	sort.Slice(statuses, func(i, j int) bool { return strings.ToLower(statuses[i].Name) < strings.ToLower(statuses[j].Name) })
+	c.JSON(http.StatusOK, statuses)
 }

@@ -7,7 +7,10 @@ import (
 
 func (h *OpenAIAPIHandler) codexClientModelsResponse() map[string]any {
 	optimizeMultiAgentV2 := h != nil && h.Cfg != nil && h.Cfg.CodexOptimizeMultiAgentV2
-	return codexmodels.BuildResponse(h.Models(), registry.GetGlobalRegistry().GetModelProviders, optimizeMultiAgentV2)
+	// Codex client catalogs require provider capability metadata that a
+	// cross-provider group cannot represent safely, so groups are deliberately omitted.
+	models := registry.GetGlobalRegistry().GetAvailableModels("openai")
+	return codexmodels.BuildResponse(models, registry.GetGlobalRegistry().GetModelProviders, optimizeMultiAgentV2)
 }
 
 // CodexClientModelsResponse builds a Codex client model response.

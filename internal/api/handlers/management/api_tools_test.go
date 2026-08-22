@@ -14,6 +14,16 @@ import (
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
 )
 
+type managementPoolTransportProvider struct{ rt http.RoundTripper }
+
+func (p managementPoolTransportProvider) RoundTripperFor(*coreauth.Auth) http.RoundTripper {
+	return p.rt
+}
+
+type managementRoundTripper struct{}
+
+func (*managementRoundTripper) RoundTrip(*http.Request) (*http.Response, error) { return nil, nil }
+
 func TestAPICallUsesRequestProxyURL(t *testing.T) {
 	t.Parallel()
 
@@ -69,6 +79,19 @@ func TestAPICallTransportDirectBypassesGlobalProxy(t *testing.T) {
 	}
 	if httpTransport.Proxy != nil {
 		t.Fatal("expected direct transport to disable proxy function")
+	}
+}
+
+func TestAPICallTransportSelectedPoolBeatsGlobalProxy(t *testing.T) {
+	selected := http.RoundTripper(&managementRoundTripper{})
+	manager := coreauth.NewManager(nil, nil, nil)
+	manager.SetRoundTripperProvider(managementPoolTransportProvider{rt: selected})
+	h := &Handler{
+		cfg:         &config.Config{SDKConfig: sdkconfig.SDKConfig{ProxyURL: "http://global-proxy.example.com:8080"}},
+		authManager: manager,
+	}
+	if got := h.apiCallTransport(&coreauth.Auth{ProxyPool: "office"}, ""); got != selected {
+		t.Fatalf("transport = %T, want selected pool transport", got)
 	}
 }
 

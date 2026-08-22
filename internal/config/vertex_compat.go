@@ -34,7 +34,8 @@ type VertexCompatKey struct {
 	BaseURL string `yaml:"base-url,omitempty" json:"base-url,omitempty"`
 
 	// ProxyURL optionally overrides the global proxy for this API key.
-	ProxyURL string `yaml:"proxy-url,omitempty" json:"proxy-url,omitempty"`
+	ProxyURL  string `yaml:"proxy-url,omitempty" json:"proxy-url,omitempty"`
+	ProxyPool string `yaml:"proxy-pool,omitempty" json:"proxy-pool,omitempty"`
 
 	// Headers optionally adds extra HTTP headers for requests sent with this key.
 	// Commonly used for cookies, user-agent, and other authentication headers.
@@ -55,10 +56,11 @@ type VertexCompatKey struct {
 	RequestRetry *int `yaml:"request-retry,omitempty" json:"request-retry,omitempty"`
 }
 
-func (k VertexCompatKey) GetAPIKey() string   { return k.APIKey }
-func (k VertexCompatKey) GetBaseURL() string  { return k.BaseURL }
-func (k VertexCompatKey) GetPrefix() string   { return k.Prefix }
-func (k VertexCompatKey) GetProxyURL() string { return k.ProxyURL }
+func (k VertexCompatKey) GetAPIKey() string    { return k.APIKey }
+func (k VertexCompatKey) GetBaseURL() string   { return k.BaseURL }
+func (k VertexCompatKey) GetPrefix() string    { return k.Prefix }
+func (k VertexCompatKey) GetProxyURL() string  { return k.ProxyURL }
+func (k VertexCompatKey) GetProxyPool() string { return k.ProxyPool }
 
 // VertexCompatModel represents a model configuration for Vertex compatibility,
 // including the actual model name and its alias for API routing.

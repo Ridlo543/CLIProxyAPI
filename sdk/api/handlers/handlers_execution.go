@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/clienterror"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/contextcompression"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
@@ -89,9 +91,25 @@ func (h *BaseAPIHandler) executeWithAuthManagerFormats(ctx context.Context, entr
 		lifecycle.completeError(ctx, interceptErr)
 		return nil, nil, interceptErr
 	}
-	resp, err := h.AuthManager.Execute(ctx, providers, req, opts)
+	// Routers and before-auth interceptors intentionally inspect the raw client body.
+	// Compress one provider-facing copy exactly once before AuthManager owns retries.
+	compressedPayload, compressionStats := applyInlineContextCompression(h.ContextCompression, ctx, req.Payload, h.contextCompressionConfig(), contextCompressionOptOut(ctx, execOptions.Headers))
+	compressionStats = contextcompression.SanitizeStats(compressionStats)
+	req.Payload = compressedPayload
+	reqMeta["compression"] = compressionStats
+	var resp coreexecutor.Response
+	var err error
+	isGroupExecution := false
+	if group, ok := h.configuredModelGroup(originalRequestedModel); ok && routeDecision.Provider == "" && routeDecision.ExecutorPluginID == "" && strings.TrimSpace(execOptions.ForcedProvider) == "" {
+		isGroupExecution = true
+		resp, err = h.AuthManager.ExecuteModelGroup(ctx, modelGroupTargets(group), req, opts)
+	} else {
+		resp, err = h.AuthManager.Execute(ctx, providers, req, opts)
+	}
 	if err != nil {
-		err = enrichAuthSelectionError(err, providers, normalizedModel)
+		if !isGroupExecution {
+			err = enrichAuthSelectionError(err, providers, normalizedModel)
+		}
 		errMsg := executionErrorMessage(err)
 		lifecycle.completeError(ctx, errMsg)
 		return nil, nil, errMsg
@@ -153,9 +171,19 @@ func (h *BaseAPIHandler) executeCountWithAuthManager(ctx context.Context, handle
 		lifecycle.completeError(ctx, interceptErr)
 		return nil, nil, interceptErr
 	}
-	resp, err := h.AuthManager.ExecuteCount(ctx, providers, req, opts)
+	var resp coreexecutor.Response
+	var err error
+	isGroupExecution := false
+	if group, ok := h.configuredModelGroup(originalRequestedModel); ok && routeDecision.Provider == "" && routeDecision.ExecutorPluginID == "" && strings.TrimSpace(execOptions.ForcedProvider) == "" {
+		isGroupExecution = true
+		resp, err = h.AuthManager.ExecuteCountModelGroup(ctx, modelGroupTargets(group), req, opts)
+	} else {
+		resp, err = h.AuthManager.ExecuteCount(ctx, providers, req, opts)
+	}
 	if err != nil {
-		err = enrichAuthSelectionError(err, providers, normalizedModel)
+		if !isGroupExecution {
+			err = enrichAuthSelectionError(err, providers, normalizedModel)
+		}
 		errMsg := executionErrorMessage(err)
 		lifecycle.completeError(ctx, errMsg)
 		return nil, nil, errMsg
@@ -185,6 +213,11 @@ func (h *BaseAPIHandler) executeWithPluginExecutor(ctx context.Context, entryPro
 		lifecycle.completeError(execCtx, interceptErr)
 		return nil, nil, interceptErr
 	}
+	compressedPayload, compressionStats := applyInlineContextCompression(h.ContextCompression, execCtx, req.Payload, h.contextCompressionConfig(), contextCompressionOptOut(execCtx, execOptions.Headers))
+	compressionStats = contextcompression.SanitizeStats(compressionStats)
+	req.Payload = compressedPayload
+	opts.OriginalRequest = cloneBytes(rawJSON)
+	opts.EnsureMetadata()["compression"] = compressionStats
 	req, opts, interceptErr = h.applyRequestInterceptorsAfterPluginExecutorRoute(execCtx, host, executorPluginID, entryProtocol, originalRequestedModel, lifecycle.requestID(), req, opts, execOptions.SkipInterceptorPluginID)
 	if interceptErr != nil {
 		lifecycle.completeError(execCtx, interceptErr)
@@ -299,7 +332,6 @@ func (h *BaseAPIHandler) applyRequestInterceptorsAfterPluginExecutorRoute(ctx co
 	opts.Headers = mergeRequestInterceptorHeaders(opts.Headers, resp.Headers, resp.ClearHeaders)
 	if len(resp.Body) > 0 {
 		req.Payload = cloneBytes(resp.Body)
-		opts.OriginalRequest = cloneBytes(resp.Body)
 	}
 	if resp.Terminate {
 		return req, opts, directTerminationError(resp.StatusCode, resp.ResponseHeaders, resp.ResponseBody)

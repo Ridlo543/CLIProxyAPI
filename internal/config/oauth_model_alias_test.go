@@ -1,6 +1,11 @@
 package config
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+)
 
 func TestSanitizeOAuthModelAlias_PreservesOptionalFields(t *testing.T) {
 	cfg := &Config{
@@ -23,6 +28,18 @@ func TestSanitizeOAuthModelAlias_PreservesOptionalFields(t *testing.T) {
 	}
 	if aliases[1].Name != "gpt-6" || aliases[1].Alias != "g6" || aliases[1].Fork || aliases[1].DisplayName != "" || aliases[1].ForceMapping {
 		t.Fatalf("unexpected sanitized second alias: %+v", aliases[1])
+	}
+}
+
+func TestSanitizeOAuthModelAlias_PreservesThinking(t *testing.T) {
+	cfg := Config{OAuthModelAlias: map[string][]OAuthModelAlias{" Codex ": {{
+		Name: " gpt-5-codex ", Alias: " team-codex ",
+		Thinking: &registry.ThinkingSupport{Levels: []string{"low", "high"}},
+	}}}}
+	cfg.SanitizeOAuthModelAlias()
+	got := cfg.OAuthModelAlias["codex"]
+	if len(got) != 1 || got[0].Thinking == nil || !reflect.DeepEqual(got[0].Thinking.Levels, []string{"low", "high"}) {
+		t.Fatalf("thinking not preserved: %#v", got)
 	}
 }
 

@@ -126,8 +126,12 @@ func nativeInteractionsExecutionError() *interfaces.ErrorMessage {
 // router selected a built-in provider, it skips model->provider resolution and uses the router's
 // provider (with an optional target model); otherwise it falls back to the registry-based path.
 func (h *BaseAPIHandler) providersForExecution(modelName, originalRequestedModel string, allowImageModel bool, routeDecision modelRouteDecision, execOptions modelExecutionOptions) ([]string, string, *interfaces.ErrorMessage) {
+	group, isGroup := h.configuredModelGroup(modelName)
 	forcedProvider := strings.ToLower(strings.TrimSpace(execOptions.ForcedProvider))
 	if forcedProvider != "" {
+		if isGroup {
+			return nil, "", modelGroupUnsupportedError("forced-provider protocol execution")
+		}
 		if routeDecision.ExecutorPluginID != "" {
 			return nil, "", nativeInteractionsExecutionError()
 		}
@@ -153,7 +157,28 @@ func (h *BaseAPIHandler) providersForExecution(modelName, originalRequestedModel
 		}
 		return []string{routeDecision.Provider}, normalizedModel, nil
 	}
+	if isGroup {
+		if allowImageModel {
+			return nil, "", modelGroupUnsupportedError("image endpoints")
+		}
+		for _, member := range group.Models {
+			if errMsg := h.validateImageOnlyModel(member.Model, false); errMsg != nil {
+				return nil, "", errMsg
+			}
+		}
+		if len(group.Models) == 0 {
+			return nil, "", modelGroupUnsupportedError("empty model group")
+		}
+		return []string{group.Models[0].Provider}, group.Models[0].Model, nil
+	}
 	return h.getRequestDetailsWithOptions(modelName, allowImageModel)
+}
+
+func modelGroupUnsupportedError(endpoint string) *interfaces.ErrorMessage {
+	return &interfaces.ErrorMessage{
+		StatusCode: http.StatusBadRequest,
+		Error:      fmt.Errorf("model groups are not supported for %s", endpoint),
+	}
 }
 
 func (h *BaseAPIHandler) getRequestDetailsWithOptions(modelName string, allowImageModel bool) (providers []string, normalizedModel string, err *interfaces.ErrorMessage) {

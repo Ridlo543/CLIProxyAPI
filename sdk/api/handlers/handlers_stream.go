@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/contextcompression"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
@@ -52,6 +54,11 @@ func (h *BaseAPIHandler) streamWithPluginExecutor(ctx context.Context, entryProt
 		close(errChan)
 		return nil, nil, errChan
 	}
+	compressedPayload, compressionStats := applyInlineContextCompression(h.ContextCompression, execCtx, req.Payload, h.contextCompressionConfig(), contextCompressionOptOut(execCtx, execOptions.Headers))
+	compressionStats = contextcompression.SanitizeStats(compressionStats)
+	req.Payload = compressedPayload
+	opts.OriginalRequest = cloneBytes(rawJSON)
+	opts.EnsureMetadata()["compression"] = compressionStats
 	req, opts, interceptErr = h.applyRequestInterceptorsAfterPluginExecutorRoute(execCtx, host, executorPluginID, entryProtocol, originalRequestedModel, lifecycle.requestID(), req, opts, execOptions.SkipInterceptorPluginID)
 	if interceptErr != nil {
 		lifecycle.completeError(execCtx, interceptErr)
@@ -350,9 +357,25 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 		close(errChan)
 		return nil, nil, errChan
 	}
-	streamResult, err := h.AuthManager.ExecuteStream(ctx, providers, req, opts)
+	// Routers and before-auth interceptors intentionally inspect the raw client body.
+	// Compress one provider-facing copy exactly once before AuthManager owns retries.
+	compressedPayload, compressionStats := applyInlineContextCompression(h.ContextCompression, ctx, req.Payload, h.contextCompressionConfig(), contextCompressionOptOut(ctx, execOptions.Headers))
+	compressionStats = contextcompression.SanitizeStats(compressionStats)
+	req.Payload = compressedPayload
+	reqMeta["compression"] = compressionStats
+	var streamResult *coreexecutor.StreamResult
+	var err error
+	isGroupExecution := false
+	if group, ok := h.configuredModelGroup(originalRequestedModel); ok && routeDecision.Provider == "" && routeDecision.ExecutorPluginID == "" && strings.TrimSpace(execOptions.ForcedProvider) == "" {
+		isGroupExecution = true
+		streamResult, err = h.AuthManager.ExecuteStreamModelGroup(ctx, modelGroupTargets(group), req, opts)
+	} else {
+		streamResult, err = h.AuthManager.ExecuteStream(ctx, providers, req, opts)
+	}
 	if err != nil {
-		err = enrichAuthSelectionError(err, providers, normalizedModel)
+		if !isGroupExecution {
+			err = enrichAuthSelectionError(err, providers, normalizedModel)
+		}
 		errMsg := executionErrorMessage(err)
 		lifecycle.completeError(ctx, errMsg)
 		errChan := make(chan *interfaces.ErrorMessage, 1)
@@ -546,7 +569,14 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 			break
 		}
 		bootstrapRetries++
-		retryResult, retryErr := h.AuthManager.ExecuteStream(ctx, providers, req, opts)
+		var retryResult *coreexecutor.StreamResult
+		var retryErr error
+		if isGroupExecution {
+			group, _ := h.configuredModelGroup(originalRequestedModel)
+			retryResult, retryErr = h.AuthManager.ExecuteStreamModelGroup(ctx, modelGroupTargets(group), req, opts)
+		} else {
+			retryResult, retryErr = h.AuthManager.ExecuteStream(ctx, providers, req, opts)
+		}
 		if retryErr != nil {
 			originalBootstrapErr := executionErrorMessage(bootstrapStreamErr)
 			if isAuthSelectionUnavailable(retryErr) && originalBootstrapErr.StatusCode >= http.StatusInternalServerError {

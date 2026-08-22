@@ -141,6 +141,12 @@ func (m *Manager) setConfigSnapshotLocked(cfg *internalconfig.Config) bool {
 		m.homeSessionAliases.clear()
 	}
 	m.runtimeConfig.Store(cfg)
+	m.mu.RLock()
+	rtProvider := m.rtProvider
+	m.mu.RUnlock()
+	if updater, ok := rtProvider.(interface{ UpdateConfig(*internalconfig.Config) }); ok {
+		updater.UpdateConfig(cfg)
+	}
 	clearedCooldowns := m.clearDisabledCooldownStates(cfg)
 	if clearedCooldowns && oldCooldownStore != nil {
 		m.mu.Lock()

@@ -387,6 +387,14 @@ func (s *Server) Stop(ctx context.Context) error {
 
 	// Shutdown the HTTP server.
 	errShutdown := s.server.Shutdown(ctx)
+	// HTTP admission is closed before this service's compression runtime is drained.
+	if s.handlers != nil {
+		compressionCtx, cancelCompression := context.WithTimeout(ctx, 5*time.Second)
+		if errCompression := s.handlers.ShutdownContextCompression(compressionCtx); errShutdown == nil && errCompression != nil {
+			errShutdown = errCompression
+		}
+		cancelCompression()
+	}
 	if s.codexLiveHandler != nil {
 		s.codexLiveHandler.Close()
 	}

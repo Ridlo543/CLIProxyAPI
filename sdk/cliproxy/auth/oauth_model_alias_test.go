@@ -4,7 +4,20 @@ import (
 	"testing"
 
 	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 )
+
+func TestOAuthModelAliasesAttributePreservesThinking(t *testing.T) {
+	auth := &Auth{}
+	SetOAuthModelAliasesAttribute(auth, []internalconfig.OAuthModelAlias{{
+		Name: "gpt-5", Alias: "g5",
+		Thinking: &registry.ThinkingSupport{Min: 1, Max: 4096, ZeroAllowed: true},
+	}})
+	aliases := OAuthModelAliasesFromAttributes(auth.Attributes)
+	if len(aliases) != 1 || aliases[0].Thinking == nil || aliases[0].Thinking.Max != 4096 || !aliases[0].Thinking.ZeroAllowed {
+		t.Fatalf("thinking did not survive auth attribute round trip: %#v", aliases)
+	}
+}
 
 func TestResolveOAuthUpstreamModel_SuffixPreservation(t *testing.T) {
 	t.Parallel()

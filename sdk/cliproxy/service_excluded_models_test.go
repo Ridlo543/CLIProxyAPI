@@ -310,7 +310,10 @@ func TestRegisterModelsForAuth_AntigravityFetchesWebSearchCapability(t *testing.
 	if staticOnlyModel == nil {
 		t.Fatal("expected static-only Antigravity model to remain registered")
 	}
-	if fetchedOnlyModel != nil {
-		t.Fatalf("fetched-only model should not be registered: %#v", fetchedOnlyModel)
+	if fetchedOnlyModel == nil {
+		t.Fatal("expected fetched-only model from the upstream catalog to be registered")
+	}
+	if !fetchedOnlyModel.SupportsWebSearch {
+		t.Fatal("expected fetched-only model web-search capability to be preserved")
 	}
 }

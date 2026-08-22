@@ -494,6 +494,9 @@ func (h *Handler) apiCallTransport(auth *coreauth.Auth, requestProxyURL string) 
 		if proxyStr := strings.TrimSpace(auth.ProxyURL); proxyStr != "" {
 			proxyCandidates = append(proxyCandidates, proxyStr)
 		}
+		if strings.TrimSpace(auth.ProxyURL) == "" && strings.TrimSpace(auth.ProxyPool) != "" && h != nil && h.authManager != nil {
+			return h.authManager.ProxyRoundTripper(auth)
+		}
 		if h != nil && h.cfg != nil {
 			if proxyStr := strings.TrimSpace(proxyURLFromAPIKeyConfig(h.cfg, auth)); proxyStr != "" {
 				proxyCandidates = append(proxyCandidates, proxyStr)

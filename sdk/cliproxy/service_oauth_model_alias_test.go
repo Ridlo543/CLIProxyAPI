@@ -3,8 +3,24 @@ package cliproxy
 import (
 	"testing"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
 )
+
+func TestApplyOAuthModelAlias_ThinkingOverridesAliasOnly(t *testing.T) {
+	cfg := &config.Config{OAuthModelAlias: map[string][]config.OAuthModelAlias{"codex": {{
+		Name: "gpt-5", Alias: "g5", Fork: true,
+		Thinking: &registry.ThinkingSupport{Levels: []string{" LOW ", "auto", "low"}},
+	}}}}
+	models := []*ModelInfo{{ID: "gpt-5", Thinking: &registry.ThinkingSupport{Min: 1, Max: 8192}}}
+	out := applyOAuthModelAlias(cfg, "codex", "oauth", models)
+	if len(out) != 2 || out[0].Thinking == nil || out[0].Thinking.Max != 8192 {
+		t.Fatalf("static original capability changed: %#v", out)
+	}
+	if out[1].Thinking == nil || len(out[1].Thinking.Levels) != 2 || out[1].Thinking.Levels[0] != "low" || !out[1].Thinking.DynamicAllowed {
+		t.Fatalf("alias thinking override missing/not normalized: %#v", out[1].Thinking)
+	}
+}
 
 func TestApplyOAuthModelAlias_Rename(t *testing.T) {
 	cfg := &config.Config{

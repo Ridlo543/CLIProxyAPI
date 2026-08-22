@@ -255,6 +255,8 @@ type OAuthModelAlias struct {
 	Name  string `yaml:"name" json:"name"`
 	Alias string `yaml:"alias" json:"alias"`
 	Fork  bool   `yaml:"fork,omitempty" json:"fork,omitempty"`
+	// Thinking optionally overrides reasoning capabilities on the client-visible alias.
+	Thinking *registry.ThinkingSupport `yaml:"thinking,omitempty" json:"thinking,omitempty"`
 
 	// DisplayName is the optional human-readable name shown in model catalogs.
 	DisplayName string `yaml:"display-name,omitempty" json:"display-name,omitempty"`
@@ -359,7 +361,8 @@ type ClaudeKey struct {
 	BaseURL string `yaml:"base-url" json:"base-url"`
 
 	// ProxyURL overrides the global proxy setting for this API key if provided.
-	ProxyURL string `yaml:"proxy-url" json:"proxy-url"`
+	ProxyURL  string `yaml:"proxy-url" json:"proxy-url"`
+	ProxyPool string `yaml:"proxy-pool,omitempty" json:"proxy-pool,omitempty"`
 
 	// Models defines upstream model names and aliases for request routing.
 	Models []ClaudeModel `yaml:"models" json:"models"`
@@ -413,7 +416,8 @@ func (k ClaudeKey) GetBaseURL() string { return k.BaseURL }
 
 func (k ClaudeKey) GetPrefix() string { return k.Prefix }
 
-func (k ClaudeKey) GetProxyURL() string { return k.ProxyURL }
+func (k ClaudeKey) GetProxyURL() string  { return k.ProxyURL }
+func (k ClaudeKey) GetProxyPool() string { return k.ProxyPool }
 
 // ClaudeModel describes a mapping between an alias and the actual upstream model name.
 type ClaudeModel struct {
@@ -480,7 +484,8 @@ type CodexKey struct {
 	AlphaSearch bool `yaml:"alpha-search,omitempty" json:"alpha-search,omitempty"`
 
 	// ProxyURL overrides the global proxy setting for this API key if provided.
-	ProxyURL string `yaml:"proxy-url" json:"proxy-url"`
+	ProxyURL  string `yaml:"proxy-url" json:"proxy-url"`
+	ProxyPool string `yaml:"proxy-pool,omitempty" json:"proxy-pool,omitempty"`
 
 	// Models defines upstream model names and aliases for request routing.
 	Models []CodexModel `yaml:"models" json:"models"`
@@ -509,7 +514,8 @@ func (k CodexKey) GetBaseURL() string { return k.BaseURL }
 
 func (k CodexKey) GetPrefix() string { return k.Prefix }
 
-func (k CodexKey) GetProxyURL() string { return k.ProxyURL }
+func (k CodexKey) GetProxyURL() string  { return k.ProxyURL }
+func (k CodexKey) GetProxyPool() string { return k.ProxyPool }
 
 // CodexModel describes a mapping between an alias and the actual upstream model name.
 type CodexModel struct {
@@ -577,7 +583,8 @@ type GeminiKey struct {
 	BaseURL string `yaml:"base-url,omitempty" json:"base-url,omitempty"`
 
 	// ProxyURL optionally overrides the global proxy for this API key.
-	ProxyURL string `yaml:"proxy-url,omitempty" json:"proxy-url,omitempty"`
+	ProxyURL  string `yaml:"proxy-url,omitempty" json:"proxy-url,omitempty"`
+	ProxyPool string `yaml:"proxy-pool,omitempty" json:"proxy-pool,omitempty"`
 
 	// Models defines upstream model names and aliases for request routing.
 	Models []GeminiModel `yaml:"models,omitempty" json:"models,omitempty"`
@@ -606,7 +613,8 @@ func (k GeminiKey) GetBaseURL() string { return k.BaseURL }
 
 func (k GeminiKey) GetPrefix() string { return k.Prefix }
 
-func (k GeminiKey) GetProxyURL() string { return k.ProxyURL }
+func (k GeminiKey) GetProxyURL() string  { return k.ProxyURL }
+func (k GeminiKey) GetProxyPool() string { return k.ProxyPool }
 
 // GeminiModel describes a mapping between an alias and the actual upstream model name.
 type GeminiModel struct {
@@ -697,7 +705,8 @@ type OpenAICompatibilityAPIKey struct {
 	Weight *int `yaml:"weight,omitempty" json:"weight,omitempty"`
 
 	// ProxyURL overrides the global proxy setting for this API key if provided.
-	ProxyURL string `yaml:"proxy-url,omitempty" json:"proxy-url,omitempty"`
+	ProxyURL  string `yaml:"proxy-url,omitempty" json:"proxy-url,omitempty"`
+	ProxyPool string `yaml:"proxy-pool,omitempty" json:"proxy-pool,omitempty"`
 }
 
 // OpenAICompatibilityModel represents a model configuration for OpenAI compatibility,

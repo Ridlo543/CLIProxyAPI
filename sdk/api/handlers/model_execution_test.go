@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -10,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/constant"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/contextcompression"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
@@ -28,6 +31,111 @@ type modelExecutionCaptureExecutor struct {
 	lastOptions coreexecutor.Options
 	execute     func(context.Context, *coreauth.Auth, coreexecutor.Request, coreexecutor.Options) (coreexecutor.Response, error)
 	stream      func(context.Context, *coreauth.Auth, coreexecutor.Request, coreexecutor.Options) (*coreexecutor.StreamResult, error)
+}
+
+type compressionRetryExecutor struct {
+	mu           sync.Mutex
+	provider     string
+	payloads     [][]byte
+	failFirst    bool
+	useTransport bool
+}
+
+func (e *compressionRetryExecutor) Identifier() string { return e.provider }
+func (e *compressionRetryExecutor) Execute(ctx context.Context, _ *coreauth.Auth, req coreexecutor.Request, _ coreexecutor.Options) (coreexecutor.Response, error) {
+	e.mu.Lock()
+	e.payloads = append(e.payloads, cloneBytes(req.Payload))
+	call := len(e.payloads)
+	e.mu.Unlock()
+	if e.failFirst && call == 1 {
+		// Match the manager's immediate same-round failover fixtures: a provider
+		// failure with cooling disabled advances to the next credential without
+		// entering refresh or delayed retry handling.
+		return coreexecutor.Response{}, &coreauth.Error{HTTPStatus: http.StatusInternalServerError, Message: "retry"}
+	}
+	if e.useTransport {
+		rt, _ := ctx.Value("cliproxy.roundtripper").(http.RoundTripper)
+		request, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://upstream.example", nil)
+		resp, err := rt.RoundTrip(request)
+		if err != nil {
+			return coreexecutor.Response{}, err
+		}
+		_ = resp.Body.Close()
+	}
+	return coreexecutor.Response{Payload: []byte(`{"ok":true}`)}, nil
+}
+func (e *compressionRetryExecutor) ExecuteStream(context.Context, *coreauth.Auth, coreexecutor.Request, coreexecutor.Options) (*coreexecutor.StreamResult, error) {
+	return nil, fmt.Errorf("unused")
+}
+func (e *compressionRetryExecutor) Refresh(_ context.Context, a *coreauth.Auth) (*coreauth.Auth, error) {
+	return a, nil
+}
+func (e *compressionRetryExecutor) CountTokens(ctx context.Context, a *coreauth.Auth, r coreexecutor.Request, o coreexecutor.Options) (coreexecutor.Response, error) {
+	return e.Execute(ctx, a, r, o)
+}
+func (e *compressionRetryExecutor) HttpRequest(context.Context, *coreauth.Auth, *http.Request) (*http.Response, error) {
+	return nil, fmt.Errorf("unused")
+}
+
+type compressionFailTransport struct{ fail bool }
+
+func (t *compressionFailTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	if t.fail {
+		return nil, fmt.Errorf("proxy failed")
+	}
+	return &http.Response{StatusCode: 200, Body: http.NoBody, Header: http.Header{}}, nil
+}
+func (t *compressionFailTransport) ProxyTransportFailed() bool { return t.fail }
+
+type compressionTransportProvider struct {
+	mu         sync.Mutex
+	next       int
+	transports []*compressionFailTransport
+}
+
+func (p *compressionTransportProvider) RoundTripperFor(*coreauth.Auth) http.RoundTripper {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	i := p.next
+	if i >= len(p.transports) {
+		i = len(p.transports) - 1
+	}
+	p.next++
+	return p.transports[i]
+}
+func (p *compressionTransportProvider) ProxyPoolAttemptLimit(*coreauth.Auth) int {
+	return len(p.transports)
+}
+
+type modelGroupCaptureExecutor struct {
+	provider string
+	req      coreexecutor.Request
+	opts     coreexecutor.Options
+	count    int
+	stream   func(coreexecutor.Request, coreexecutor.Options, int) (*coreexecutor.StreamResult, error)
+}
+
+func (e *modelGroupCaptureExecutor) Identifier() string { return e.provider }
+func (e *modelGroupCaptureExecutor) Execute(_ context.Context, _ *coreauth.Auth, req coreexecutor.Request, opts coreexecutor.Options) (coreexecutor.Response, error) {
+	e.req, e.opts, e.count = req, opts, e.count+1
+	return coreexecutor.Response{Payload: []byte(`{"ok":true}`)}, nil
+}
+func (e *modelGroupCaptureExecutor) ExecuteStream(_ context.Context, _ *coreauth.Auth, req coreexecutor.Request, opts coreexecutor.Options) (*coreexecutor.StreamResult, error) {
+	e.req, e.opts, e.count = req, opts, e.count+1
+	if e.stream != nil {
+		return e.stream(req, opts, e.count)
+	}
+	return nil, &coreauth.Error{HTTPStatus: http.StatusNotImplemented, Message: "unused"}
+}
+func (e *modelGroupCaptureExecutor) Refresh(context.Context, *coreauth.Auth) (*coreauth.Auth, error) {
+	return nil, nil
+}
+func (e *modelGroupCaptureExecutor) CountTokens(_ context.Context, _ *coreauth.Auth, req coreexecutor.Request, opts coreexecutor.Options) (coreexecutor.Response, error) {
+	e.req, e.opts, e.count = req, opts, e.count+1
+	return coreexecutor.Response{Payload: []byte("1")}, nil
+}
+func (*modelGroupCaptureExecutor) HttpRequest(context.Context, *coreauth.Auth, *http.Request) (*http.Response, error) {
+	return nil, nil
 }
 
 type modelExecutionStatusHeaderError struct {
@@ -170,6 +278,7 @@ func (e *modelExecutionCaptureExecutor) captured() (coreexecutor.Request, coreex
 func newModelExecutionHandler(t *testing.T, model string, executor *modelExecutionCaptureExecutor, cfg *sdkconfig.SDKConfig) *BaseAPIHandler {
 	t.Helper()
 	manager := coreauth.NewManager(nil, nil, nil)
+	manager.SetRetryConfig(0, 0, 0)
 	manager.RegisterExecutor(executor)
 	auth := &coreauth.Auth{
 		ID:       "model-execution-" + model,
@@ -185,6 +294,181 @@ func newModelExecutionHandler(t *testing.T, model string, executor *modelExecuti
 		registry.GetGlobalRegistry().UnregisterClient(auth.ID)
 	})
 	return NewBaseAPIHandlers(cfg, manager)
+}
+
+func TestModelGroupRewritesTargetAndPreservesRequestedModelMetadata(t *testing.T) {
+	first := &modelGroupCaptureExecutor{provider: "group-first"}
+	manager := coreauth.NewManager(nil, nil, nil)
+	manager.RegisterExecutor(first)
+	registry.GetGlobalRegistry().RegisterClient("group-first", "group-first", []*registry.ModelInfo{{ID: "upstream-one"}})
+	t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient("group-first") })
+	if _, err := manager.Register(context.Background(), &coreauth.Auth{ID: "group-first", Provider: "group-first", Status: coreauth.StatusActive, ModelStates: map[string]*coreauth.ModelState{"upstream-one": {Status: coreauth.StatusActive}}}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &sdkconfig.SDKConfig{ModelGroups: []config.ModelGroup{{Name: "code-auto", Models: []config.ModelGroupMember{{Provider: "group-first", Model: "upstream-one"}}}}}
+	handler := NewBaseAPIHandlers(cfg, manager)
+	body, _, errMsg := handler.ExecuteWithAuthManager(context.Background(), "openai", "code-auto", []byte(`{"model":"code-auto"}`), "")
+	if errMsg != nil || string(body) != `{"ok":true}` {
+		t.Fatalf("body = %s, error = %+v", body, errMsg)
+	}
+	if first.req.Model != "upstream-one" || first.opts.Metadata[coreexecutor.RequestedModelMetadataKey] != "code-auto" {
+		t.Fatalf("request = %#v, metadata = %#v", first.req, first.opts.Metadata)
+	}
+}
+
+func TestModelGroupBootstrapRetryReusesCompressedPayloadExactlyOnce(t *testing.T) {
+	originalApply := applyInlineContextCompression
+	calls := 0
+	applyInlineContextCompression = func(runtime *contextcompression.Runtime, ctx context.Context, raw []byte, cfg config.ContextCompressionConfig, optOut bool) ([]byte, contextcompression.Stats) {
+		calls++
+		return runtime.Apply(ctx, raw, cfg, optOut)
+	}
+	t.Cleanup(func() { applyInlineContextCompression = originalApply })
+	var payloads [][]byte
+	executor := &modelGroupCaptureExecutor{provider: "group-stream"}
+	executor.stream = func(req coreexecutor.Request, _ coreexecutor.Options, call int) (*coreexecutor.StreamResult, error) {
+		payloads = append(payloads, cloneBytes(req.Payload))
+		chunks := make(chan coreexecutor.StreamChunk, 1)
+		if call == 1 {
+			chunks <- coreexecutor.StreamChunk{Err: &coreauth.Error{HTTPStatus: http.StatusUnauthorized, Message: "unauthorized"}}
+		} else {
+			chunks <- coreexecutor.StreamChunk{Payload: []byte("ok")}
+		}
+		close(chunks)
+		return &coreexecutor.StreamResult{Chunks: chunks}, nil
+	}
+	manager := coreauth.NewManager(nil, nil, nil)
+	manager.RegisterExecutor(executor)
+	for _, id := range []string{"group-stream-1", "group-stream-2"} {
+		auth := &coreauth.Auth{ID: id, Provider: "group-stream", Status: coreauth.StatusActive, ModelStates: map[string]*coreauth.ModelState{"upstream": {Status: coreauth.StatusActive}}}
+		if _, err := manager.Register(context.Background(), auth); err != nil {
+			t.Fatal(err)
+		}
+		registry.GetGlobalRegistry().RegisterClient(id, "group-stream", []*registry.ModelInfo{{ID: "upstream"}})
+		defer registry.GetGlobalRegistry().UnregisterClient(id)
+	}
+	cfg := &sdkconfig.SDKConfig{ModelGroups: []config.ModelGroup{{Name: "group-auto", Models: []config.ModelGroupMember{{Provider: "group-stream", Model: "upstream"}}}}, Streaming: sdkconfig.StreamingConfig{BootstrapRetries: 1}, ContextCompression: config.ContextCompressionConfig{Engine: config.ContextCompressionRTK, MinBytes: 1, RawCapBytes: 1024 * 1024}}
+	raw := []byte(`{"model":"group-auto","messages":[{"role":"tool","content":"same repeated historical output line\nsame repeated historical output line\nsame repeated historical output line\nsame repeated historical output line\nsame repeated historical output line\nsame repeated historical output line"}]}`)
+	data, _, errs := NewBaseAPIHandlers(cfg, manager).ExecuteStreamWithAuthManager(context.Background(), "openai", "group-auto", raw, "")
+	for range data {
+	}
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != 1 || len(payloads) != 2 || !bytes.Equal(payloads[0], payloads[1]) || bytes.Equal(payloads[0], raw) {
+		t.Fatalf("calls=%d payloads=%q", calls, payloads)
+	}
+}
+
+func TestCompressionExactlyOnceAcrossCredentialAndProxyFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		credential, proxy bool
+	}{{"credential", true, false}, {"proxy", false, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			original := applyInlineContextCompression
+			calls := 0
+			applyInlineContextCompression = func(runtime *contextcompression.Runtime, ctx context.Context, raw []byte, cfg config.ContextCompressionConfig, opt bool) ([]byte, contextcompression.Stats) {
+				calls++
+				return runtime.Apply(ctx, raw, cfg, opt)
+			}
+			t.Cleanup(func() { applyInlineContextCompression = original })
+			provider := "compression-" + tc.name
+			executor := &compressionRetryExecutor{provider: provider, failFirst: tc.credential, useTransport: tc.proxy}
+			manager := coreauth.NewManager(nil, nil, nil)
+			manager.RegisterExecutor(executor)
+			if tc.proxy {
+				manager.SetRoundTripperProvider(&compressionTransportProvider{transports: []*compressionFailTransport{{fail: true}, {}}})
+			}
+			authCount := 1
+			if tc.credential {
+				authCount = 2
+			}
+			for i := 0; i < authCount; i++ {
+				id := fmt.Sprintf("%s-%d", provider, i)
+				auth := &coreauth.Auth{ID: id, Provider: provider, Status: coreauth.StatusActive, ProxyPool: map[bool]string{true: "office"}[tc.proxy], Metadata: map[string]any{"request_retry": 0, "disable_cooling": true}}
+				if _, err := manager.Register(context.Background(), auth); err != nil {
+					t.Fatal(err)
+				}
+				registry.GetGlobalRegistry().RegisterClient(id, provider, []*registry.ModelInfo{{ID: "model"}})
+				t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient(id) })
+			}
+			cfg := &sdkconfig.SDKConfig{ContextCompression: config.ContextCompressionConfig{Engine: config.ContextCompressionRTK, MinBytes: 1, RawCapBytes: 1024 * 1024}}
+			raw := []byte(`{"model":"model","messages":[{"role":"tool","content":"same repeated output line\nsame repeated output line\nsame repeated output line\nsame repeated output line\nsame repeated output line\nsame repeated output line"}]}`)
+			execCtx, cancelExec := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancelExec()
+			body, _, errMsg := NewBaseAPIHandlers(cfg, manager).ExecuteWithAuthManager(execCtx, "openai", "model", raw, "")
+			if errMsg != nil || len(body) == 0 {
+				t.Fatalf("body=%s err=%+v", body, errMsg)
+			}
+			if calls != 1 || len(executor.payloads) != 2 || !bytes.Equal(executor.payloads[0], executor.payloads[1]) || bytes.Equal(executor.payloads[0], raw) {
+				t.Fatalf("calls=%d payloads=%q", calls, executor.payloads)
+			}
+		})
+	}
+}
+
+func TestModelGroupCountUsesTargetModel(t *testing.T) {
+	first := &modelGroupCaptureExecutor{provider: "group-count"}
+	manager := coreauth.NewManager(nil, nil, nil)
+	manager.RegisterExecutor(first)
+	registry.GetGlobalRegistry().RegisterClient("group-count", "group-count", []*registry.ModelInfo{{ID: "count-upstream"}})
+	t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient("group-count") })
+	if _, err := manager.Register(context.Background(), &coreauth.Auth{ID: "group-count", Provider: "group-count", Status: coreauth.StatusActive, ModelStates: map[string]*coreauth.ModelState{"count-upstream": {Status: coreauth.StatusActive}}}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &sdkconfig.SDKConfig{ModelGroups: []config.ModelGroup{{Name: "count-auto", Models: []config.ModelGroupMember{{Provider: "group-count", Model: "count-upstream"}}}}}
+	_, _, errMsg := NewBaseAPIHandlers(cfg, manager).ExecuteCountWithAuthManager(context.Background(), "claude", "count-auto", []byte(`{"model":"count-auto"}`), "")
+	if errMsg != nil || first.req.Model != "count-upstream" || first.opts.Metadata[coreexecutor.RequestedModelMetadataKey] != "count-auto" {
+		t.Fatalf("request = %#v, metadata = %#v, error = %+v", first.req, first.opts.Metadata, errMsg)
+	}
+}
+
+func TestModelGroupRejectsImageAndForcedProviderPaths(t *testing.T) {
+	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{ModelGroups: []config.ModelGroup{{Name: "group", Models: []config.ModelGroupMember{{Provider: "codex", Model: "gpt-test"}}}}}, nil)
+	_, _, imageErr := handler.providersForExecution("group", "group", true, modelRouteDecision{}, modelExecutionOptions{})
+	if imageErr == nil || imageErr.StatusCode != http.StatusBadRequest || !strings.Contains(imageErr.Error.Error(), "image endpoints") {
+		t.Fatalf("image error = %+v", imageErr)
+	}
+	_, _, forcedErr := handler.providersForExecution("group", "group", false, modelRouteDecision{}, modelExecutionOptions{ForcedProvider: "codex"})
+	if forcedErr == nil || forcedErr.StatusCode != http.StatusBadRequest || !strings.Contains(forcedErr.Error.Error(), "forced-provider") {
+		t.Fatalf("forced-provider error = %+v", forcedErr)
+	}
+}
+
+func TestModelGroupRejectsAnyImageOnlyMemberOnNonImageEndpoint(t *testing.T) {
+	imageModel := "gpt-image-2"
+	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{ModelGroups: []config.ModelGroup{{Name: "mixed", Models: []config.ModelGroupMember{{Provider: "codex", Model: "text"}, {Provider: "compat", Model: imageModel}}}}}, nil)
+	_, _, errMsg := handler.providersForExecution("mixed", "mixed", false, modelRouteDecision{}, modelExecutionOptions{})
+	if errMsg == nil || errMsg.StatusCode != http.StatusServiceUnavailable || !strings.Contains(errMsg.Error.Error(), imageModel) {
+		t.Fatalf("error = %+v", errMsg)
+	}
+}
+
+func TestModelGroupListingsUseProtocolNativeShapes(t *testing.T) {
+	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{ModelGroups: []config.ModelGroup{{Name: "code-auto", Models: []config.ModelGroupMember{{Provider: "codex", Model: "gpt-test"}}}}}, nil)
+	claude := handler.ModelGroupModels("claude")[0]
+	if claude["id"] != "code-auto" || claude["type"] != "model" || claude["owned_by"] != "ainyrouter/model-group" {
+		t.Fatalf("Claude model = %#v", claude)
+	}
+	gemini := handler.ModelGroupModels("gemini")[0]
+	if gemini["name"] != "code-auto" || gemini["displayName"] != "code-auto" {
+		t.Fatalf("Gemini model = %#v", gemini)
+	}
+}
+
+func TestModelGroupTerminalErrorDoesNotClaimFirstTarget(t *testing.T) {
+	manager := coreauth.NewManager(nil, nil, nil)
+	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{ModelGroups: []config.ModelGroup{{Name: "code-auto", Models: []config.ModelGroupMember{{Provider: "first-provider", Model: "first-model"}, {Provider: "second-provider", Model: "second-model"}}}}}, manager)
+	_, _, errMsg := handler.ExecuteWithAuthManager(context.Background(), "openai", "code-auto", nil, "")
+	if errMsg == nil || errMsg.Error == nil {
+		t.Fatal("expected terminal group error")
+	}
+	if strings.Contains(errMsg.Error.Error(), "first-provider") || strings.Contains(errMsg.Error.Error(), "first-model") {
+		t.Fatalf("terminal error contains stale first target: %v", errMsg.Error)
+	}
 }
 
 func TestExecuteModelCarriesEntryAndExitProtocols(t *testing.T) {

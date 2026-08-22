@@ -46,11 +46,12 @@ func toggleConfigAPIKeyExcludedAll(cfg *config.Config, auth *coreauth.Auth, disa
 		key := strings.TrimSpace(entry.APIKey)
 		base := strings.TrimSpace(entry.BaseURL)
 		proxyURL := strings.TrimSpace(entry.ProxyURL)
+		proxyPool := strings.TrimSpace(entry.ProxyPool)
 		prefix := strings.TrimSpace(entry.Prefix)
 		if key == "" && base == "" {
 			continue
 		}
-		id, _ := idGen.Next("gemini:apikey", key, base, proxyURL, prefix, config.FormatSortedHeaders(entry.Headers))
+		id, _ := idGen.Next("gemini:apikey", key, base, proxyURL, proxyPool, prefix, config.FormatSortedHeaders(entry.Headers))
 		if id == authID {
 			entry.ExcludedModels = setConfigAPIKeyExcludedAll(entry.ExcludedModels, disable)
 			return true, nil
@@ -61,11 +62,12 @@ func toggleConfigAPIKeyExcludedAll(cfg *config.Config, auth *coreauth.Auth, disa
 		key := strings.TrimSpace(entry.APIKey)
 		base := strings.TrimSpace(entry.BaseURL)
 		proxyURL := strings.TrimSpace(entry.ProxyURL)
+		proxyPool := strings.TrimSpace(entry.ProxyPool)
 		prefix := strings.TrimSpace(entry.Prefix)
 		if key == "" && base == "" {
 			continue
 		}
-		id, _ := idGen.Next("gemini-interactions:apikey", key, base, proxyURL, prefix, config.FormatSortedHeaders(entry.Headers))
+		id, _ := idGen.Next("gemini-interactions:apikey", key, base, proxyURL, proxyPool, prefix, config.FormatSortedHeaders(entry.Headers))
 		if id == authID {
 			entry.ExcludedModels = setConfigAPIKeyExcludedAll(entry.ExcludedModels, disable)
 			return true, nil
@@ -76,11 +78,12 @@ func toggleConfigAPIKeyExcludedAll(cfg *config.Config, auth *coreauth.Auth, disa
 		key := strings.TrimSpace(entry.APIKey)
 		base := strings.TrimSpace(entry.BaseURL)
 		proxyURL := strings.TrimSpace(entry.ProxyURL)
+		proxyPool := strings.TrimSpace(entry.ProxyPool)
 		prefix := strings.TrimSpace(entry.Prefix)
 		if key == "" && base == "" {
 			continue
 		}
-		id, _ := idGen.Next("claude:apikey", key, base, proxyURL, prefix, config.FormatSortedHeaders(entry.Headers))
+		id, _ := idGen.Next("claude:apikey", key, base, proxyURL, proxyPool, prefix, config.FormatSortedHeaders(entry.Headers))
 		if id == authID {
 			entry.ExcludedModels = setConfigAPIKeyExcludedAll(entry.ExcludedModels, disable)
 			return true, nil
@@ -91,11 +94,12 @@ func toggleConfigAPIKeyExcludedAll(cfg *config.Config, auth *coreauth.Auth, disa
 		key := strings.TrimSpace(entry.APIKey)
 		base := strings.TrimSpace(entry.BaseURL)
 		proxyURL := strings.TrimSpace(entry.ProxyURL)
+		proxyPool := strings.TrimSpace(entry.ProxyPool)
 		prefix := strings.TrimSpace(entry.Prefix)
 		if key == "" && base == "" {
 			continue
 		}
-		id, _ := idGen.Next("codex:apikey", key, base, proxyURL, prefix, config.FormatSortedHeaders(entry.Headers))
+		id, _ := idGen.Next("codex:apikey", key, base, proxyURL, proxyPool, prefix, config.FormatSortedHeaders(entry.Headers))
 		if id == authID {
 			entry.ExcludedModels = setConfigAPIKeyExcludedAll(entry.ExcludedModels, disable)
 			return true, nil
@@ -106,11 +110,12 @@ func toggleConfigAPIKeyExcludedAll(cfg *config.Config, auth *coreauth.Auth, disa
 		key := strings.TrimSpace(entry.APIKey)
 		base := strings.TrimSpace(entry.BaseURL)
 		proxyURL := strings.TrimSpace(entry.ProxyURL)
+		proxyPool := strings.TrimSpace(entry.ProxyPool)
 		prefix := strings.TrimSpace(entry.Prefix)
 		if key == "" && base == "" {
 			continue
 		}
-		id, _ := idGen.Next("xai:apikey", key, base, proxyURL, prefix, config.FormatSortedHeaders(entry.Headers))
+		id, _ := idGen.Next("xai:apikey", key, base, proxyURL, proxyPool, prefix, config.FormatSortedHeaders(entry.Headers))
 		if id == authID {
 			entry.ExcludedModels = setConfigAPIKeyExcludedAll(entry.ExcludedModels, disable)
 			return true, nil
@@ -121,7 +126,7 @@ func toggleConfigAPIKeyExcludedAll(cfg *config.Config, auth *coreauth.Auth, disa
 		key := strings.TrimSpace(entry.APIKey)
 		base := strings.TrimSpace(entry.BaseURL)
 		proxy := strings.TrimSpace(entry.ProxyURL)
-		id, _ := idGen.Next("vertex:apikey", key, base, proxy)
+		id, _ := idGen.Next("vertex:apikey", key, base, proxy, strings.TrimSpace(entry.ProxyPool))
 		if id == authID {
 			entry.ExcludedModels = setConfigAPIKeyExcludedAll(entry.ExcludedModels, disable)
 			return true, nil

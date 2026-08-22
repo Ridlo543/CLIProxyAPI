@@ -273,6 +273,21 @@ func (m *Manager) preparedExecutionModelsWithAlias(auth *Auth, routeModel string
 	return m.filterExecutionModels(auth, routeModel, candidates, pooled), pooled, aliasResult, routing
 }
 
+func (m *Manager) refreshedExecutionAttempt(auth *Auth, routeModel string) (string, bool, OAuthModelAliasResult, *apiKeyModelRoutingSnapshot) {
+	models, pooled, aliasResult, routing := m.preparedExecutionModelsWithAlias(auth, routeModel)
+	if len(models) == 0 {
+		return "", pooled, aliasResult, routing
+	}
+	return models[0], pooled, aliasResult, routing
+}
+
+func applyHomeResponseAlias(aliasResult OAuthModelAliasResult, responseAlias string, home bool) OAuthModelAliasResult {
+	if home && aliasResult.ForceMapping && strings.TrimSpace(responseAlias) != "" {
+		aliasResult.OriginalAlias = responseAlias
+	}
+	return aliasResult
+}
+
 func (m *Manager) executionModelCandidatesWithAlias(auth *Auth, routeModel string) ([]string, bool, OAuthModelAliasResult, *apiKeyModelRoutingSnapshot) {
 	routing := m.loadAPIKeyModelRouting()
 	requestedModel := rewriteModelForAuth(routeModel, auth)
@@ -710,6 +725,7 @@ type APIKeyConfigEntry interface {
 	GetBaseURL() string
 	GetPrefix() string
 	GetProxyURL() string
+	GetProxyPool() string
 }
 
 func resolveAPIKeyConfig[T APIKeyConfigEntry](entries []T, auth *Auth) *T {
@@ -739,7 +755,7 @@ func resolveAPIKeyConfig[T APIKeyConfigEntry](entries []T, auth *Auth) *T {
 	}
 	for i := range entries {
 		entry := entries[i]
-		if matchesCredentials(entry) && strings.EqualFold(strings.TrimSpace(entry.GetPrefix()), strings.TrimSpace(auth.Prefix)) && strings.EqualFold(strings.TrimSpace(entry.GetProxyURL()), strings.TrimSpace(auth.ProxyURL)) {
+		if matchesCredentials(entry) && strings.EqualFold(strings.TrimSpace(entry.GetPrefix()), strings.TrimSpace(auth.Prefix)) && strings.EqualFold(strings.TrimSpace(entry.GetProxyURL()), strings.TrimSpace(auth.ProxyURL)) && strings.EqualFold(strings.TrimSpace(entry.GetProxyPool()), strings.TrimSpace(auth.ProxyPool)) {
 			return &entries[i]
 		}
 	}

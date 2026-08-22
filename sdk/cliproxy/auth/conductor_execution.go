@@ -126,6 +126,13 @@ func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req clip
 // ExecuteStream performs a streaming execution using the configured selector and executor.
 // It supports multiple providers for the same model and round-robins the starting provider per model.
 func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
+	return m.executeStream(ctx, providers, req, opts, true)
+}
+
+// executeStream optionally materializes a pre-payload bootstrap error as a
+// StreamResult. Model-group coordination disables materialization so it can
+// safely advance before exposing a stream to the caller.
+func (m *Manager) executeStream(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, materializeBootstrapError bool) (*cliproxyexecutor.StreamResult, error) {
 	req, opts = cliproxysession.Enrich(req, opts)
 	if m.HomeEnabled() {
 		if unlockSession := m.lockHomeWebsocketSession(ctx, opts); unlockSession != nil {
@@ -189,7 +196,7 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 			}
 		}
 		var bootstrapErr *streamBootstrapError
-		if errors.As(lastErr, &bootstrapErr) && bootstrapErr != nil {
+		if materializeBootstrapError && errors.As(lastErr, &bootstrapErr) && bootstrapErr != nil {
 			return streamErrorResult(bootstrapErr.Headers(), lastErr), nil
 		}
 		return nil, lastErr
@@ -343,11 +350,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 		publishSelectedAuthMetadata(opts.Metadata, auth)
 
 		tried[auth.ID] = struct{}{}
-		execCtx := ctx
-		if rt := m.roundTripperFor(auth); rt != nil {
-			execCtx = context.WithValue(execCtx, roundTripperContextKey{}, rt)
-			execCtx = context.WithValue(execCtx, "cliproxy.roundtripper", rt)
-		}
+		execCtx, _ := m.proxyAttemptContext(ctx, auth)
 		execCtx = contextWithRequestedModelAlias(execCtx, opts, routeModel)
 
 		models, pooled, aliasResult, routing := m.preparedExecutionModelsWithAlias(auth, routeModel)
@@ -383,9 +386,10 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 			}
 			if !restoreExecutionModel {
 				execReq = attachResolvedAPIKeyModelInfo(routing, execReq, auth, routeModel, upstreamModel)
+				execReq = m.attachResolvedOAuthModelInfo(execReq, auth, upstreamModel, aliasResult)
 			}
 			startExec := time.Now()
-			resp, errExec := executor.Execute(execCtx, auth, execReq, execOpts)
+			resp, errExec := m.executeWithProxyFailover(execCtx, executor, auth, execReq, execOpts)
 			durationExec := time.Since(startExec)
 			if errExec != nil {
 				if errCtx := execCtx.Err(); errCtx != nil {
@@ -394,8 +398,29 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 				if refreshed, okRefresh := m.tryRefreshAfterUnauthorized(execCtx, auth, errExec, didRefreshOnUnauthorized); okRefresh {
 					auth = refreshed
 					didRefreshOnUnauthorized = true
+					refreshedModel, refreshedPooled, refreshedAlias, refreshedRouting := m.refreshedExecutionAttempt(auth, routeModel)
+					if refreshedModel == "" {
+						return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no execution models available after refresh"}
+					}
+					upstreamModel, pooled, aliasResult, routing = refreshedModel, refreshedPooled, refreshedAlias, refreshedRouting
+					resultModel = m.stateModelForExecution(auth, routeModel, upstreamModel, pooled)
+					retryReq := req
+					retryReq.Model = upstreamModel
+					if restoreExecutionModel {
+						retryReq.Model = executionModel
+					}
+					retryOpts := opts
+					retryReq, retryOpts, errIntercept = applyRequestAfterAuthInterceptor(execCtx, executor, provider, retryReq, retryOpts, requestedModelAliasFromOptions(retryOpts, routeModel))
+					if errIntercept != nil {
+						return cliproxyexecutor.Response{}, errIntercept
+					}
+					if !restoreExecutionModel {
+						retryReq = attachResolvedAPIKeyModelInfo(routing, retryReq, auth, routeModel, upstreamModel)
+						retryReq = m.attachResolvedOAuthModelInfo(retryReq, auth, upstreamModel, aliasResult)
+					}
+					execReq, execOpts = retryReq, retryOpts
 					startRetry := time.Now()
-					resp, errExec = executor.Execute(execCtx, auth, execReq, execOpts)
+					resp, errExec = m.executeWithProxyFailover(execCtx, executor, auth, execReq, execOpts)
 					durationRetry := time.Since(startRetry)
 					if errExec != nil {
 						warnLogUpstreamFailure(execCtx, entry, provider, upstreamModel, auth, durationRetry, errExec)
@@ -557,9 +582,10 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 			}
 			if !restoreExecutionModel {
 				execReq = attachResolvedAPIKeyModelInfo(routing, execReq, auth, routeModel, upstreamModel)
+				execReq = m.attachResolvedOAuthModelInfo(execReq, auth, upstreamModel, aliasResult)
 			}
 			startExec := time.Now()
-			resp, errExec := executor.CountTokens(execCtx, auth, execReq, execOpts)
+			resp, errExec := m.countTokensWithProxyFailover(execCtx, executor, auth, execReq, execOpts)
 			durationExec := time.Since(startExec)
 			if errExec != nil {
 				if errCtx := execCtx.Err(); errCtx != nil {
@@ -568,8 +594,29 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 				if refreshed, okRefresh := m.tryRefreshAfterUnauthorized(execCtx, auth, errExec, didRefreshOnUnauthorized); okRefresh {
 					auth = refreshed
 					didRefreshOnUnauthorized = true
+					refreshedModel, refreshedPooled, refreshedAlias, refreshedRouting := m.refreshedExecutionAttempt(auth, routeModel)
+					if refreshedModel == "" {
+						return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no execution models available after refresh"}
+					}
+					upstreamModel, pooled, aliasResult, routing = refreshedModel, refreshedPooled, refreshedAlias, refreshedRouting
+					resultModel = m.stateModelForExecution(auth, routeModel, upstreamModel, pooled)
+					retryReq := req
+					retryReq.Model = upstreamModel
+					if restoreExecutionModel {
+						retryReq.Model = executionModel
+					}
+					retryOpts := opts
+					retryReq, retryOpts, errIntercept = applyRequestAfterAuthInterceptor(execCtx, executor, provider, retryReq, retryOpts, requestedModelAliasFromOptions(retryOpts, routeModel))
+					if errIntercept != nil {
+						return cliproxyexecutor.Response{}, errIntercept
+					}
+					if !restoreExecutionModel {
+						retryReq = attachResolvedAPIKeyModelInfo(routing, retryReq, auth, routeModel, upstreamModel)
+						retryReq = m.attachResolvedOAuthModelInfo(retryReq, auth, upstreamModel, aliasResult)
+					}
+					execReq, execOpts = retryReq, retryOpts
 					startRetry := time.Now()
-					resp, errExec = executor.CountTokens(execCtx, auth, execReq, execOpts)
+					resp, errExec = m.countTokensWithProxyFailover(execCtx, executor, auth, execReq, execOpts)
 					durationRetry := time.Since(startRetry)
 					if errExec != nil {
 						warnLogUpstreamFailure(execCtx, entry, provider, upstreamModel, auth, durationRetry, errExec)
@@ -810,9 +857,7 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 		// Enrich before auth preparation so prepare-stage usage records observe the client request.
 		execCtx = contextWithRequestedModelAlias(execCtx, opts, routeModel)
 		models, pooled, aliasResult, routing := m.preparedExecutionModelsWithAlias(auth, routeModel)
-		if selection != nil && aliasResult.ForceMapping && responseAlias != "" {
-			aliasResult.OriginalAlias = responseAlias
-		}
+		aliasResult = applyHomeResponseAlias(aliasResult, responseAlias, selection != nil)
 		if len(models) == 0 {
 			if selection != nil {
 				homeExcludedAuthIDs[auth.ID] = struct{}{}
@@ -1441,9 +1486,95 @@ func (m *Manager) roundTripperFor(auth *Auth) http.RoundTripper {
 	return p.RoundTripperFor(auth)
 }
 
+func (m *Manager) proxyAttemptLimit(auth *Auth) int {
+	m.mu.RLock()
+	p := m.rtProvider
+	m.mu.RUnlock()
+	if limiter, ok := p.(interface{ ProxyPoolAttemptLimit(*Auth) int }); ok {
+		if limit := limiter.ProxyPoolAttemptLimit(auth); limit > 0 {
+			return limit
+		}
+	}
+	return 1
+}
+
+func (m *Manager) proxyAttemptContext(ctx context.Context, auth *Auth) (context.Context, http.RoundTripper) {
+	rt := m.roundTripperFor(auth)
+	if rt == nil {
+		return ctx, nil
+	}
+	ctx = context.WithValue(ctx, roundTripperContextKey{}, rt)
+	ctx = context.WithValue(ctx, "cliproxy.roundtripper", rt)
+	return ctx, rt
+}
+
+func proxyTransportFailed(rt http.RoundTripper) bool {
+	reporter, ok := rt.(interface{ ProxyTransportFailed() bool })
+	return ok && reporter.ProxyTransportFailed()
+}
+
+func (m *Manager) executeWithProxyFailover(ctx context.Context, executor ProviderExecutor, auth *Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+	return m.executeOperationWithProxyFailover(ctx, auth, func(attemptCtx context.Context) (cliproxyexecutor.Response, error) {
+		return executor.Execute(attemptCtx, auth, req, opts)
+	})
+}
+
+func (m *Manager) countTokensWithProxyFailover(ctx context.Context, executor ProviderExecutor, auth *Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+	return m.executeOperationWithProxyFailover(ctx, auth, func(attemptCtx context.Context) (cliproxyexecutor.Response, error) {
+		return executor.CountTokens(attemptCtx, auth, req, opts)
+	})
+}
+
+func (m *Manager) executeOperationWithProxyFailover(ctx context.Context, auth *Auth, execute func(context.Context) (cliproxyexecutor.Response, error)) (cliproxyexecutor.Response, error) {
+	limit := m.proxyAttemptLimit(auth)
+	for attempt := 0; attempt < limit; attempt++ {
+		attemptCtx := ctx
+		rt, _ := ctx.Value("cliproxy.roundtripper").(http.RoundTripper)
+		if attempt > 0 || rt == nil {
+			attemptCtx, rt = m.proxyAttemptContext(ctx, auth)
+		}
+		resp, errExec := execute(attemptCtx)
+		if errExec == nil || !proxyTransportFailed(rt) || attempt+1 >= limit {
+			return resp, errExec
+		}
+		if errCtx := attemptCtx.Err(); errCtx != nil {
+			return cliproxyexecutor.Response{}, errCtx
+		}
+	}
+	return cliproxyexecutor.Response{}, errors.New("proxy pool attempts exhausted")
+}
+
 // RoundTripperProvider defines a minimal provider of per-auth HTTP transports.
 type RoundTripperProvider interface {
 	RoundTripperFor(auth *Auth) http.RoundTripper
+}
+
+// ProxyPoolStatus is a sanitized runtime view of a named proxy pool.
+type ProxyPoolStatus struct {
+	Name         string   `json:"name"`
+	Strategy     string   `json:"strategy"`
+	Strict       bool     `json:"strict"`
+	EntryCount   int      `json:"entry-count"`
+	URLs         []string `json:"urls"`
+	Healthy      int      `json:"healthy"`
+	Cooling      int      `json:"cooling"`
+	FailureCount uint64   `json:"failure-count"`
+}
+
+// ProxyPoolStatuses returns sanitized status when the configured transport provider supports pools.
+func (m *Manager) ProxyPoolStatuses() []ProxyPoolStatus {
+	m.mu.RLock()
+	p := m.rtProvider
+	m.mu.RUnlock()
+	if reporter, ok := p.(interface{ ProxyPoolStatuses() []ProxyPoolStatus }); ok {
+		return reporter.ProxyPoolStatuses()
+	}
+	return nil
+}
+
+// ProxyRoundTripper returns the credential-selected transport for management calls.
+func (m *Manager) ProxyRoundTripper(auth *Auth) http.RoundTripper {
+	return m.roundTripperFor(auth)
 }
 
 // RequestPreparer is an optional interface that provider executors can implement

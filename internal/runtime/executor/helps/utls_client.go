@@ -371,13 +371,13 @@ func NewUtlsHTTPClient(ctx context.Context, cfg *config.Config, auth *cliproxyau
 	if auth != nil {
 		proxyURL = strings.TrimSpace(auth.ProxyURL)
 	}
-	if proxyURL == "" && cfg != nil {
-		proxyURL = strings.TrimSpace(cfg.ProxyURL)
-	}
 
 	var ctxRoundTripper http.RoundTripper
 	if ctx != nil {
 		ctxRoundTripper, _ = ctx.Value("cliproxy.roundtripper").(http.RoundTripper)
+	}
+	if proxyURL == "" && ctxRoundTripper == nil && cfg != nil {
+		proxyURL = strings.TrimSpace(cfg.ProxyURL)
 	}
 
 	var chromeRT http.RoundTripper = newUtlsRoundTripper(proxyURL)

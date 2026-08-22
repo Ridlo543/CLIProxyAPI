@@ -69,6 +69,8 @@ type Auth struct {
 	Unavailable bool `json:"unavailable"`
 	// ProxyURL overrides the global proxy setting for this auth if provided.
 	ProxyURL string `json:"proxy_url,omitempty"`
+	// ProxyPool selects a named proxy pool when ProxyURL is empty.
+	ProxyPool string `json:"proxy_pool,omitempty"`
 	// Attributes stores provider specific metadata needed by executors (immutable configuration).
 	Attributes map[string]string `json:"attributes,omitempty"`
 	// Metadata stores runtime mutable provider state (e.g. tokens, cookies).
@@ -423,6 +425,9 @@ func (a *Auth) ProxyInfo() string {
 	}
 	proxyStr := strings.TrimSpace(a.ProxyURL)
 	if proxyStr == "" {
+		if strings.TrimSpace(a.ProxyPool) != "" {
+			return "via proxy pool"
+		}
 		return ""
 	}
 	if idx := strings.Index(proxyStr, "://"); idx > 0 {

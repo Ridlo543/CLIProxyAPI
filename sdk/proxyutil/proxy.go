@@ -36,6 +36,43 @@ type Setting struct {
 	URL  *url.URL
 }
 
+// WebsocketDialConfig carries a selected proxy attempt into websocket dialers.
+// Exactly one of Proxy or NetDialContext may be set; Direct disables both.
+type WebsocketDialConfig struct {
+	Direct         bool
+	Proxy          func(*http.Request) (*url.URL, error)
+	NetDialContext func(context.Context, string, string) (net.Conn, error)
+}
+
+// BuildWebsocketDialConfig constructs websocket dial settings without exposing
+// or reverse-engineering an HTTP RoundTripper.
+func BuildWebsocketDialConfig(raw string) (WebsocketDialConfig, error) {
+	setting, errParse := Parse(raw)
+	if errParse != nil {
+		return WebsocketDialConfig{}, errParse
+	}
+	switch setting.Mode {
+	case ModeDirect:
+		return WebsocketDialConfig{Direct: true}, nil
+	case ModeProxy:
+		if setting.URL.Scheme == "http" || setting.URL.Scheme == "https" {
+			return WebsocketDialConfig{Proxy: http.ProxyURL(setting.URL)}, nil
+		}
+		dialer, _, errDialer := BuildDialer(raw)
+		if errDialer != nil {
+			return WebsocketDialConfig{}, errDialer
+		}
+		return WebsocketDialConfig{NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if contextDialer, ok := dialer.(proxy.ContextDialer); ok {
+				return contextDialer.DialContext(ctx, network, addr)
+			}
+			return dialer.Dial(network, addr)
+		}}, nil
+	default:
+		return WebsocketDialConfig{}, nil
+	}
+}
+
 // Parse normalizes a proxy configuration value into inherit, direct, or proxy modes.
 func Parse(raw string) (Setting, error) {
 	trimmed := strings.TrimSpace(raw)

@@ -52,7 +52,8 @@ func (h *OpenAIAPIHandler) HandlerType() string {
 func (h *OpenAIAPIHandler) Models() []map[string]any {
 	// Get dynamic models from the global registry
 	modelRegistry := registry.GetGlobalRegistry()
-	return modelRegistry.GetAvailableModels("openai")
+	models := modelRegistry.GetAvailableModels("openai")
+	return append(models, h.ModelGroupModels("openai")...)
 }
 
 // OpenAIModels handles the /v1/models endpoint.
@@ -67,12 +68,15 @@ func (h *OpenAIAPIHandler) OpenAIModels(c *gin.Context) {
 	// Get all available models
 	allModels := h.Models()
 
-	// Filter to only include the 4 required fields: id, object, created, owned_by
+	// Filter to the OpenAI-compatible fields exposed by this endpoint.
 	filteredModels := make([]map[string]any, len(allModels))
 	for i, model := range allModels {
 		filteredModel := map[string]any{
 			"id":     model["id"],
 			"object": model["object"],
+		}
+		if modelType, exists := model["type"]; exists {
+			filteredModel["type"] = modelType
 		}
 
 		// Add created field if it exists

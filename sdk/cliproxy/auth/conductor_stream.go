@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -206,6 +207,25 @@ func (m *Manager) replaceHomeExecutionLifecycleAuth(lifecycle cliproxyexecutor.E
 }
 
 func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor ProviderExecutor, auth *Auth, provider string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, routeModel, executionModel string, execModels []string, pooled bool, aliasResult OAuthModelAliasResult, routing *apiKeyModelRoutingSnapshot, allowRetry bool, ephemeralResult bool, unauthorizedRefreshTried map[string]struct{}) (*cliproxyexecutor.StreamResult, error) {
+	limit := m.proxyAttemptLimit(auth)
+	for attempt := 0; attempt < limit; attempt++ {
+		attemptCtx := ctx
+		rt, _ := ctx.Value("cliproxy.roundtripper").(http.RoundTripper)
+		if attempt > 0 || rt == nil {
+			attemptCtx, rt = m.proxyAttemptContext(ctx, auth)
+		}
+		result, errStream := m.executeStreamWithModelPoolOnce(attemptCtx, executor, auth, provider, req, opts, routeModel, executionModel, execModels, pooled, aliasResult, routing, allowRetry, ephemeralResult, unauthorizedRefreshTried)
+		if errStream == nil || !proxyTransportFailed(rt) || attempt+1 >= limit {
+			return result, errStream
+		}
+		if errCtx := attemptCtx.Err(); errCtx != nil {
+			return nil, errCtx
+		}
+	}
+	return nil, errors.New("proxy pool attempts exhausted")
+}
+
+func (m *Manager) executeStreamWithModelPoolOnce(ctx context.Context, executor ProviderExecutor, auth *Auth, provider string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, routeModel, executionModel string, execModels []string, pooled bool, aliasResult OAuthModelAliasResult, routing *apiKeyModelRoutingSnapshot, allowRetry bool, ephemeralResult bool, unauthorizedRefreshTried map[string]struct{}) (*cliproxyexecutor.StreamResult, error) {
 	if executor == nil {
 		return nil, &Error{Code: "executor_not_found", Message: "executor not registered"}
 	}
@@ -230,6 +250,32 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 		}
 		if executionModel == "" {
 			execReq = attachResolvedAPIKeyModelInfo(routing, execReq, auth, routeModel, execModel)
+			execReq = m.attachResolvedOAuthModelInfo(execReq, auth, execModel, aliasResult)
+		}
+		rebuildAfterRefresh := func(refreshed *Auth) error {
+			refreshedModel, refreshedPooled, refreshedAlias, refreshedRouting := m.refreshedExecutionAttempt(refreshed, routeModel)
+			if refreshedModel == "" {
+				return &Error{Code: "auth_not_found", Message: "no execution models available after refresh"}
+			}
+			auth, execModel, pooled, aliasResult, routing = refreshed, refreshedModel, refreshedPooled, refreshedAlias, refreshedRouting
+			aliasResult = applyHomeResponseAlias(aliasResult, requestedModelAliasFromOptions(opts, routeModel), ephemeralResult)
+			resultModel = m.stateModelForExecution(auth, routeModel, execModel, pooled)
+			execReq = req
+			execReq.Model = execModel
+			if executionModel != "" {
+				execReq.Model = executionModel
+			}
+			execOpts = opts
+			var err error
+			execReq, execOpts, err = applyRequestAfterAuthInterceptor(ctx, executor, provider, execReq, execOpts, requestedModelAliasFromOptions(execOpts, routeModel))
+			if err != nil {
+				return err
+			}
+			if executionModel == "" {
+				execReq = attachResolvedAPIKeyModelInfo(routing, execReq, auth, routeModel, execModel)
+				execReq = m.attachResolvedOAuthModelInfo(execReq, auth, execModel, aliasResult)
+			}
+			return nil
 		}
 		if errCtx := ctx.Err(); errCtx != nil {
 			return nil, errCtx
@@ -256,7 +302,9 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 					errStream = errRefresh
 					warnLogUpstreamFailure(ctx, entry, provider, execModel, auth, durationStream, errStream)
 				} else if okRefresh {
-					auth = refreshed
+					if errRebuild := rebuildAfterRefresh(refreshed); errRebuild != nil {
+						return nil, errRebuild
+					}
 					m.replaceHomeExecutionLifecycleAuth(execOpts.ExecutionLifecycle, auth)
 					publishSelectedAuthMetadata(execOpts.Metadata, auth)
 					didRefreshOnUnauthorized = true
@@ -335,7 +383,9 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 					streamResult = &cliproxyexecutor.StreamResult{}
 				} else if okRefresh {
 					discardStreamChunks(streamResult.Chunks)
-					auth = refreshed
+					if errRebuild := rebuildAfterRefresh(refreshed); errRebuild != nil {
+						return nil, errRebuild
+					}
 					m.replaceHomeExecutionLifecycleAuth(execOpts.ExecutionLifecycle, auth)
 					publishSelectedAuthMetadata(execOpts.Metadata, auth)
 					didRefreshOnUnauthorized = true

@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/contextcompression"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
@@ -243,8 +245,84 @@ func TestHandlerModelRouterDirectExecutorRunsAfterAuthInterceptor(t *testing.T) 
 	if host.lastOptions.Headers.Get("X-After-Auth") != "yes" {
 		t.Fatalf("executor headers = %#v, want after-auth header", host.lastOptions.Headers)
 	}
-	if string(host.lastOptions.OriginalRequest) != `{"after":true}` {
-		t.Fatalf("original request = %q, want after-auth body", host.lastOptions.OriginalRequest)
+	if string(host.lastOptions.OriginalRequest) != fmt.Sprintf(`{"model":%q}`, originalModel) {
+		t.Fatalf("original request = %q, want raw client body", host.lastOptions.OriginalRequest)
+	}
+}
+
+func TestHandlerPluginExecutorCompressionKeepsRawOriginalNonStreamAndStream(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			originalApply := applyInlineContextCompression
+			calls := 0
+			applyInlineContextCompression = func(runtime *contextcompression.Runtime, ctx context.Context, raw []byte, cfg internalconfig.ContextCompressionConfig, optOut bool) ([]byte, contextcompression.Stats) {
+				calls++
+				return runtime.Apply(ctx, raw, cfg, optOut)
+			}
+			t.Cleanup(func() { applyInlineContextCompression = originalApply })
+			host := &handlerDirectExecutorRouteHost{}
+			host.hasRouters = true
+			host.route = func(_ context.Context, req pluginapi.ModelRouteRequest) (pluginapi.ModelRouteResponse, bool) {
+				if !strings.Contains(string(req.Body), "same repeated line") {
+					t.Fatalf("router did not see raw body: %s", req.Body)
+				}
+				return pluginapi.ModelRouteResponse{Handled: true, TargetKind: pluginapi.ModelRouteTargetExecutor, Target: "compress-plugin"}, true
+			}
+			cfg := &sdkconfig.SDKConfig{ContextCompression: internalconfig.ContextCompressionConfig{Engine: internalconfig.ContextCompressionRTK, MinBytes: 1, RawCapBytes: 1024 * 1024}}
+			handler := NewBaseAPIHandlers(cfg, nil)
+			handler.SetModelRouterHost(host)
+			raw := []byte(`{"model":"m","messages":[{"role":"tool","content":"same repeated line\nsame repeated line\nsame repeated line\nsame repeated line\nsame repeated line\nsame repeated line"}]}`)
+			if stream {
+				data, _, errs := handler.ExecuteStreamWithAuthManager(context.Background(), "openai", "m", raw, "")
+				for range data {
+				}
+				for err := range errs {
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+			} else {
+				_, _, err := handler.ExecuteWithAuthManager(context.Background(), "openai", "m", raw, "")
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if string(host.lastOptions.OriginalRequest) != string(raw) {
+				t.Fatalf("original=%s", host.lastOptions.OriginalRequest)
+			}
+			if calls != 1 {
+				t.Fatalf("compression calls=%d, want 1", calls)
+			}
+			if string(host.lastRequest.Payload) == string(raw) {
+				t.Fatal("provider payload was not compressed")
+			}
+			meta, ok := host.lastOptions.Metadata["compression"].(contextcompression.Stats)
+			if !ok || !meta.Applied {
+				t.Fatalf("metadata=%#v", host.lastOptions.Metadata["compression"])
+			}
+		})
+	}
+}
+
+func TestHandlerCompressionTelemetryOmitsUnsafeVersionAndManifest(t *testing.T) {
+	originalApply := applyInlineContextCompression
+	applyInlineContextCompression = func(_ *contextcompression.Runtime, _ context.Context, raw []byte, _ internalconfig.ContextCompressionConfig, _ bool) ([]byte, contextcompression.Stats) {
+		return raw, contextcompression.Stats{Engine: "tare_structural", Reason: "applied", Applied: true, Version: "Bearer credential.control", ManifestID: "../../secret?token=x"}
+	}
+	t.Cleanup(func() { applyInlineContextCompression = originalApply })
+	host := &handlerDirectExecutorRouteHost{}
+	host.hasRouters = true
+	host.route = func(context.Context, pluginapi.ModelRouteRequest) (pluginapi.ModelRouteResponse, bool) {
+		return pluginapi.ModelRouteResponse{Handled: true, TargetKind: pluginapi.ModelRouteTargetExecutor, Target: "telemetry"}, true
+	}
+	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, nil)
+	handler.SetModelRouterHost(host)
+	if _, _, err := handler.ExecuteWithAuthManager(context.Background(), "openai", "m", []byte(`{"model":"m"}`), ""); err != nil {
+		t.Fatal(err)
+	}
+	stats := host.lastOptions.Metadata["compression"].(contextcompression.Stats)
+	if stats.Version != "" || stats.ManifestID != "" {
+		t.Fatalf("unsafe metadata=%+v", stats)
 	}
 }
 

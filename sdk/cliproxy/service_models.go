@@ -943,6 +943,7 @@ func applyOAuthModelAliasEntries(aliases []config.OAuthModelAlias, models []*Mod
 		alias       string
 		displayName string
 		fork        bool
+		thinking    *registry.ThinkingSupport
 	}
 
 	forward := make(map[string][]aliasEntry, len(aliases))
@@ -960,6 +961,7 @@ func applyOAuthModelAliasEntries(aliases []config.OAuthModelAlias, models []*Mod
 			alias:       alias,
 			displayName: strings.TrimSpace(aliases[i].DisplayName),
 			fork:        aliases[i].Fork,
+			thinking:    aliases[i].Thinking,
 		})
 	}
 	if len(forward) == 0 {
@@ -1017,6 +1019,9 @@ func applyOAuthModelAliasEntries(aliases []config.OAuthModelAlias, models []*Mod
 			seen[aliasKey] = struct{}{}
 			clone := *model
 			clone.ID = mappedID
+			if entry.thinking != nil {
+				clone.Thinking = modelconfig.NormalizeThinkingSupport(entry.thinking)
+			}
 			if entry.displayName != "" {
 				clone.DisplayName = entry.displayName
 			}

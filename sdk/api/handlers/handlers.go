@@ -16,6 +16,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/contextcompression"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
@@ -57,6 +59,10 @@ const (
 	maxStreamInterceptorHistoryChunks = 64
 	maxStreamInterceptorHistoryBytes  = 1 << 20
 )
+
+var applyInlineContextCompression = func(runtime *contextcompression.Runtime, ctx context.Context, raw []byte, cfg internalconfig.ContextCompressionConfig, optOut bool) ([]byte, contextcompression.Stats) {
+	return runtime.Apply(ctx, raw, cfg, optOut)
+}
 
 // BuildErrorResponseBody builds an OpenAI-compatible JSON error response body.
 // If errText is already valid JSON, it is returned as-is to preserve upstream error payloads.
@@ -199,6 +205,24 @@ func requestExecutionMetadata(ctx context.Context) map[string]any {
 	return meta
 }
 
+func contextCompressionOptOut(ctx context.Context, explicit http.Header) bool {
+	value := explicit.Get(contextcompression.OptOutHeader)
+	if value == "" && ctx != nil {
+		if ginCtx, ok := ctx.Value("gin").(*gin.Context); ok && ginCtx != nil {
+			value = ginCtx.GetHeader(contextcompression.OptOutHeader)
+		}
+	}
+	// Match 9Router exactly: lowercase comparison without whitespace normalization.
+	return strings.EqualFold(value, "off")
+}
+
+func (h *BaseAPIHandler) contextCompressionConfig() internalconfig.ContextCompressionConfig {
+	if h == nil || h.Cfg == nil {
+		return internalconfig.ContextCompressionConfig{Engine: internalconfig.ContextCompressionOff}
+	}
+	return h.Cfg.ContextCompression
+}
+
 func requestClientIP(request *http.Request) string {
 	if request == nil {
 		return ""
@@ -287,6 +311,8 @@ type BaseAPIHandler struct {
 	// ModelRouterHost optionally routes matching requests to a plugin executor, the router's own
 	// executor, or a built-in provider before model-to-provider resolution and auth selection.
 	ModelRouterHost PluginModelRouterHost
+
+	ContextCompression *contextcompression.Runtime
 }
 
 // NewBaseAPIHandlers creates a new API handlers instance.
@@ -300,9 +326,18 @@ type BaseAPIHandler struct {
 //   - *BaseAPIHandler: A new API handlers instance
 func NewBaseAPIHandlers(cfg *config.SDKConfig, authManager *coreauth.Manager) *BaseAPIHandler {
 	return &BaseAPIHandler{
-		Cfg:         cfg,
-		AuthManager: authManager,
+		Cfg:                cfg,
+		AuthManager:        authManager,
+		ContextCompression: contextcompression.NewRuntime(),
 	}
+}
+
+// ShutdownContextCompression drains only this handler/service runtime.
+func (h *BaseAPIHandler) ShutdownContextCompression(ctx context.Context) error {
+	if h == nil || h.ContextCompression == nil {
+		return nil
+	}
+	return h.ContextCompression.Shutdown(ctx)
 }
 
 // UpdateClients updates the handlers' client list and configuration.
