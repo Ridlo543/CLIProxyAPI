@@ -104,3 +104,28 @@ func TestAntigravityWebSearchModelForRequiresRequestedModelCapability(t *testing
 		t.Fatalf("unknown model should not get Antigravity web search model, got %q", got)
 	}
 }
+
+func TestStaticCatalogIncludesReconciledEntries(t *testing.T) {
+	kimi := GetKimiModels()
+	if len(kimi) < 12 {
+		t.Fatalf("kimi count = %d, want >= 12", len(kimi))
+	}
+	for _, id := range []string{"kimi-k2.5-thinking", "kimi-for-coding", "kimi-for-coding-highspeed", "kimi-latest"} {
+		if LookupStaticModelInfo(id) == nil {
+			t.Fatalf("kimi entry %q not found in static catalog", id)
+		}
+	}
+	antigravity := GetAntigravityModels()
+	if len(antigravity) < 18 {
+		t.Fatalf("antigravity count = %d, want >= 18", len(antigravity))
+	}
+	for _, id := range []string{"gemini-3.5-flash-high", "gemini-3.6-flash-low", "gemini-3.6-flash-medium", "gemini-3.7-flash-low", "gemini-3.7-flash-medium"} {
+		info := LookupStaticModelInfo(id)
+		if info == nil {
+			t.Fatalf("antigravity entry %q not found in static catalog", id)
+		}
+		if info.OwnedBy != "antigravity" || info.Type != "antigravity" {
+			t.Fatalf("%s ownership = %q/%q", id, info.OwnedBy, info.Type)
+		}
+	}
+}

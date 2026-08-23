@@ -1,6 +1,7 @@
 package management
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,6 +21,12 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
+
+const configRevisionMismatchCode = "config_revision_mismatch"
+
+func configContentETag(data []byte) string {
+	return fmt.Sprintf("\"%x\"", sha256.Sum256(data))
+}
 
 const (
 	latestReleaseURL       = "https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest"
@@ -151,6 +158,33 @@ func (h *Handler) PutConfigYAML(c *gin.Context) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if expected := strings.TrimSpace(c.GetHeader("If-Match")); expected != "" {
+		// RFC 7232: "*" means "apply only if the resource exists".
+		if expected == "*" {
+			if _, errStat := os.Stat(h.configFilePath); errStat != nil {
+				c.JSON(http.StatusPreconditionFailed, gin.H{
+					"error":   configRevisionMismatchCode,
+					"message": "config file does not exist",
+				})
+				return
+			}
+		} else {
+			current, errRead := os.ReadFile(h.configFilePath)
+			if errRead != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "read_failed", "message": "failed to read current config"})
+				return
+			}
+			currentETag := configContentETag(current)
+			if expected != currentETag {
+				c.Header("ETag", currentETag)
+				c.JSON(http.StatusPreconditionFailed, gin.H{
+					"error":   configRevisionMismatchCode,
+					"message": "config changed since it was loaded",
+				})
+				return
+			}
+		}
+	}
 	if WriteConfig(h.configFilePath, body) != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "write_failed", "message": "failed to write config"})
 		return
@@ -162,12 +196,17 @@ func (h *Handler) PutConfigYAML(c *gin.Context) {
 		return
 	}
 	h.cfg = newCfg
+	// Echo the new content's ETag so conditional clients can chain saves
+	// without an extra GET round trip.
+	c.Header("ETag", configContentETag(body))
 	c.JSON(http.StatusOK, gin.H{"ok": true, "changed": []string{"config"}})
 }
 
 // GetConfigYAML returns the raw config.yaml file bytes without re-encoding.
 // It preserves comments and original formatting/styles.
 func (h *Handler) GetConfigYAML(c *gin.Context) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	data, err := os.ReadFile(h.configFilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -180,6 +219,7 @@ func (h *Handler) GetConfigYAML(c *gin.Context) {
 	c.Header("Content-Type", "application/yaml; charset=utf-8")
 	c.Header("Cache-Control", "no-store")
 	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("ETag", configContentETag(data))
 	// Write raw bytes as-is
 	_, _ = c.Writer.Write(data)
 }

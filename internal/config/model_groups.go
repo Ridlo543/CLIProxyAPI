@@ -11,10 +11,20 @@ type ModelGroupMember struct {
 	Model    string `yaml:"model" json:"model"`
 }
 
+// ModelGroup target selection strategies.
+const (
+	// ModelGroupStrategyOrderedFallback tries targets strictly in configured order (default).
+	ModelGroupStrategyOrderedFallback = "ordered-fallback"
+	// ModelGroupStrategyRoundRobin rotates the starting target across requests,
+	// then falls back through the remaining targets in order.
+	ModelGroupStrategyRoundRobin = "round-robin"
+)
+
 // ModelGroup defines a client-visible model backed by ordered upstream targets.
 type ModelGroup struct {
-	Name   string             `yaml:"name" json:"name"`
-	Models []ModelGroupMember `yaml:"models" json:"models"`
+	Name     string             `yaml:"name" json:"name"`
+	Strategy string             `yaml:"strategy,omitempty" json:"strategy,omitempty"`
+	Models   []ModelGroupMember `yaml:"models" json:"models"`
 }
 
 // NormalizeModelGroups validates model groups and returns a normalized copy.
@@ -39,6 +49,16 @@ func NormalizeModelGroups(groups []ModelGroup) ([]ModelGroup, error) {
 	normalized := make([]ModelGroup, len(groups))
 	for i, group := range groups {
 		group.Name = strings.TrimSpace(group.Name)
+		switch strings.ToLower(strings.TrimSpace(group.Strategy)) {
+		case "":
+			group.Strategy = ""
+		case ModelGroupStrategyOrderedFallback:
+			group.Strategy = ModelGroupStrategyOrderedFallback
+		case ModelGroupStrategyRoundRobin:
+			group.Strategy = ModelGroupStrategyRoundRobin
+		default:
+			return nil, fmt.Errorf("model-groups[%d] %q: strategy must be empty, %s, or %s", i, group.Name, ModelGroupStrategyOrderedFallback, ModelGroupStrategyRoundRobin)
+		}
 		if len(group.Models) == 0 {
 			return nil, fmt.Errorf("model-groups[%d] %q: models must not be empty", i, group.Name)
 		}

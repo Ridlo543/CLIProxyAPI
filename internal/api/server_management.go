@@ -140,6 +140,12 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PUT("/openai-compatibility", s.mgmt.PutOpenAICompat)
 		mgmt.PATCH("/openai-compatibility", s.mgmt.PatchOpenAICompat)
 		mgmt.DELETE("/openai-compatibility", s.mgmt.DeleteOpenAICompat)
+		mgmt.GET("/api-key-policies", s.mgmt.GetAPIKeyPolicies)
+		mgmt.PUT("/api-key-policies", s.mgmt.PutAPIKeyPolicies)
+		mgmt.GET("/api-key-policies/usage", s.mgmt.GetAPIKeyPolicyUsage)
+		mgmt.POST("/openai-compatibility/:name/import-models", s.mgmt.ImportOpenAICompatModels)
+		mgmt.GET("/oauth-model-alias/:channel", s.mgmt.GetOAuthModelAliasChannel)
+		mgmt.POST("/oauth-model-alias/:channel", s.mgmt.AddOAuthModelAliases)
 
 		mgmt.GET("/vertex-api-key", s.mgmt.GetVertexCompatKeys)
 		mgmt.PUT("/vertex-api-key", s.mgmt.PutVertexCompatKeys)

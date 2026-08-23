@@ -121,6 +121,11 @@ func tryRefreshModels(ctx context.Context, label string) {
 		return
 	}
 
+	// Preserve locally-added entries that the remote catalog does not carry yet
+	// (for example fork-specific model ids) so a periodic refresh cannot clobber
+	// them. Remote entries win on id conflicts.
+	parsed = mergeStaticModels(oldData, parsed)
+
 	// Detect changes before updating store.
 	changed := detectChangedProviders(oldData, parsed)
 
@@ -187,6 +192,60 @@ func fetchModelsFromRemote(ctx context.Context) (*staticModelsJSON, string) {
 		return &parsed, url
 	}
 	return nil, ""
+}
+
+// mergeStaticModels returns the remote catalog with any locally-present model
+// entries appended that the remote does not define, per channel. Remote entries
+// always win on conflicting ids; local-only additions survive refreshes.
+func mergeStaticModels(local, remote *staticModelsJSON) *staticModelsJSON {
+	if remote == nil {
+		return local
+	}
+	if local == nil {
+		return remote
+	}
+	sections := []struct {
+		dst   *[]*ModelInfo
+		local []*ModelInfo
+	}{
+		{&remote.Claude, local.Claude},
+		{&remote.Gemini, local.Gemini},
+		{&remote.Vertex, local.Vertex},
+		{&remote.AIStudio, local.AIStudio},
+		{&remote.CodexFree, local.CodexFree},
+		{&remote.CodexTeam, local.CodexTeam},
+		{&remote.CodexPlus, local.CodexPlus},
+		{&remote.CodexPro, local.CodexPro},
+		{&remote.Kimi, local.Kimi},
+		{&remote.Antigravity, local.Antigravity},
+		{&remote.XAI, local.XAI},
+	}
+	for _, s := range sections {
+		if len(s.local) == 0 {
+			continue
+		}
+		existing := make(map[string]struct{}, len(*s.dst))
+		for _, m := range *s.dst {
+			if m != nil && strings.TrimSpace(m.ID) != "" {
+				existing[strings.ToLower(strings.TrimSpace(m.ID))] = struct{}{}
+			}
+		}
+		for _, m := range s.local {
+			if m == nil {
+				continue
+			}
+			id := strings.ToLower(strings.TrimSpace(m.ID))
+			if id == "" {
+				continue
+			}
+			if _, ok := existing[id]; ok {
+				continue
+			}
+			existing[id] = struct{}{}
+			*s.dst = append(*s.dst, cloneModelInfo(m))
+		}
+	}
+	return remote
 }
 
 // detectChangedProviders compares two model catalogs and returns provider names

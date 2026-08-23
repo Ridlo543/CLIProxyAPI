@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	ContextCompressionOff  = "off"
-	ContextCompressionRTK  = "rtk"
-	ContextCompressionTARE = "tare_structural"
+	ContextCompressionOff     = "off"
+	ContextCompressionRTK     = "rtk"
+	ContextCompressionTARE    = "tare_structural"
+	ContextCompressionRTKTARE = "rtk_tare"
 )
 
 var sha256Pattern = regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
@@ -24,8 +25,11 @@ const (
 )
 
 func (c *ContextCompressionConfig) applyDefaults() {
-	if c.Engine == "tare-structural" {
+	switch c.Engine {
+	case "tare-structural":
 		c.Engine = ContextCompressionTARE
+	case "rtk+tare":
+		c.Engine = ContextCompressionRTKTARE
 	}
 	if c.Engine == "" {
 		c.Engine = ContextCompressionOff
@@ -66,7 +70,7 @@ func (c *ContextCompressionConfig) applyDefaults() {
 // TARE engine has no explicit identity fields. A partial explicit identity is
 // deliberately left untouched so validation rejects it.
 func (c *ContextCompressionConfig) applyBundledTAREFallback() {
-	if c.Engine != ContextCompressionTARE {
+	if c.Engine != ContextCompressionTARE && c.Engine != ContextCompressionRTKTARE {
 		return
 	}
 	t := &c.TARE
@@ -85,8 +89,8 @@ func (c *ContextCompressionConfig) applyBundledTAREFallback() {
 
 // Validate rejects unsafe or unbounded compression configuration at load time.
 func (c ContextCompressionConfig) Validate() error {
-	if c.Engine != ContextCompressionOff && c.Engine != ContextCompressionRTK && c.Engine != ContextCompressionTARE {
-		return fmt.Errorf("context-compression.engine must be off, rtk, or tare_structural")
+	if c.Engine != ContextCompressionOff && c.Engine != ContextCompressionRTK && c.Engine != ContextCompressionTARE && c.Engine != ContextCompressionRTKTARE {
+		return fmt.Errorf("context-compression.engine must be off, rtk, tare_structural, or rtk_tare")
 	}
 	if c.MinBytes < 1 || c.MinBytes > 1024*1024 || c.RawCapBytes < c.MinBytes || c.RawCapBytes > 10*1024*1024 {
 		return fmt.Errorf("context-compression size bounds are invalid")
@@ -109,9 +113,9 @@ func (c ContextCompressionConfig) Validate() error {
 			return fmt.Errorf("context-compression TARE version allowlist is invalid")
 		}
 	}
-	if c.Engine == ContextCompressionTARE {
+	if c.Engine == ContextCompressionTARE || c.Engine == ContextCompressionRTKTARE {
 		if !filepath.IsAbs(t.BinaryPath) || !sha256Pattern.MatchString(t.SHA256) || len(t.AllowedVersions) == 0 || t.ManifestID == "" || len(t.ManifestID) > 128 {
-			return fmt.Errorf("context-compression tare-structural requires an absolute binary path, checksum, version allowlist, and manifest id")
+			return fmt.Errorf("context-compression tare-structural and rtk_tare require an absolute binary path, checksum, version allowlist, and manifest id")
 		}
 	}
 	return nil
