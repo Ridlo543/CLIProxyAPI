@@ -338,6 +338,14 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth) gin.H {
 		"source":         "memory",
 		"size":           int64(0),
 	}
+	if !auth.Quota.NextRecoverAt.IsZero() {
+		// Expose the credential's cooldown expiry so management clients can
+		// render a countdown instead of guessing from status alone.
+		entry["quota_next_recover_at"] = auth.Quota.NextRecoverAt
+		if auth.Quota.Reason != "" {
+			entry["quota_reason"] = auth.Quota.Reason
+		}
+	}
 	entry["success"] = auth.Success
 	entry["failed"] = auth.Failed
 	entry["recent_requests"] = auth.RecentRequestsSnapshot(time.Now())
