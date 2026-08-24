@@ -146,6 +146,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PUT("/api-key-policies", s.mgmt.PutAPIKeyPolicies)
 		mgmt.GET("/api-key-policies/usage", s.mgmt.GetAPIKeyPolicyUsage)
 		mgmt.POST("/openai-compatibility/:name/import-models", s.mgmt.ImportOpenAICompatModels)
+		mgmt.POST("/provider-probe", s.mgmt.ProbeProvider)
 		mgmt.GET("/oauth-model-alias/:channel", s.mgmt.GetOAuthModelAliasChannel)
 		mgmt.POST("/oauth-model-alias/:channel", s.mgmt.AddOAuthModelAliases)
 
