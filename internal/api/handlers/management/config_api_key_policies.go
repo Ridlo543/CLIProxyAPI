@@ -138,7 +138,10 @@ func (h *Handler) ImportOpenAICompatModels(c *gin.Context) {
 		return
 	}
 
-	added, skipped := mergeDiscoveredModels(entry.Models, body)
+	// free_only restricts imports to the provider's officially free tier,
+// so a keyless/free listing never pulls in paid models by accident.
+	freeOnly := c.Query("free_only") == "true"
+	added, skipped := mergeDiscoveredModels(entry.Models, body, freeOnly)
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -174,7 +177,16 @@ func modelNames(models []config.OpenAICompatibilityModel) []string {
 // mergeDiscoveredModels parses OpenAI-style {"data":[{"id":...}]} payloads
 // (tolerating {"models":[...]} shapes) and returns new name-only entries plus
 // the names skipped because they already exist as a name or alias.
-func mergeDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []byte) ([]config.OpenAICompatibilityModel, []string) {
+// isFreeModelID reports whether an OpenCode Zen model id belongs to the
+// officially free tier (https://opencode.ai/docs/zen/): documented limited-
+// time free listings carry a "-free" suffix, with the stealth model
+// "big-pickle" as the single known exception.
+func isFreeModelID(id string) bool {
+	id = strings.ToLower(strings.TrimSpace(id))
+	return strings.HasSuffix(id, "-free") || id == "big-pickle"
+}
+
+func mergeDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []byte, freeOnly bool) ([]config.OpenAICompatibilityModel, []string) {
 	known := make(map[string]struct{}, len(existing))
 	for _, m := range existing {
 		if trimmed := strings.TrimSpace(m.Name); trimmed != "" {
@@ -190,6 +202,9 @@ func mergeDiscoveredModels(existing []config.OpenAICompatibilityModel, payload [
 	var skipped []string
 	seenNew := map[string]struct{}{}
 	for _, id := range discovered {
+		if freeOnly && !isFreeModelID(id) {
+			continue
+		}
 		key := strings.ToLower(id)
 		if _, exists := known[key]; exists {
 			skipped = append(skipped, id)
