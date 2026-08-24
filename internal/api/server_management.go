@@ -147,6 +147,12 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/api-key-policies/usage", s.mgmt.GetAPIKeyPolicyUsage)
 		mgmt.POST("/openai-compatibility/:name/import-models", s.mgmt.ImportOpenAICompatModels)
 		mgmt.POST("/provider-probe", s.mgmt.ProbeProvider)
+		// Combos (isolated feature — see internal/config/config_combos.go).
+		mgmt.GET("/combos", s.mgmt.ListCombos)
+		mgmt.GET("/combos/:name", s.mgmt.GetCombo)
+		mgmt.POST("/combos", s.mgmt.CreateCombo)
+		mgmt.PUT("/combos/:name", s.mgmt.UpdateCombo)
+		mgmt.DELETE("/combos/:name", s.mgmt.DeleteCombo)
 		mgmt.GET("/oauth-model-alias/:channel", s.mgmt.GetOAuthModelAliasChannel)
 		mgmt.POST("/oauth-model-alias/:channel", s.mgmt.AddOAuthModelAliases)
 
