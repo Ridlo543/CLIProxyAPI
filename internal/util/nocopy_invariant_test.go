@@ -106,8 +106,9 @@ var reviewedInPlaceByteWrites = map[string]reviewedInPlaceByteWrite{
 	"internal/runtime/executor/claude_executor_request.go":  {2, "shifts []string headers to insert a part; no byte of any payload is rewritten"},
 	"internal/runtime/executor/helps/claude_mcp_alias.go":   {1, "copies an HMAC sum into a local fixed-size digest array"},
 	"internal/client/codex/live/tcp_proxy.go":               {1, "copies header and payload into a freshly allocated frame"},
-	"internal/home/client.go":                               {1, "zeroes a secret buffer after json.Unmarshal has copied every value out"},
-	"internal/pluginstore/auth.go":                          {1, "zeroes a locally built credential buffer after base64 encoding copied it out"},
+	"internal/contextcompression/tare.go":                   {1, "LRU move-to-back shifts engine-owned cacheEntry structs under e.mu; values are compressed-output copies that never back a GJSON view"},
+// Stale entries removed 2026-08-25: home/client.go and pluginstore/auth.go
+// no longer contain in-place byte writes.
 }
 
 // TestInPlaceByteWritesAreReviewed keeps the set of in-place byte writes small
