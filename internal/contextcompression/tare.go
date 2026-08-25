@@ -58,7 +58,9 @@ func newTAREEngine() *tareEngine {
 	e := &tareEngine{semaphore: make(chan struct{}, 1), identities: map[string]*identityCall{}, children: map[*os.Process]struct{}{}, shutdownCh: make(chan struct{}), drainChanged: make(chan struct{})}
 	e.readIdentityBinary = os.ReadFile
 	e.runIdentityVersion = func(ctx context.Context, cfg config.TAREStructuralConfig) ([]byte, string) {
-		return e.run(ctx, cfg, []string{"--version"}, nil, runLimits{timeoutMS: 1000, input: 1, stdout: 256, stderr: 1024})
+		// Budget follows the configured process timeout: under -race on slow
+		// runners a hardcoded 1s starves the version probe and poisons identity.
+		return e.run(ctx, cfg, []string{"--version"}, nil, runLimits{timeoutMS: cfg.ProcessTimeoutMS, input: 1, stdout: 256, stderr: 1024})
 	}
 	return e
 }
