@@ -170,8 +170,10 @@ func (h *Host) callHostHTTPDoStream(ctx context.Context, request []byte) ([]byte
 	streamID := ""
 	if h != nil && h.httpStreams != nil {
 		streamID = h.httpStreams.open(resp.Chunks, cancel)
+		// Ownership transferred: the stream registry cancels on close.
+		cancel = nil
 	}
-	if streamID == "" {
+	if cancel != nil {
 		cancel()
 		return nil, fmt.Errorf("host http stream bridge is unavailable")
 	}
