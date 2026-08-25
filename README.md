@@ -2,6 +2,48 @@
 
 English | [中文](README_CN.md) | [日本語](README_JA.md)
 
+## AinyRouter fork — run locally like 9Router
+
+This fork adds a desktop-style local experience:
+
+```powershell
+# one-time build (embeds the web panel into the exe)
+pwsh scripts/build-local.ps1            # -> ainyrouter.exe
+
+# everyday use: just run it
+.\ainyrouter.exe                        # starts the server + console menu
+```
+
+The console menu:
+
+```
+AinyRouter dev
+  🚀 Server: http://localhost:18400
+========================================
+
+ 1) Web UI (Open in Browser)
+ 2) Hide to Tray (Background)
+ q) Exit
+> 
+```
+
+- **1** opens the management panel (`/management.html`) served by the router itself.
+- **2** hides this window to the system tray (Windows); restore or quit from the tray icon.
+- `q` shuts the server down cleanly.
+
+Install the embedded panel into an existing deployment:
+
+```powershell
+.\ainyrouter.exe -panel-install --config .\config.yaml
+```
+
+Other useful modes: `-service install|start|stop|status|run` (run as a Windows
+service), `--no-menu` for plain log output, and `AINYROUTER_HEADLESS=1` to
+force headless runs. On Linux/macOS the same binary works; hide-to-tray falls
+back to your init system.
+
+---
+
 If you want to use CLIProxyAPI on your desktop, we recommend our [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) desktop client. It provides a graphical configuration UI, automatic updates, system tray integration, and one-click start/stop for the CLIProxyAPI service.
 
 CLIProxyAPI is a proxy server that provides OpenAI/Gemini/Claude/Codex/Grok compatible API interfaces for CLI.

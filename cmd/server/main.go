@@ -85,6 +85,9 @@ func main() {
 	var vertexImportPrefix string
 	var configPath string
 	var serviceAction string
+	var panelInstall bool
+	var forceMenu bool
+	var noMenu bool
 	var password string
 	var homeJWT string
 	var homeDisableClusterDiscovery bool
@@ -103,6 +106,9 @@ func main() {
 	flag.BoolVar(&xaiLogin, "xai-login", false, "Login to xAI using OAuth")
 	flag.StringVar(&configPath, "config", DefaultConfigPath, "Configure File Path")
 	flag.StringVar(&serviceAction, "service", "", "Windows service management: install|remove|start|stop|status|run")
+	flag.BoolVar(&panelInstall, "panel-install", false, "Install the embedded management panel into the static dir")
+	flag.BoolVar(&forceMenu, "menu", false, "Show the interactive console menu (default on real terminals)")
+	flag.BoolVar(&noMenu, "no-menu", false, "Disable the interactive console menu")
 	flag.StringVar(&vertexImport, "vertex-import", "", "Import Vertex service account key JSON file")
 	flag.StringVar(&vertexImportPrefix, "vertex-import-prefix", "", "Prefix for Vertex model namespacing (use with -vertex-import)")
 	flag.StringVar(&password, "password", "", "")
@@ -153,6 +159,13 @@ func main() {
 	if serviceAction != "" && serviceAction != "run" {
 		if errService := cmd.HandleWindowsService(serviceAction, configPath); errService != nil {
 			fmt.Fprintf(os.Stderr, "service error: %v\n", errService)
+			os.Exit(1)
+		}
+		return
+	}
+	if panelInstall {
+		if errPanel := cmd.HandlePanelInstall(flag.CommandLine, configPath); errPanel != nil {
+			fmt.Fprintf(os.Stderr, "panel install error: %v\n", errPanel)
 			os.Exit(1)
 		}
 		return
@@ -771,6 +784,20 @@ func main() {
 			if serviceAction == "run" {
 				if errService := cmd.RunWindowsService(cfg, configFilePath, password, pluginHost, serverOptions...); errService != nil {
 					log.Errorf("windows service run failed: %v", errService)
+					os.Exit(1)
+				}
+				return
+			}
+			if cmd.ShouldUseConsoleMenu(forceMenu, noMenu, cmd.StdinIsTerminal()) {
+				if errMenu := cmd.RunConsoleMenu(cmd.ConsoleMenuOptions{
+					Cfg:           cfg,
+					ConfigPath:    configFilePath,
+					LocalPassword: password,
+					Host:          pluginHost,
+					ServerOptions: serverOptions,
+					Version:       Version,
+				}); errMenu != nil {
+					log.Errorf("console menu failed: %v", errMenu)
 					os.Exit(1)
 				}
 				return
