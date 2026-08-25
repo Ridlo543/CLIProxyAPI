@@ -102,7 +102,9 @@ func fakeTAREConfig(t *testing.T) config.ContextCompressionConfig {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(data)
-	return config.ContextCompressionConfig{Engine: config.ContextCompressionTARE, MinBytes: 500, RawCapBytes: 10 * 1024 * 1024, TARE: config.TAREStructuralConfig{BinaryPath: binary, SHA256: fmt.Sprintf("%x", sum), AllowedVersions: []string{"0.2.0"}, ManifestID: "tare-cli-test", ProcessTimeoutMS: 300, QueueTimeoutMS: 50, InputLimitBytes: 1024*1024 + 1024, StdoutLimitBytes: 1024 * 1024, StderrLimitBytes: 64 * 1024, GlobalConcurrency: 1, CacheEntries: 128, CacheBytes: 16 * 1024 * 1024}}
+	// ProcessTimeoutMS must tolerate -race overhead on shared CI runners:
+	// the budget guards the real binary in production, not this fake script.
+	return config.ContextCompressionConfig{Engine: config.ContextCompressionTARE, MinBytes: 500, RawCapBytes: 10 * 1024 * 1024, TARE: config.TAREStructuralConfig{BinaryPath: binary, SHA256: fmt.Sprintf("%x", sum), AllowedVersions: []string{"0.2.0"}, ManifestID: "tare-cli-test", ProcessTimeoutMS: 8000, QueueTimeoutMS: 4000, InputLimitBytes: 1024*1024 + 1024, StdoutLimitBytes: 1024 * 1024, StderrLimitBytes: 64 * 1024, GlobalConcurrency: 1, CacheEntries: 128, CacheBytes: 16 * 1024 * 1024}}
 }
 func marked(v string) string { return "[[FAKE_TARE_COMPRESS]]" + v + "[[/FAKE_TARE_COMPRESS]]" }
 
