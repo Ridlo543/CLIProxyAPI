@@ -9,12 +9,13 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/combos"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 )
 
 // combosChatWrapper intercepts /v1/chat/completions when the requested model
@@ -44,9 +45,19 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 		}
 
 		chain := combos.Order(combo)
+		originalWriter := c.Writer
 		var lastWriter *combosResponseWriter
 
 		for _, member := range chain {
+			// OpenAI-compatible entries register bare model ids; routing picks
+			// the serving provider itself. Members nothing can serve are
+			// skipped so an unknown model cannot cut the chain short.
+			providers := registry.GetGlobalRegistry().GetModelProviders(member.Model)
+			if len(providers) == 0 {
+				logrus.WithField("combo", combo.Name).Warnf("combos: skipping member %s: no provider serves model %q", combos.ModelID(member), member.Model)
+				continue
+			}
+			logrus.WithField("combo", combo.Name).Debugf("combos: attempt %s via providers %v", combos.ModelID(member), providers)
 			body, mErr := rewriteModelField(raw, member.Model)
 			if mErr != nil {
 				continue
@@ -56,9 +67,10 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 			req2.ContentLength = int64(len(body))
 			c.Request = req2
 
-			w := newCombosWriter(c.Writer)
+			w := newCombosWriter(originalWriter)
 			c.Writer = w
 			next(c)
+			c.Writer = originalWriter
 
 			status := w.StatusCode()
 			if status < http.StatusBadRequest {
@@ -96,15 +108,18 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 		}
 		// Buffer the small JSON response so we can append entries.
 		buf := &bytes.Buffer{}
-		grw := &passthroughRecorder{ResponseWriter: c.Writer, Body: buf}
+		originalWriter := c.Writer
+		grw := &passthroughRecorder{ResponseWriter: originalWriter, Body: buf}
 		c.Writer = grw
 		next(c)
+		c.Writer = originalWriter
 
 		var parsed struct {
 			Object string           `json:"object"`
 			Data   []map[string]any `json:"data"`
 		}
-		if err := json.Unmarshal(grw.Body.Bytes(), &parsed); err != nil || parsed.Object != "list" && parsed.Data == nil {
+		if err := json.Unmarshal(grw.Body.Bytes(), &parsed); err != nil || (parsed.Object != "list" && parsed.Data == nil) {
+			c.Writer.WriteHeader(grw.heldCode)
 			_, _ = c.Writer.Write(grw.Body.Bytes())
 			return
 		}
@@ -116,28 +131,39 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 			})
 		}
 		out, _ := json.Marshal(parsed)
-		c.Writer.Header().Set("Content-Length", intToString(len(out)))
+		if c.Writer.Header().Get("Content-Type") == "" {
+			c.Writer.Header().Set("Content-Type", "application/json")
+		}
+		c.Writer.WriteHeader(http.StatusOK)
 		_, _ = c.Writer.Write(out)
 	}
 }
 
-func intToString(n int) string { return strconv.Itoa(n) }
-
-// passthroughRecorder mirrors the real writer while teeing the body into a
-// buffer, so tiny JSON responses can be post-processed before delivery.
+// passthroughRecorder HOLDS the response body (does not write through) so
+// tiny JSON responses can be post-processed exactly once before delivery.
 type passthroughRecorder struct {
 	gin.ResponseWriter
-	Body *bytes.Buffer
+	Body     *bytes.Buffer
+	heldCode int
+	wrote    bool
+}
+
+func (w *passthroughRecorder) WriteHeader(code int) {
+	if !w.wrote {
+		w.heldCode = code
+		w.wrote = true
+	}
 }
 
 func (w *passthroughRecorder) Write(b []byte) (int, error) {
-	w.Body.Write(b)
-	return w.ResponseWriter.Write(b)
+	if !w.wrote {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.Body.Write(b)
 }
 
 func (w *passthroughRecorder) WriteString(s string) (int, error) {
-	w.Body.WriteString(s)
-	return w.ResponseWriter.WriteString(s)
+	return w.Write([]byte(s))
 }
 
 // rewriteModelField replaces only the top-level "model" field. Field order is
