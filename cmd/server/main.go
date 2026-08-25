@@ -154,6 +154,10 @@ func main() {
 	// Parse the command-line flags.
 	flag.Parse()
 
+	// Bare `ainyrouter` must work from any directory: fall back to the
+	// per-user install location when ./config.yaml does not exist.
+	configPath = cmd.ResolveConfigPath(configPath)
+
 	// Windows service management actions run before any application init:
 	// they only need the service registry, not a loaded configuration.
 	if serviceAction != "" && serviceAction != "run" {
