@@ -27,7 +27,8 @@ AinyRouter dev
 > 
 ```
 
-- **1** opens the management panel (`/management.html`) served by the router itself.
+- **1** opens the management dashboard — the router serves it directly at
+  `http://localhost:18400/` (root redirects to `/management.html`).
 - **2** hides this window to the system tray (Windows); restore or quit from the tray icon.
 - `q` shuts the server down cleanly.
 
