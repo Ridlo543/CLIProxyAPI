@@ -1,0 +1,72 @@
+# Ainyrouter fork CI: test & smoke coverage that upstream's build-only
+# pipeline does not provide. Kept as a separate workflow so pulling
+# upstream commits stays conflict-free.
+name: ainyrouter-tests
+
+on:
+  pull_request:
+  push:
+    branches: [feat/ainyrouter-control-plane]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests-linux:
+    # Race detection requires cgo, which is unavailable in the maintainer's
+    # local Windows environment; run it here instead.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test (race)
+        run: go test -race ./internal/... ./sdk/... -count=1
+      - name: Vet
+        run: go vet ./internal/... ./sdk/...
+
+  smoke-windows:
+    # Proves the shipped Windows binary boots and serves on a clean machine.
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: go build -o router-smoke.exe ./cmd/server
+      - name: Boot and probe
+        shell: pwsh
+        run: |
+          @'
+          host: "127.0.0.1"
+          port: 18401
+          auth-dir: "./smoke-auths"
+          api-keys:
+            - "smoke-test-key"
+          remote-management:
+            secret-key: "smoke-mgmt"
+            disable-control-panel: true
+          '@ | Set-Content -Path smoke-config.yaml
+          $p = Start-Process -FilePath .\router-smoke.exe -ArgumentList "--config","smoke-config.yaml" -PassThru -WindowStyle Hidden
+          try {
+            $up = $false
+            foreach ($i in 1..20) {
+              Start-Sleep -Seconds 1
+              if ($p.HasExited) { throw "router exited early with code $($p.ExitCode)" }
+              try {
+                $r = Invoke-WebRequest -Uri "http://127.0.0.1:18401/v1/models" -Headers @{ Authorization = "Bearer smoke-test-key" } -UseBasicParsing -TimeoutSec 3
+                if ($r.StatusCode -eq 200) { $up = $true; break }
+              } catch { }
+            }
+            if (-not $up) { throw "router did not serve /v1/models within 20s" }
+            Write-Output "windows smoke OK"
+          } finally {
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          }
