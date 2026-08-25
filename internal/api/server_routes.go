@@ -63,8 +63,8 @@ func (s *Server) setupRoutes() {
 	v1 := s.engine.Group("/v1")
 	v1.Use(AuthMiddleware(s.accessManager), APIKeyPolicyMiddleware())
 	{
-		v1.GET("/models", s.unifiedModelsHandler(openaiHandlers, claudeCodeHandlers))
-		v1.POST("/chat/completions", openaiHandlers.ChatCompletions)
+		v1.GET("/models", s.combosAugmentModels(s.unifiedModelsHandler(openaiHandlers, claudeCodeHandlers)))
+		v1.POST("/chat/completions", s.combosChatWrapper(openaiHandlers.ChatCompletions))
 		v1.POST("/completions", openaiHandlers.Completions)
 		v1.POST("/images/generations", openaiHandlers.ImagesGenerations)
 		v1.POST("/images/edits", openaiHandlers.ImagesEdits)
