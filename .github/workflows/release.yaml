@@ -95,6 +95,7 @@ jobs:
           fi
 
   build-hosted:
+    if: github.repository == 'router-for-me/CLIProxyAPI'
     name: build ${{ matrix.target }}
     needs: prepare-release
     runs-on: ${{ matrix.runner }}
@@ -236,6 +237,7 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" "$tmp_dir/checksums.txt" --clobber
 
   build-linux-glibc:
+    if: github.repository == 'router-for-me/CLIProxyAPI'
     name: build linux-${{ matrix.goarch }} glibc
     needs: prepare-release
     runs-on: ${{ matrix.runner }}
@@ -372,6 +374,7 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" "$tmp_dir/checksums.txt" --clobber
 
   build-linux-no-plugin:
+    if: github.repository == 'router-for-me/CLIProxyAPI'
     name: build linux-${{ matrix.goarch }} no-plugin
     needs: prepare-release
     runs-on: ubuntu-latest
@@ -491,6 +494,7 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" "$tmp_dir/checksums.txt" --clobber
 
   build-freebsd:
+    if: github.repository == 'router-for-me/CLIProxyAPI'
     name: build ${{ matrix.target }}
     needs: prepare-release
     runs-on: ubuntu-latest
@@ -645,8 +649,8 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" "$tmp_dir/checksums.txt" --clobber
 
   publish-checksums:
+    if: github.repository == 'router-for-me/CLIProxyAPI' && always()
     runs-on: ubuntu-latest
-    if: always()
     needs:
       - build-hosted
       - build-linux-glibc
