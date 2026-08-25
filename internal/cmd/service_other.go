@@ -15,6 +15,10 @@ import (
 // launchd) instead of a built-in service wrapper.
 var ErrWindowsServiceUnsupported = errors.New("-service is only available on Windows; on this platform use the native service manager (e.g. systemd unit or launchd plist)")
 
+// ErrNotUnderServiceControl mirrors the Windows sentinel so callers can use
+// errors.Is against it on every platform.
+var ErrNotUnderServiceControl = ErrWindowsServiceUnsupported
+
 // HandleWindowsService mirrors the Windows-only management entry point.
 func HandleWindowsService(action, configPath string) error {
 	return ErrWindowsServiceUnsupported
