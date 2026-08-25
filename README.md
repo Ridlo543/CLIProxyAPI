@@ -4,17 +4,41 @@ English | [中文](README_CN.md) | [日本語](README_JA.md)
 
 ## AinyRouter fork — run locally like 9Router
 
-This fork adds a desktop-style local experience:
+### Install (end users, Windows)
 
 ```powershell
-# one-time build (embeds the web panel into the exe)
-pwsh scripts/build-local.ps1            # -> ainyrouter.exe
-
-# everyday use: just run it
-.\ainyrouter.exe                        # starts the server + console menu
+irm https://raw.githubusercontent.com/Ridlo543/CLIProxyAPI/ainyrouter-control-plane/install.ps1 | iex
 ```
 
-The console menu:
+Then open a NEW terminal:
+
+```text
+ainyrouter        # server + console menu (Web UI / Hide to Tray / Exit)
+```
+
+The installer prints a fresh **management key**; the dashboard will ask for it
+once on first run. Everything lives under `%LOCALAPPDATA%\AinyRouter`.
+
+### Build from source
+
+```powershell
+pwsh scripts\build-local.ps1      # panel -> embed -> ainyrouter.exe
+pwsh scripts\install-user.ps1     # same install as above, from your build
+pwsh scripts\tray-e2e.ps1         # guided tray interaction test
+```
+
+Linux (systemd user service):
+
+```bash
+bash scripts/install-systemd.sh   # binary + config + panel + systemd unit
+systemctl --user status ainyrouter
+```
+
+Releases are cut by pushing an `ainyrouter-v*` tag (`ainyrouter-release`
+workflow): `ainyrouter-windows-amd64.zip`, `ainyrouter-linux-amd64.tar.gz`,
+and the one-line `install.ps1` are attached automatically.
+
+### The console menu
 
 ```
 AinyRouter dev
