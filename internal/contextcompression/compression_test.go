@@ -410,6 +410,9 @@ func TestTAREChecksumVersionAbortQueueAndCacheLimits(t *testing.T) {
 	}
 	t.Setenv("FAKE_TARE_MODE", "timeout")
 	cfg.TARE.ProcessTimeoutMS = 500
+	// Restore the tight queue budget: this case asserts the SECOND caller
+	// aborts with queue_timeout while the first still holds the single slot.
+	cfg.TARE.QueueTimeoutMS = 50
 	first := make(chan Stats, 1)
 	go func() { _, v := Apply(context.Background(), raw, cfg, false); first <- v }()
 	time.Sleep(30 * time.Millisecond)
