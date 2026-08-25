@@ -84,6 +84,7 @@ func main() {
 	var vertexImport string
 	var vertexImportPrefix string
 	var configPath string
+	var serviceAction string
 	var password string
 	var homeJWT string
 	var homeDisableClusterDiscovery bool
@@ -101,6 +102,7 @@ func main() {
 	flag.BoolVar(&kimiLogin, "kimi-login", false, "Login to Kimi using OAuth")
 	flag.BoolVar(&xaiLogin, "xai-login", false, "Login to xAI using OAuth")
 	flag.StringVar(&configPath, "config", DefaultConfigPath, "Configure File Path")
+	flag.StringVar(&serviceAction, "service", "", "Windows service management: install|remove|start|stop|status|run")
 	flag.StringVar(&vertexImport, "vertex-import", "", "Import Vertex service account key JSON file")
 	flag.StringVar(&vertexImportPrefix, "vertex-import-prefix", "", "Prefix for Vertex model namespacing (use with -vertex-import)")
 	flag.StringVar(&password, "password", "", "")
@@ -145,6 +147,20 @@ func main() {
 
 	// Parse the command-line flags.
 	flag.Parse()
+
+	// Windows service management actions run before any application init:
+	// they only need the service registry, not a loaded configuration.
+	if serviceAction != "" && serviceAction != "run" {
+		if errService := cmd.HandleWindowsService(serviceAction, configPath); errService != nil {
+			fmt.Fprintf(os.Stderr, "service error: %v\n", errService)
+			os.Exit(1)
+		}
+		return
+	}
+	if serviceAction == "run" && !cmd.IsWindowsServiceRun() {
+		fmt.Fprintf(os.Stderr, "service error: %v\n", cmd.ErrNotUnderServiceControl)
+		os.Exit(1)
+	}
 
 	// Core application variables.
 	var err error
@@ -752,6 +768,13 @@ func main() {
 			managementasset.StartAutoUpdater(context.Background(), configFilePath)
 			misc.StartAntigravityVersionUpdater(context.Background())
 			startModelCatalogUpdaters(localModel, cfg.Home.Enabled)
+			if serviceAction == "run" {
+				if errService := cmd.RunWindowsService(cfg, configFilePath, password, pluginHost, serverOptions...); errService != nil {
+					log.Errorf("windows service run failed: %v", errService)
+					os.Exit(1)
+				}
+				return
+			}
 			cmd.StartServiceWithPluginHost(cfg, configFilePath, password, pluginHost, serverOptions...)
 		}
 	}
