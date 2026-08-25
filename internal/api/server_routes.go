@@ -128,8 +128,24 @@ func (s *Server) setupRoutes() {
 		v1beta.GET("/models/*action", s.geminiGetHandler(geminiHandlers))
 	}
 
-	// Root endpoint
+	// Root endpoint: open the management dashboard directly (9Router-style).
+	// When the control panel is unavailable (headless/docker builds without
+	// the asset), fall back to the legacy API summary, also kept at /api-info.
 	s.engine.GET("/", func(c *gin.Context) {
+		if _, ok := s.managementPanelFile(); ok {
+			c.Redirect(http.StatusFound, "/management.html")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message": "CLI Proxy API Server",
+			"endpoints": []string{
+				"POST /v1/chat/completions",
+				"POST /v1/completions",
+				"GET /v1/models",
+			},
+		})
+	})
+	s.engine.GET("/api-info", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "CLI Proxy API Server",
 			"endpoints": []string{

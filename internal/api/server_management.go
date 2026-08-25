@@ -303,6 +303,23 @@ func (s *Server) pluginResourceNoRoute(c *gin.Context) {
 	c.AbortWithStatus(http.StatusNotFound)
 }
 
+// managementPanelFile returns the on-disk management.html path when the
+// control panel is enabled and its asset exists.
+func (s *Server) managementPanelFile() (string, bool) {
+	cfg := s.cfg
+	if cfg == nil || cfg.Home.Enabled || cfg.RemoteManagement.DisableControlPanel {
+		return "", false
+	}
+	panelPath := managementasset.FilePath(s.configFilePath)
+	if panelPath == "" {
+		return "", false
+	}
+	if _, err := os.Stat(panelPath); err != nil {
+		return "", false
+	}
+	return panelPath, true
+}
+
 func (s *Server) serveManagementControlPanel(c *gin.Context) {
 	cfg := s.cfg
 	if cfg == nil || cfg.Home.Enabled || cfg.RemoteManagement.DisableControlPanel {
