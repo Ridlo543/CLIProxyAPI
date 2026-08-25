@@ -1,7 +1,7 @@
 package panelasset
 
 import (
-	"errors"
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,12 +29,19 @@ func TestInstallFromRejectsEmptyStaticDir(t *testing.T) {
 	}
 }
 
-func TestPlaceholderIsNotMarkedAsEmbedded(t *testing.T) {
-	if Available() {
-		t.Fatal("committed placeholder must not carry the embedded marker")
+func TestEmbeddedPanelShipsWithMarker(t *testing.T) {
+	// scripts/build-local.ps1 vendors the built panel into the repo, so repo
+	// builds must always carry the marker-stamped asset.
+	if !Available() {
+		t.Fatal("embedded panel is missing the marker; run scripts/build-local.ps1")
 	}
-	_, err := Install(t.TempDir())
-	if !errors.Is(err, ErrNotEmbedded) {
-		t.Fatalf("Install with placeholder = %v, want ErrNotEmbedded", err)
+	dir := t.TempDir()
+	path, err := Install(dir)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	data, errRead := os.ReadFile(path)
+	if errRead != nil || !bytes.Contains(data, []byte(embeddedMarker)) {
+		t.Fatalf("installed panel missing marker")
 	}
 }
