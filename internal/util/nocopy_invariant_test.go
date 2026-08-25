@@ -107,8 +107,8 @@ var reviewedInPlaceByteWrites = map[string]reviewedInPlaceByteWrite{
 	"internal/runtime/executor/helps/claude_mcp_alias.go":   {1, "copies an HMAC sum into a local fixed-size digest array"},
 	"internal/client/codex/live/tcp_proxy.go":               {1, "copies header and payload into a freshly allocated frame"},
 	"internal/contextcompression/tare.go":                   {1, "LRU move-to-back shifts engine-owned cacheEntry structs under e.mu; values are compressed-output copies that never back a GJSON view"},
-	// Stale entries removed 2026-08-25: home/client.go and pluginstore/auth.go
-	// no longer contain in-place byte writes.
+	"internal/home/client.go":                               {1, "zeroes a secret buffer after json.Unmarshal has copied every value out"},
+	"internal/pluginstore/auth.go":                          {1, "zeroes a locally built credential buffer after base64 encoding copied it out"},
 }
 
 // TestInPlaceByteWritesAreReviewed keeps the set of in-place byte writes small
@@ -119,7 +119,7 @@ func TestInPlaceByteWritesAreReviewed(t *testing.T) {
 	root := repoRoot(t)
 	found := make(map[string][]string)
 	forEachSourceFile(t, root, func(rel string, data []byte) {
-		for _, line := range strings.Split(string(data), "\n") {
+		for _, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
 			for _, pattern := range inPlaceByteWritePatterns {
 				if pattern.MatchString(line) {
 					found[rel] = append(found[rel], strings.TrimSpace(line))
