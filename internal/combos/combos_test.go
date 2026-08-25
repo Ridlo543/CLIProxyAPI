@@ -1,6 +1,7 @@
 package combos
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
@@ -12,6 +13,24 @@ func combo(name string, strategy config.ComboStrategy, members ...[2]string) con
 		c.Models = append(c.Models, config.ComboModelRef{Provider: m[0], Model: m[1]})
 	}
 	return c
+}
+
+func TestOrderRoundRobinConcurrentAddsAreRaceFree(t *testing.T) {
+	SyncFromConfig(&config.Config{Combos: []config.ComboConfig{}})
+	c := combo("rrc", config.ComboStrategyRoundRobin,
+		[2]string{"a", "m1"}, [2]string{"b", "m2"}, [2]string{"c", "m3"})
+	var wg sync.WaitGroup
+	for i := 0; i < 120; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got := Order(c)
+			if len(got) != 3 {
+				t.Errorf("membership changed: %d", len(got))
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func TestOrderFallbackKeepsListedOrder(t *testing.T) {

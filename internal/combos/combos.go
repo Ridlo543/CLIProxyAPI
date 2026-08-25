@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 )
@@ -18,7 +19,7 @@ var (
 	mu       sync.RWMutex
 	snapshot []config.ComboConfig
 	// rrIndex tracks per-combo rotation state for round-robin strategy.
-	rrIndex sync.Map // combo name(lowercased) -> *uint64
+	rrIndex sync.Map // combo name(lowercased) -> *atomic.Uint64
 )
 
 // SyncFromConfig replaces the in-memory snapshot. Called by
@@ -75,10 +76,8 @@ func Order(c config.ComboConfig) []config.ComboModelRef {
 		return members
 	}
 	key := strings.ToLower(c.Name)
-	rawIdx, _ := rrIndex.LoadOrStore(key, new(uint64))
-	idxPtr := rawIdx.(*uint64)
-	head := int((*idxPtr) % uint64(len(members)))
-	*idxPtr++
+	rawIdx, _ := rrIndex.LoadOrStore(key, new(atomic.Uint64))
+	head := int(rawIdx.(*atomic.Uint64).Add(1)-1) % len(members)
 	return append(append([]config.ComboModelRef(nil), members[head:]...), members[:head]...)
 }
 
