@@ -53,6 +53,10 @@ func (s *Server) setupRoutes() {
 	s.engine.HEAD("/healthz", healthzHandler)
 
 	s.engine.GET("/management.html", s.serveManagementControlPanel)
+	// Assets referenced by the embedded single-file panel. Only these explicit
+	// paths are exposed; arbitrary files in the config/static dir stay private.
+	s.engine.GET("/favicon.svg", s.serveManagementAsset("favicon.svg"))
+	s.engine.GET("/providers/*path", s.serveManagementProviderAsset)
 	openaiHandlers := openai.NewOpenAIAPIHandler(s.handlers)
 	geminiHandlers := gemini.NewGeminiAPIHandler(s.handlers)
 	claudeCodeHandlers := claude.NewClaudeCodeAPIHandler(s.handlers)
