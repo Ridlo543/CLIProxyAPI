@@ -200,7 +200,6 @@ func (h *Host) ApplyConfig(ctx context.Context, cfg *config.Config) {
 	// Combos: keep the runtime snapshot in sync at boot and on every save.
 	combos.SyncFromConfig(cfg)
 	defer h.unlockApply()
-	defer h.unlockApply()
 	if ctx == nil {
 		ctx = context.Background()
 	}
