@@ -1,4 +1,9 @@
 # AinyRouter release: tagged builds with the embedded control panel.
+#
+# The single-file panel is vendored into internal/panelasset/panel (refresh it
+# with scripts/build-local.ps1 before tagging), so no cross-repo checkout is
+# needed here.
+#
 # Produces:
 #   ainyrouter-windows-amd64.zip
 #   ainyrouter-linux-amd64.tar.gz
@@ -13,31 +18,7 @@ permissions:
   contents: write
 
 jobs:
-  panel:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: Ridlo543/ainyrouter
-          ref: feat/ainyrouter-control-plane
-          path: ainyrouter
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: ainyrouter/apps/control-panel/package-lock.json
-      - run: npm ci
-        working-directory: ainyrouter/apps/control-panel
-      - run: npm run build:management
-        working-directory: ainyrouter/apps/control-panel
-      - uses: actions/upload-artifact@v4
-        with:
-          name: management-panel
-          path: ainyrouter/apps/control-panel/dist-management
-          if-no-files-found: error
-
   build:
-    needs: panel
     strategy:
       matrix:
         include:
@@ -56,20 +37,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/download-artifact@v4
-        with:
-          name: management-panel
-          path: panel-dist
-      - name: Inject panel asset
-        shell: pwsh
-        run: |
-          $target = "internal/panelasset/panel"
-          Remove-Item $target -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path $target | Out-Null
-          Copy-Item "panel-dist/*" $target -Recurse -Force
-          Move-Item "$target/index.html" "$target/management.html" -Force
-          $html = Get-Content "$target/management.html" -Raw
-          "<!-- ainyrouter-panel-embedded -->`n$html" | Set-Content "$target/management.html" -NoNewline
       - name: Build
         shell: pwsh
         run: |
@@ -77,10 +44,8 @@ jobs:
           $env:GOOS='${{ matrix.goos }}'; $env:GOARCH='${{ matrix.goarch }}'; $env:CGO_ENABLED='0'
           go build -ldflags "-s -w -X main.Version=${{ github.ref_name }} -X main.Commit=${{ github.sha }}" -o "dist/ainyrouter$ext" ./cmd/server
           Copy-Item README.md dist/
-          Copy-Item config.example.yaml dist/
           New-Item -ItemType Directory -Force -Path dist/scripts | Out-Null
           Copy-Item scripts/install-user.ps1 dist/scripts/ -ErrorAction SilentlyContinue
-          Copy-Item scripts/install-systemd.sh dist/scripts/ -ErrorAction SilentlyContinue
       - name: Package
         shell: pwsh
         run: |
