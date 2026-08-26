@@ -18,6 +18,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/proxyutil"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/sjson"
+	"golang.org/x/net/proxy"
 )
 
 const (
@@ -27,16 +28,13 @@ const (
 )
 
 func (e *CodexWebsocketsExecutor) dialCodexWebsocket(ctx context.Context, auth *cliproxyauth.Auth, wsURL string, headers http.Header) (*websocket.Conn, *websocketConnectionCloser, *http.Response, error) {
-	dialer, selectedAttempt := newProxyAwareWebsocketDialer(ctx, e.cfg, auth)
+	dialer := newProxyAwareWebsocketDialer(e.cfg, auth)
 	dialer.HandshakeTimeout = codexResponsesWebsocketHandshakeTO
 	dialer.EnableCompression = true
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	conn, resp, err := dialer.DialContext(ctx, wsURL, headers)
-	if err != nil && selectedAttempt != nil {
-		selectedAttempt.ReportProxyTransportFailure()
-	}
 	closer := newWebsocketConnectionCloser(conn)
 	if conn != nil {
 		// Avoid gorilla/websocket flate tail validation issues on some upstreams/Go versions.
@@ -156,12 +154,7 @@ func readCodexWebsocketMessage(ctx context.Context, sess *codexWebsocketSession,
 	}
 }
 
-type selectedWebsocketProxyAttempt interface {
-	ProxyWebsocketDialConfig() (proxyutil.WebsocketDialConfig, error)
-	ReportProxyTransportFailure()
-}
-
-func newProxyAwareWebsocketDialer(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth) (*websocket.Dialer, selectedWebsocketProxyAttempt) {
+func newProxyAwareWebsocketDialer(cfg *config.Config, auth *cliproxyauth.Auth) *websocket.Dialer {
 	dialer := &websocket.Dialer{
 		Proxy:             http.ProxyFromEnvironment,
 		HandshakeTimeout:  codexResponsesWebsocketHandshakeTO,
@@ -170,17 +163,6 @@ func newProxyAwareWebsocketDialer(ctx context.Context, cfg *config.Config, auth 
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
-	}
-	if auth == nil || strings.TrimSpace(auth.ProxyURL) == "" {
-		if rt, ok := ctx.Value("cliproxy.roundtripper").(selectedWebsocketProxyAttempt); ok && rt != nil {
-			selected, errSelected := rt.ProxyWebsocketDialConfig()
-			if errSelected != nil {
-				dialer.Proxy = func(*http.Request) (*url.URL, error) { return nil, errors.New("selected proxy attempt unavailable") }
-				return dialer, rt
-			}
-			applyWebsocketDialConfig(dialer, selected)
-			return dialer, rt
-		}
 	}
 
 	proxyURL := ""
@@ -191,52 +173,48 @@ func newProxyAwareWebsocketDialer(ctx context.Context, cfg *config.Config, auth 
 		proxyURL = strings.TrimSpace(cfg.ProxyURL)
 	}
 	if proxyURL == "" {
-		return dialer, nil
+		return dialer
 	}
 
 	setting, errParse := proxyutil.Parse(proxyURL)
 	if errParse != nil {
 		log.Errorf("codex websockets executor: %v", errParse)
-		return dialer, nil
+		return dialer
 	}
 
 	switch setting.Mode {
 	case proxyutil.ModeDirect:
 		dialer.Proxy = nil
-		return dialer, nil
+		return dialer
 	case proxyutil.ModeProxy:
 	default:
-		return dialer, nil
+		return dialer
 	}
 
 	switch setting.URL.Scheme {
 	case "socks5", "socks5h":
-		selected, errSelected := proxyutil.BuildWebsocketDialConfig(proxyURL)
-		if errSelected != nil {
-			return dialer, nil
+		var proxyAuth *proxy.Auth
+		if setting.URL.User != nil {
+			username := setting.URL.User.Username()
+			password, _ := setting.URL.User.Password()
+			proxyAuth = &proxy.Auth{User: username, Password: password}
 		}
-		applyWebsocketDialConfig(dialer, selected)
+		socksDialer, errSOCKS5 := proxy.SOCKS5("tcp", setting.URL.Host, proxyAuth, proxy.Direct)
+		if errSOCKS5 != nil {
+			log.Errorf("codex websockets executor: create SOCKS5 dialer failed: %v", errSOCKS5)
+			return dialer
+		}
+		dialer.Proxy = nil
+		dialer.NetDialContext = func(_ context.Context, network, addr string) (net.Conn, error) {
+			return socksDialer.Dial(network, addr)
+		}
 	case "http", "https":
 		dialer.Proxy = http.ProxyURL(setting.URL)
 	default:
 		log.Errorf("codex websockets executor: unsupported proxy scheme: %s", setting.URL.Scheme)
 	}
 
-	return dialer, nil
-}
-
-func applyWebsocketDialConfig(dialer *websocket.Dialer, selected proxyutil.WebsocketDialConfig) {
-	if selected.Direct {
-		dialer.Proxy = nil
-		return
-	}
-	if selected.Proxy != nil {
-		dialer.Proxy = selected.Proxy
-	}
-	if selected.NetDialContext != nil {
-		dialer.Proxy = nil
-		dialer.NetDialContext = selected.NetDialContext
-	}
+	return dialer
 }
 
 func buildCodexResponsesWebsocketURL(httpURL string) (string, error) {

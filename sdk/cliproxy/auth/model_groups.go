@@ -74,7 +74,7 @@ func (m *Manager) ExecuteStreamModelGroup(ctx context.Context, targets []ModelGr
 		}
 		memberReq := req
 		memberReq.Model = target.Model
-		result, err := m.executeStream(ctx, []string{target.Provider}, memberReq, opts, false)
+		result, err := m.ExecuteStream(ctx, []string{target.Provider}, memberReq, opts)
 		if err == nil {
 			return result, nil
 		}

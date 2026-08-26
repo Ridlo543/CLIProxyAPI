@@ -47,7 +47,6 @@ type homeUnauthorizedRefreshExecutor struct {
 	countCalls      atomic.Int32
 	streamCalls     atomic.Int32
 	refreshCalls    atomic.Int32
-	responseModel   string
 }
 
 func (*homeUnauthorizedRefreshExecutor) Identifier() string { return homeUnauthorizedRefreshProvider }
@@ -61,9 +60,6 @@ func (e *homeUnauthorizedRefreshExecutor) Execute(_ context.Context, auth *Auth,
 	}
 	if authAccessToken(auth) == "stale-access-token" {
 		return cliproxyexecutor.Response{}, &Error{HTTPStatus: http.StatusUnauthorized, Message: "expired access token"}
-	}
-	if e.responseModel != "" {
-		return cliproxyexecutor.Response{Payload: []byte(`{"model":"` + e.responseModel + `"}`)}, nil
 	}
 	return cliproxyexecutor.Response{Payload: []byte("ok")}, nil
 }
@@ -88,11 +84,7 @@ func (e *homeUnauthorizedRefreshExecutor) ExecuteStream(_ context.Context, auth 
 		}
 	}
 	chunks := make(chan cliproxyexecutor.StreamChunk, 1)
-	payload := []byte("ok")
-	if e.responseModel != "" {
-		payload = []byte(`{"model":"` + e.responseModel + `"}`)
-	}
-	chunks <- cliproxyexecutor.StreamChunk{Payload: payload}
+	chunks <- cliproxyexecutor.StreamChunk{Payload: []byte("ok")}
 	close(chunks)
 	return &cliproxyexecutor.StreamResult{Chunks: chunks}, nil
 }
@@ -172,48 +164,6 @@ func TestHomeUnauthorizedRefreshesSameSelectionBeforeRedispatch(t *testing.T) {
 			}
 			if test.name == "count_tokens" && executor.countCalls.Load() != 2 {
 				t.Fatalf("count calls = %d, want 2", executor.countCalls.Load())
-			}
-		})
-	}
-}
-
-func TestHomeUnauthorizedRefreshPreservesClientResponseAlias(t *testing.T) {
-	for _, stream := range []bool{false, true} {
-		name := "normal"
-		if stream {
-			name = "stream"
-		}
-		t.Run(name, func(t *testing.T) {
-			dispatcher := &homeUnauthorizedRefreshDispatcher{}
-			executor := &homeUnauthorizedRefreshExecutor{responseModel: "upstream-model"}
-			manager := newHomeUnauthorizedRefreshManager(dispatcher, executor)
-			manager.SetOAuthModelAlias(map[string][]internalconfig.OAuthModelAlias{homeUnauthorizedRefreshProvider: {{
-				Name: "upstream-model", Alias: "config-alias", ForceMapping: true,
-			}}})
-			request := cliproxyexecutor.Request{Model: "config-alias"}
-			opts := cliproxyexecutor.Options{Metadata: map[string]any{cliproxyexecutor.RequestedModelMetadataKey: "client-facing-alias"}}
-			var payload []byte
-			if stream {
-				result, err := manager.ExecuteStream(context.Background(), []string{homeUnauthorizedRefreshProvider}, request, opts)
-				if err != nil {
-					t.Fatalf("ExecuteStream() error = %v", err)
-				}
-				for chunk := range result.Chunks {
-					payload = append(payload, chunk.Payload...)
-				}
-			} else {
-				response, err := manager.Execute(context.Background(), []string{homeUnauthorizedRefreshProvider}, request, opts)
-				if err != nil {
-					t.Fatalf("Execute() error = %v", err)
-				}
-				payload = response.Payload
-			}
-			var body map[string]any
-			if err := json.Unmarshal(payload, &body); err != nil {
-				t.Fatalf("response JSON = %q: %v", payload, err)
-			}
-			if body["model"] != "client-facing-alias" {
-				t.Fatalf("response model = %#v, want client-facing-alias", body["model"])
 			}
 		})
 	}

@@ -1850,8 +1850,7 @@ func contextWithGinHeaders(headers map[string]string) context.Context {
 func TestNewProxyAwareWebsocketDialerDirectDisablesProxy(t *testing.T) {
 	t.Parallel()
 
-	dialer, _ := newProxyAwareWebsocketDialer(
-		context.Background(),
+	dialer := newProxyAwareWebsocketDialer(
 		&config.Config{SDKConfig: sdkconfig.SDKConfig{ProxyURL: "http://global-proxy.example.com:8080"}},
 		&cliproxyauth.Auth{ProxyURL: "direct"},
 	)
