@@ -122,7 +122,11 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 			Data   []map[string]any `json:"data"`
 		}
 		if err := json.Unmarshal(grw.Body.Bytes(), &parsed); err != nil || (parsed.Object != "list" && parsed.Data == nil) {
-			c.Writer.WriteHeader(grw.heldCode)
+			code := grw.heldCode
+			if code <= 0 {
+				code = http.StatusOK
+			}
+			c.Writer.WriteHeader(code)
 			_, _ = c.Writer.Write(grw.Body.Bytes())
 			return
 		}

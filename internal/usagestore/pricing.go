@@ -89,10 +89,20 @@ var modelPricing = map[string]ModelRates{
 	"gpt-5.2-codex":              {Input: 1.75, Output: 14, Cached: 0.175, Reasoning: 14, CacheCreation: 1.75},
 	"gpt-5.3-codex":              {Input: 1.75, Output: 14, Cached: 0.175, Reasoning: 14, CacheCreation: 1.75},
 	"gpt-5.3-codex-spark":        {Input: 3, Output: 12, Cached: 0.3, Reasoning: 12, CacheCreation: 3},
+	"gpt-5.3-codex-spark-review": {Input: 3, Output: 12, Cached: 0.3, Reasoning: 12, CacheCreation: 3},
+	"gpt-5.4":                    {Input: 1.5, Output: 9, Cached: 0.15, Reasoning: 9, CacheCreation: 1.5},
+	"gpt-5.4-review":             {Input: 1.5, Output: 9, Cached: 0.15, Reasoning: 9, CacheCreation: 1.5},
+	"gpt-5.4-mini":               {Input: 0.5, Output: 3, Cached: 0.05, Reasoning: 3, CacheCreation: 0.5},
+	"gpt-5.4-mini-review":        {Input: 0.5, Output: 3, Cached: 0.05, Reasoning: 3, CacheCreation: 0.5},
+	"gpt-5.5":                    {Input: 2, Output: 12, Cached: 0.2, Reasoning: 12, CacheCreation: 2},
+	"gpt-5.5-review":             {Input: 2, Output: 12, Cached: 0.2, Reasoning: 12, CacheCreation: 2},
 	"gpt-5.6":                    {Input: 2.5, Output: 15, Cached: 0.25, Reasoning: 15, CacheCreation: 2.5},
 	"gpt-5.6-luna":               {Input: 1, Output: 6, Cached: 0.1, Reasoning: 6, CacheCreation: 1},
+	"gpt-5.6-luna-review":        {Input: 1, Output: 6, Cached: 0.1, Reasoning: 6, CacheCreation: 1},
 	"gpt-5.6-sol":                {Input: 5, Output: 30, Cached: 0.5, Reasoning: 30, CacheCreation: 5},
+	"gpt-5.6-sol-review":         {Input: 5, Output: 30, Cached: 0.5, Reasoning: 30, CacheCreation: 5},
 	"gpt-5.6-terra":              {Input: 2.5, Output: 15, Cached: 0.25, Reasoning: 15, CacheCreation: 2.5},
+	"gpt-5.6-terra-review":       {Input: 2.5, Output: 15, Cached: 0.25, Reasoning: 15, CacheCreation: 2.5},
 	"gpt-oss-120b-medium":        {Input: 0.5, Output: 2, Cached: 0.25, Reasoning: 3, CacheCreation: 0.5},
 	"grok-code-fast-1":           {Input: 0.5, Output: 2, Cached: 0.25, Reasoning: 3, CacheCreation: 0.5},
 	"k3":                         {Input: 3, Output: 15, Cached: 0.3, Reasoning: 15, CacheCreation: 3},
@@ -195,7 +205,7 @@ func lookupRates(model string) (ModelRates, bool) {
 	bestLen := 0
 	var best ModelRates
 	for candidate, r := range modelPricing {
-		if len(candidate) > bestLen && strings.HasPrefix(name, candidate+"/") || strings.HasPrefix(name, candidate) {
+		if len(candidate) > bestLen && (strings.HasPrefix(name, candidate+"/") || strings.HasPrefix(name, candidate)) {
 			// Prefix matches must respect token boundaries to avoid
 			// "gemini-2" matching "gemini-2.5-pro".
 			next := len(candidate)

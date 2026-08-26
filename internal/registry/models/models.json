@@ -2411,6 +2411,518 @@
       "supportedOutputModalities": [
         "text"
       ]
+    },
+    {
+      "id": "gpt-5.6-sol-review",
+      "object": "model",
+      "created": 1773705600,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Sol Review",
+      "version": "gpt-5.4-mini",
+      "description": "GPT 5.6 Sol Review",
+      "context_length": 400000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-sol-review"
+    },
+    {
+      "id": "gpt-5.6-terra-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Terra Review",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Terra Review",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-terra-review"
+    },
+    {
+      "id": "gpt-5.6-luna-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Luna Review",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Luna Review",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "config": {
+        "override_header": {
+          "user-agent": "codex-tui/0.144.0 (Mac OS 26.5.1; arm64) iTerm.app/3.6.11 (codex-tui; 0.144.0)",
+          "originator": "codex-tui"
+        }
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-luna-review"
+    },
+    {
+      "id": "gpt-5.5-review",
+      "object": "model",
+      "created": 1776902400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.5 Review",
+      "version": "gpt-5.5",
+      "description": "GPT 5.5 Review",
+      "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.5-review"
+    },
+    {
+      "id": "gpt-5.4-review",
+      "object": "model",
+      "created": 1773705600,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.4 Review",
+      "version": "gpt-5.4-mini",
+      "description": "GPT 5.4 Review",
+      "context_length": 400000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.4-review"
+    },
+    {
+      "id": "gpt-5.4-mini-review",
+      "object": "model",
+      "created": 1773705600,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.4 Mini Review",
+      "version": "gpt-5.4-mini",
+      "description": "GPT 5.4 Mini Review",
+      "context_length": 400000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.4-mini-review"
+    },
+    {
+      "id": "gpt-5.3-codex-spark-review",
+      "object": "model",
+      "created": 1773705600,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.3 Codex Spark Review",
+      "version": "gpt-5.4-mini",
+      "description": "GPT 5.3 Codex Spark Review",
+      "context_length": 400000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.3-codex-spark-review"
+    },
+    {
+      "id": "gpt-5.6-sol-image",
+      "object": "model",
+      "created": 1773705600,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Sol Image",
+      "version": "gpt-5.4-mini",
+      "description": "GPT 5.6 Sol Image",
+      "context_length": 400000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-sol-image"
+    },
+    {
+      "id": "gpt-5.6-terra-image",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Terra Image",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Terra Image",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-terra-image"
+    },
+    {
+      "id": "gpt-5.6-luna-image",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Luna Image",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Luna Image",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "config": {
+        "override_header": {
+          "user-agent": "codex-tui/0.144.0 (Mac OS 26.5.1; arm64) iTerm.app/3.6.11 (codex-tui; 0.144.0)",
+          "originator": "codex-tui"
+        }
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-luna-image"
+    },
+    {
+      "id": "gpt-5.6-image",
+      "object": "model",
+      "created": 1773705600,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Image",
+      "version": "gpt-5.4-mini",
+      "description": "GPT 5.6 Image",
+      "context_length": 400000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-image"
+    },
+    {
+      "id": "gpt-5.5-image",
+      "object": "model",
+      "created": 1776902400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.5 Image",
+      "version": "gpt-5.5",
+      "description": "GPT 5.5 Image",
+      "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.5-image"
+    },
+    {
+      "id": "gpt-5.4-image",
+      "object": "model",
+      "created": 1773705600,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.4 Image",
+      "version": "gpt-5.4-mini",
+      "description": "GPT 5.4 Image",
+      "context_length": 400000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.4-image"
+    },
+    {
+      "id": "gpt-5.3-image",
+      "object": "model",
+      "created": 1773705600,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.3 Image",
+      "version": "gpt-5.4-mini",
+      "description": "GPT 5.3 Image",
+      "context_length": 400000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.3-image"
+    },
+    {
+      "id": "gpt-image-1.5",
+      "object": "model",
+      "created": 1773705600,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT Image 1.5",
+      "version": "gpt-5.4-mini",
+      "description": "GPT Image 1.5",
+      "context_length": 400000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-image-1.5"
+    },
+    {
+      "id": "gpt-image-2",
+      "object": "model",
+      "created": 1776902400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT Image 2",
+      "version": "gpt-5.5",
+      "description": "GPT Image 2",
+      "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-image-2"
     }
   ],
   "codex-team": [
@@ -2632,6 +3144,523 @@
       "supportedOutputModalities": [
         "text"
       ]
+    },
+    {
+      "id": "gpt-5.6-sol-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Sol Review",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Sol Review",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-sol-review"
+    },
+    {
+      "id": "gpt-5.6-terra-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Terra Review",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Terra Review",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-terra-review"
+    },
+    {
+      "id": "gpt-5.6-luna-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Luna Review",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Luna Review",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "config": {
+        "override_header": {
+          "user-agent": "codex-tui/0.144.0 (Mac OS 26.5.1; arm64) iTerm.app/3.6.11 (codex-tui; 0.144.0)",
+          "originator": "codex-tui"
+        }
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-luna-review"
+    },
+    {
+      "id": "gpt-5.5-review",
+      "object": "model",
+      "created": 1776902400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.5 Review",
+      "version": "gpt-5.5",
+      "description": "GPT 5.5 Review",
+      "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.5-review"
+    },
+    {
+      "id": "gpt-5.4-review",
+      "object": "model",
+      "created": 1772668800,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.4 Review",
+      "version": "gpt-5.4",
+      "description": "GPT 5.4 Review",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.4-review"
+    },
+    {
+      "id": "gpt-5.4-mini-review",
+      "object": "model",
+      "created": 1773705600,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.4 Mini Review",
+      "version": "gpt-5.4-mini",
+      "description": "GPT 5.4 Mini Review",
+      "context_length": 400000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.4-mini-review"
+    },
+    {
+      "id": "gpt-5.3-codex-spark-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.3 Codex Spark Review",
+      "version": "gpt-5.6",
+      "description": "GPT 5.3 Codex Spark Review",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.3-codex-spark-review"
+    },
+    {
+      "id": "gpt-5.6-sol-image",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Sol Image",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Sol Image",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-sol-image"
+    },
+    {
+      "id": "gpt-5.6-terra-image",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Terra Image",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Terra Image",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-terra-image"
+    },
+    {
+      "id": "gpt-5.6-luna-image",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Luna Image",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Luna Image",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "config": {
+        "override_header": {
+          "user-agent": "codex-tui/0.144.0 (Mac OS 26.5.1; arm64) iTerm.app/3.6.11 (codex-tui; 0.144.0)",
+          "originator": "codex-tui"
+        }
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-luna-image"
+    },
+    {
+      "id": "gpt-5.6-image",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Image",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Image",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-image"
+    },
+    {
+      "id": "gpt-5.5-image",
+      "object": "model",
+      "created": 1776902400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.5 Image",
+      "version": "gpt-5.5",
+      "description": "GPT 5.5 Image",
+      "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.5-image"
+    },
+    {
+      "id": "gpt-5.4-image",
+      "object": "model",
+      "created": 1772668800,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.4 Image",
+      "version": "gpt-5.4",
+      "description": "GPT 5.4 Image",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.4-image"
+    },
+    {
+      "id": "gpt-5.3-image",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.3 Image",
+      "version": "gpt-5.6",
+      "description": "GPT 5.3 Image",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.3-image"
+    },
+    {
+      "id": "gpt-image-1.5",
+      "object": "model",
+      "created": 1772668800,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT Image 1.5",
+      "version": "gpt-5.4",
+      "description": "GPT Image 1.5",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-image-1.5"
+    },
+    {
+      "id": "gpt-image-2",
+      "object": "model",
+      "created": 1776902400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT Image 2",
+      "version": "gpt-5.5",
+      "description": "GPT Image 2",
+      "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-image-2"
     }
   ],
   "codex-plus": [
@@ -2882,6 +3911,519 @@
       "supportedOutputModalities": [
         "text"
       ]
+    },
+    {
+      "id": "gpt-5.6-sol-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Sol Review",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Sol Review",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-sol-review"
+    },
+    {
+      "id": "gpt-5.6-terra-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Terra Review",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Terra Review",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-terra-review"
+    },
+    {
+      "id": "gpt-5.6-luna-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Luna Review",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Luna Review",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "config": {
+        "override_header": {
+          "user-agent": "codex-tui/0.144.0 (Mac OS 26.5.1; arm64) iTerm.app/3.6.11 (codex-tui; 0.144.0)",
+          "originator": "codex-tui"
+        }
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-luna-review"
+    },
+    {
+      "id": "gpt-5.5-review",
+      "object": "model",
+      "created": 1776902400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.5 Review",
+      "version": "gpt-5.5",
+      "description": "GPT 5.5 Review",
+      "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.5-review"
+    },
+    {
+      "id": "gpt-5.4-review",
+      "object": "model",
+      "created": 1772668800,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.4 Review",
+      "version": "gpt-5.4",
+      "description": "GPT 5.4 Review",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.4-review"
+    },
+    {
+      "id": "gpt-5.4-mini-review",
+      "object": "model",
+      "created": 1773705600,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.4 Mini Review",
+      "version": "gpt-5.4-mini",
+      "description": "GPT 5.4 Mini Review",
+      "context_length": 400000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.4-mini-review"
+    },
+    {
+      "id": "gpt-5.3-codex-spark-review",
+      "object": "model",
+      "created": 1770912000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.3 Codex Spark Review",
+      "version": "gpt-5.3",
+      "description": "GPT 5.3 Codex Spark Review",
+      "context_length": 128000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.3-codex-spark-review"
+    },
+    {
+      "id": "gpt-5.6-sol-image",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Sol Image",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Sol Image",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-sol-image"
+    },
+    {
+      "id": "gpt-5.6-terra-image",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Terra Image",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Terra Image",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-terra-image"
+    },
+    {
+      "id": "gpt-5.6-luna-image",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Luna Image",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Luna Image",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "config": {
+        "override_header": {
+          "user-agent": "codex-tui/0.144.0 (Mac OS 26.5.1; arm64) iTerm.app/3.6.11 (codex-tui; 0.144.0)",
+          "originator": "codex-tui"
+        }
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-luna-image"
+    },
+    {
+      "id": "gpt-5.6-image",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Image",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Image",
+      "context_length": 372000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-image"
+    },
+    {
+      "id": "gpt-5.5-image",
+      "object": "model",
+      "created": 1776902400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.5 Image",
+      "version": "gpt-5.5",
+      "description": "GPT 5.5 Image",
+      "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.5-image"
+    },
+    {
+      "id": "gpt-5.4-image",
+      "object": "model",
+      "created": 1772668800,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.4 Image",
+      "version": "gpt-5.4",
+      "description": "GPT 5.4 Image",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.4-image"
+    },
+    {
+      "id": "gpt-5.3-image",
+      "object": "model",
+      "created": 1770912000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.3 Image",
+      "version": "gpt-5.3",
+      "description": "GPT 5.3 Image",
+      "context_length": 128000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.3-image"
+    },
+    {
+      "id": "gpt-image-1.5",
+      "object": "model",
+      "created": 1772668800,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT Image 1.5",
+      "version": "gpt-5.4",
+      "description": "GPT Image 1.5",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-image-1.5"
+    },
+    {
+      "id": "gpt-image-2",
+      "object": "model",
+      "created": 1776902400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT Image 2",
+      "version": "gpt-5.5",
+      "description": "GPT Image 2",
+      "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-image-2"
     }
   ],
   "codex-pro": [
@@ -3132,6 +4674,519 @@
       "supportedOutputModalities": [
         "text"
       ]
+    },
+    {
+      "id": "gpt-5.6-sol-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Sol Review",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Sol Review",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-sol-review"
+    },
+    {
+      "id": "gpt-5.6-terra-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Terra Review",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Terra Review",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-terra-review"
+    },
+    {
+      "id": "gpt-5.6-luna-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Luna Review",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Luna Review",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "config": {
+        "override_header": {
+          "user-agent": "codex-tui/0.144.0 (Mac OS 26.5.1; arm64) iTerm.app/3.6.11 (codex-tui; 0.144.0)",
+          "originator": "codex-tui"
+        }
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-luna-review"
+    },
+    {
+      "id": "gpt-5.5-review",
+      "object": "model",
+      "created": 1776902400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.5 Review",
+      "version": "gpt-5.5",
+      "description": "GPT 5.5 Review",
+      "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.5-review"
+    },
+    {
+      "id": "gpt-5.4-review",
+      "object": "model",
+      "created": 1772668800,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.4 Review",
+      "version": "gpt-5.4",
+      "description": "GPT 5.4 Review",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.4-review"
+    },
+    {
+      "id": "gpt-5.4-mini-review",
+      "object": "model",
+      "created": 1773705600,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.4 Mini Review",
+      "version": "gpt-5.4-mini",
+      "description": "GPT 5.4 Mini Review",
+      "context_length": 400000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.4-mini-review"
+    },
+    {
+      "id": "gpt-5.3-codex-spark-review",
+      "object": "model",
+      "created": 1770912000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.3 Codex Spark Review",
+      "version": "gpt-5.3",
+      "description": "GPT 5.3 Codex Spark Review",
+      "context_length": 128000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.3-codex-spark-review"
+    },
+    {
+      "id": "gpt-5.6-sol-image",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Sol Image",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Sol Image",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-sol-image"
+    },
+    {
+      "id": "gpt-5.6-terra-image",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Terra Image",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Terra Image",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-terra-image"
+    },
+    {
+      "id": "gpt-5.6-luna-image",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Luna Image",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Luna Image",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "config": {
+        "override_header": {
+          "user-agent": "codex-tui/0.144.0 (Mac OS 26.5.1; arm64) iTerm.app/3.6.11 (codex-tui; 0.144.0)",
+          "originator": "codex-tui"
+        }
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-luna-image"
+    },
+    {
+      "id": "gpt-5.6-image",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Image",
+      "version": "gpt-5.6",
+      "description": "GPT 5.6 Image",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.6-image"
+    },
+    {
+      "id": "gpt-5.5-image",
+      "object": "model",
+      "created": 1776902400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.5 Image",
+      "version": "gpt-5.5",
+      "description": "GPT 5.5 Image",
+      "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.5-image"
+    },
+    {
+      "id": "gpt-5.4-image",
+      "object": "model",
+      "created": 1772668800,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.4 Image",
+      "version": "gpt-5.4",
+      "description": "GPT 5.4 Image",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.4-image"
+    },
+    {
+      "id": "gpt-5.3-image",
+      "object": "model",
+      "created": 1770912000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.3 Image",
+      "version": "gpt-5.3",
+      "description": "GPT 5.3 Image",
+      "context_length": 128000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-5.3-image"
+    },
+    {
+      "id": "gpt-image-1.5",
+      "object": "model",
+      "created": 1772668800,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT Image 1.5",
+      "version": "gpt-5.4",
+      "description": "GPT Image 1.5",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-image-1.5"
+    },
+    {
+      "id": "gpt-image-2",
+      "object": "model",
+      "created": 1776902400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT Image 2",
+      "version": "gpt-5.5",
+      "description": "GPT Image 2",
+      "context_length": 272000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ],
+      "name": "gpt-image-2"
     }
   ],
   "kimi": [
@@ -3278,7 +5333,8 @@
       "supportedOutputModalities": [
         "text"
       ]
-    },    {
+    },
+    {
       "id": "kimi-k2.6",
       "object": "model",
       "created": 1776729600,
@@ -4161,6 +6217,136 @@
       "description": "xAI Composer 2.5 Fast model for the Responses API.",
       "context_length": 200000,
       "max_completion_tokens": 32768
+    }
+  ],
+  "codex": [
+    {
+      "object": "model",
+      "type": "codex",
+      "id": "gpt-5.6-sol-review",
+      "name": "gpt-5.6-sol-review",
+      "display_name": "GPT 5.6 Sol Review",
+      "description": "GPT 5.6 Sol Review"
+    },
+    {
+      "object": "model",
+      "type": "codex",
+      "id": "gpt-5.6-terra-review",
+      "name": "gpt-5.6-terra-review",
+      "display_name": "GPT 5.6 Terra Review",
+      "description": "GPT 5.6 Terra Review"
+    },
+    {
+      "object": "model",
+      "type": "codex",
+      "id": "gpt-5.6-luna-review",
+      "name": "gpt-5.6-luna-review",
+      "display_name": "GPT 5.6 Luna Review",
+      "description": "GPT 5.6 Luna Review"
+    },
+    {
+      "object": "model",
+      "type": "codex",
+      "id": "gpt-5.5-review",
+      "name": "gpt-5.5-review",
+      "display_name": "GPT 5.5 Review",
+      "description": "GPT 5.5 Review"
+    },
+    {
+      "object": "model",
+      "type": "codex",
+      "id": "gpt-5.4-review",
+      "name": "gpt-5.4-review",
+      "display_name": "GPT 5.4 Review",
+      "description": "GPT 5.4 Review"
+    },
+    {
+      "object": "model",
+      "type": "codex",
+      "id": "gpt-5.4-mini-review",
+      "name": "gpt-5.4-mini-review",
+      "display_name": "GPT 5.4 Mini Review",
+      "description": "GPT 5.4 Mini Review"
+    },
+    {
+      "object": "model",
+      "type": "codex",
+      "id": "gpt-5.3-codex-spark-review",
+      "name": "gpt-5.3-codex-spark-review",
+      "display_name": "GPT 5.3 Codex Spark Review",
+      "description": "GPT 5.3 Codex Spark Review"
+    },
+    {
+      "object": "model",
+      "type": "codex",
+      "id": "gpt-5.6-sol-image",
+      "name": "gpt-5.6-sol-image",
+      "display_name": "GPT 5.6 Sol Image",
+      "description": "GPT 5.6 Sol Image"
+    },
+    {
+      "object": "model",
+      "type": "codex",
+      "id": "gpt-5.6-terra-image",
+      "name": "gpt-5.6-terra-image",
+      "display_name": "GPT 5.6 Terra Image",
+      "description": "GPT 5.6 Terra Image"
+    },
+    {
+      "object": "model",
+      "type": "codex",
+      "id": "gpt-5.6-luna-image",
+      "name": "gpt-5.6-luna-image",
+      "display_name": "GPT 5.6 Luna Image",
+      "description": "GPT 5.6 Luna Image"
+    },
+    {
+      "object": "model",
+      "type": "codex",
+      "id": "gpt-5.6-image",
+      "name": "gpt-5.6-image",
+      "display_name": "GPT 5.6 Image",
+      "description": "GPT 5.6 Image"
+    },
+    {
+      "object": "model",
+      "type": "codex",
+      "id": "gpt-5.5-image",
+      "name": "gpt-5.5-image",
+      "display_name": "GPT 5.5 Image",
+      "description": "GPT 5.5 Image"
+    },
+    {
+      "object": "model",
+      "type": "codex",
+      "id": "gpt-5.4-image",
+      "name": "gpt-5.4-image",
+      "display_name": "GPT 5.4 Image",
+      "description": "GPT 5.4 Image"
+    },
+    {
+      "object": "model",
+      "type": "codex",
+      "id": "gpt-5.3-image",
+      "name": "gpt-5.3-image",
+      "display_name": "GPT 5.3 Image",
+      "description": "GPT 5.3 Image"
+    },
+    {
+      "object": "model",
+      "type": "codex",
+      "id": "gpt-image-1.5",
+      "name": "gpt-image-1.5",
+      "display_name": "GPT Image 1.5",
+      "description": "GPT Image 1.5"
+    },
+    {
+      "object": "model",
+      "type": "codex",
+      "id": "gpt-image-2",
+      "name": "gpt-image-2",
+      "display_name": "GPT Image 2",
+      "description": "GPT Image 2"
     }
   ]
 }

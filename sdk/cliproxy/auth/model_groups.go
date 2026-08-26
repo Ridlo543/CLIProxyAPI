@@ -114,12 +114,13 @@ func isModelGroupFallbackError(err error) bool {
 	}
 	var authErr *Error
 	typedAuthFailure := errors.As(err, &authErr) && authErr != nil && isModelGroupAuthFailureCode(authErr.Code)
-	if status == 0 {
-		return authErr != nil && (strings.TrimSpace(authErr.Code) == "" || typedAuthFailure || authErr.Retryable)
-	}
 	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return authErr != nil && (strings.TrimSpace(authErr.Code) == "" || typedAuthFailure || authErr.Retryable)
 	case http.StatusRequestTimeout, http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway,
 		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	case 0:
 		return authErr != nil && (authErr.Retryable || typedAuthFailure || authErr.Code == "provider_not_found" || authErr.Code == "executor_not_found")
 	default:
 		return false
@@ -136,7 +137,7 @@ func isTransientModelGroupNetworkError(err error) bool {
 
 func isModelGroupAuthFailureCode(code string) bool {
 	switch strings.ToLower(strings.TrimSpace(code)) {
-	case "auth_not_found", "executor_not_found", "provider_not_found", "auth_disabled", "token_refresh_failed", "upstream_error", "rate_limit", "quota_exceeded", "capacity_exhausted", "service_unavailable":
+	case "auth_not_found", "auth_unavailable", "auth_expired", "invalid_grant", "token_expired", "unauthorized", "provider_not_found", "executor_not_found", "auth_disabled", "token_refresh_failed", "upstream_error", "rate_limit", "quota_exceeded", "capacity_exhausted", "service_unavailable":
 		return true
 	default:
 		return false
