@@ -79,12 +79,12 @@ func (h *Handler) PostMonitoringAnalytics(c *gin.Context) {
 	identity := h.identityLookup()
 	inc := req.Include
 
-	if inc.Summary {
+	// The summary block backs both the explicit request and the
+	// summary-percentiles variant used by dashboard KPI tiles.
+	if inc.Summary || inc.SummaryPct {
 		resp["summary"] = buildSummary(events, from, to, now)
 	}
 	if inc.SummaryPct {
-		// Percentiles are already part of summary; keep the flag a no-op so
-		// clients asking twice stay compatible.
 		resp["summary_percentiles"] = true
 	}
 	if inc.Timeline {
