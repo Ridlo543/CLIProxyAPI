@@ -122,12 +122,15 @@ func (m *Manager) executeHomeOnce(ctx context.Context, providers []string, req c
 		}
 		// Enrich before auth preparation so prepare-stage usage records observe the client request.
 		execCtx = contextWithRequestedModelAlias(execCtx, opts, routeModel)
+		execCtx = newUpstreamAttemptContext(execCtx)
 		if rt := m.roundTripperFor(auth); rt != nil {
 			execCtx = context.WithValue(execCtx, roundTripperContextKey{}, rt)
 			execCtx = context.WithValue(execCtx, "cliproxy.roundtripper", rt)
 		}
 		models, pooled, aliasResult, routing := m.preparedExecutionModelsWithAlias(auth, routeModel)
-		aliasResult = applyHomeResponseAlias(aliasResult, responseAlias, true)
+		if aliasResult.ForceMapping && responseAlias != "" {
+			aliasResult.OriginalAlias = responseAlias
+		}
 		if len(models) > 1 {
 			models = models[:1]
 			pooled = false
@@ -154,6 +157,7 @@ func (m *Manager) executeHomeOnce(ctx context.Context, providers []string, req c
 		}
 		didRefreshOnUnauthorized := false
 		for _, upstreamModel := range models {
+			execCtx = newUpstreamAttemptContext(execCtx)
 			resultModel := m.stateModelForExecution(preparedAuth, routeModel, upstreamModel, pooled)
 			execReq := req
 			execReq.Model = upstreamModel
@@ -171,7 +175,6 @@ func (m *Manager) executeHomeOnce(ctx context.Context, providers []string, req c
 			}
 			if !restoreExecutionModel {
 				execReq = attachResolvedAPIKeyModelInfo(routing, execReq, preparedAuth, routeModel, upstreamModel)
-				execReq = m.attachResolvedOAuthModelInfo(execReq, preparedAuth, upstreamModel, aliasResult)
 			}
 			if errCtx := execCtx.Err(); errCtx != nil {
 				releaseAttempt()
@@ -204,9 +207,9 @@ func (m *Manager) executeHomeOnce(ctx context.Context, providers []string, req c
 			}
 			execute := func() (cliproxyexecutor.Response, error) {
 				if countTokens {
-					return m.countTokensWithProxyFailover(executorCtx, selection.Executor, preparedAuth, execReq, execOpts)
+					return selection.Executor.CountTokens(executorCtx, preparedAuth, execReq, execOpts)
 				}
-				return m.executeWithProxyFailover(execCtx, selection.Executor, preparedAuth, execReq, execOpts)
+				return selection.Executor.Execute(execCtx, preparedAuth, execReq, execOpts)
 			}
 			startHomeExec := time.Now()
 			response, errExecute = execute()
@@ -221,38 +224,21 @@ func (m *Manager) executeHomeOnce(ctx context.Context, providers []string, req c
 				}
 			}
 			if errExecute != nil {
-				if refreshed, okRefresh, errRefresh := m.tryRefreshExecutionAuthAfterUnauthorized(execCtx, selection.Executor, refreshAuth, errExecute, didRefreshOnUnauthorized, true); errRefresh != nil {
+				refreshCtx := newUpstreamAttemptContext(execCtx)
+				if refreshed, okRefresh, errRefresh := m.tryRefreshExecutionAuthAfterUnauthorized(refreshCtx, selection.Executor, refreshAuth, errExecute, didRefreshOnUnauthorized, true); errRefresh != nil {
 					errExecute = errRefresh
 					warnLogUpstreamFailure(execCtx, entry, selection.Provider, upstreamModel, preparedAuth, durationHomeExec, errExecute)
 				} else if okRefresh {
 					preparedAuth = refreshed
-					refreshedModel, refreshedPooled, refreshedAlias, refreshedRouting := m.refreshedExecutionAttempt(preparedAuth, routeModel)
-					if refreshedModel == "" {
-						return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no execution models available after refresh"}
-					}
-					upstreamModel, pooled, aliasResult, routing = refreshedModel, refreshedPooled, refreshedAlias, refreshedRouting
-					aliasResult = applyHomeResponseAlias(aliasResult, responseAlias, true)
-					resultModel = m.stateModelForExecution(preparedAuth, routeModel, upstreamModel, pooled)
-					retryReq := req
-					retryReq.Model = upstreamModel
-					if restoreExecutionModel {
-						retryReq.Model = executionModel
-					}
-					retryOpts := opts
-					retryOpts.ExecutionLifecycle = selection
-					retryReq, retryOpts, errIntercept = applyRequestAfterAuthInterceptor(execCtx, selection.Executor, selection.Provider, retryReq, retryOpts, requestedModelAliasFromOptions(retryOpts, routeModel))
-					if errIntercept != nil {
-						return cliproxyexecutor.Response{}, errIntercept
-					}
-					if !restoreExecutionModel {
-						retryReq = attachResolvedAPIKeyModelInfo(routing, retryReq, preparedAuth, routeModel, upstreamModel)
-						retryReq = m.attachResolvedOAuthModelInfo(retryReq, preparedAuth, upstreamModel, aliasResult)
-					}
-					execReq, execOpts = retryReq, retryOpts
 					m.replaceHomeSelectionAuth(selection, preparedAuth)
 					didRefreshOnUnauthorized = true
 					publishSelectedAuthMetadata(opts.Metadata, preparedAuth)
 					setEffectiveAuth(preparedAuth)
+					execCtx = newUpstreamAttemptContext(execCtx)
+					executorCtx = execCtx
+					if countTokens {
+						executorCtx = withAccessTokenFingerprintObserver(execCtx, setEffectiveAuth)
+					}
 					startHomeRetry := time.Now()
 					response, errExecute = execute()
 					durationHomeRetry := time.Since(startHomeRetry)

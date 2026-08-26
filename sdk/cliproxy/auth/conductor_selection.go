@@ -316,6 +316,13 @@ func (m *Manager) SetRoundTripperProvider(p RoundTripperProvider) {
 	m.mu.Unlock()
 }
 
+// RoundTripperProvider returns the registered RoundTripperProvider.
+func (m *Manager) RoundTripperProvider() RoundTripperProvider {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.rtProvider
+}
+
 func (m *Manager) availableAuthsForRouteModel(auths []*Auth, provider, routeModel string, now time.Time) ([]*Auth, error) {
 	return m.availableAuthsForRouteModelWithPriorityMode(auths, provider, routeModel, now, false)
 }

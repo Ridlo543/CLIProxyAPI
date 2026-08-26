@@ -119,6 +119,37 @@ type accountIdentity struct {
 	label   string
 }
 
+// canonicalProvider collapses the many provider spellings seen in events
+// (legacy 9Router values, executor names, per-entry compat names like
+// "openai-compatible-dahono-dahono-1") into tidy brand keys and display
+// labels so topology/aggregations render one node per real provider.
+func canonicalProvider(raw string) (key, label string) {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	if s == "" {
+		return "unknown", "Unknown"
+	}
+	switch s {
+	case "antigravity":
+		return "antigravity", "Antigravity"
+	case "codex", "openai":
+		return "codex", "Codex"
+	case "deepseek":
+		return "deepseek", "DeepSeek"
+	case "opencode", "opencode-free":
+		return "opencode", "Opencode"
+	case "cloudflare-ai", "cloudflare":
+		return "cloudflare", "Cloudflare"
+	case "gemini":
+		return "gemini", "Gemini"
+	}
+	s = strings.TrimPrefix(s, "openai-compatible-")
+	brand := s
+	if i := strings.Index(brand, "-"); i > 0 {
+		brand = brand[:i]
+	}
+	return s, strings.ToUpper(brand[:1]) + brand[1:]
+}
+
 // applyFilters narrows the event set to the requested auth identities.
 // auth_indexes matches the internal credential index; auth_files matches by
 // resolved identity (label/account) so filename-based callers still work.
@@ -251,22 +282,24 @@ func buildSummary(events []usagestore.Event, from, to, now time.Time) gin.H {
 	sort.Slice(a.ttfts, func(i, j int) bool { return a.ttfts[i] < a.ttfts[j] })
 
 	window30 := now.Add(-30 * time.Minute)
-	var rpm int64
-	var tpm30 int64
+	var reqCount30 int64
+	var tokCount30 int64
 	days := to.Sub(from).Hours() / 24
 	if days < 1 {
 		days = 1
 	}
 	zeroModels := map[string]bool{}
 	for _, ev := range events {
-		if window30.After(ev.Timestamp) || ev.Timestamp.Equal(window30) {
-			rpm++
-			tpm30 += ev.Total
+		if window30.Before(ev.Timestamp) || window30.Equal(ev.Timestamp) {
+			reqCount30++
+			tokCount30 += ev.Total
 		}
 		if ev.Total == 0 && ev.Model != "" {
 			zeroModels[ev.Model] = true
 		}
 	}
+	rpm := reqCount30 / 30
+	tpm30 := tokCount30 / 30
 	cacheTotal := a.cached + a.cacheRead + a.cacheCreate
 	cacheHit := 0.0
 	if cacheTotal > 0 {
@@ -425,39 +458,33 @@ func buildChannelShare(events []usagestore.Event, identity map[string]accountIde
 	type chanAgg struct {
 		agg
 		provider string
+		key      string
+		label    string
 		account  string
 	}
 	index := map[string]*chanAgg{}
 	order := make([]string, 0, 8)
 	for _, ev := range events {
-		id := ev.AuthIndex
-		if id == "" {
-			if ev.Account != "" {
-				id = "account:" + ev.Account
-			} else {
-				id = "unknown"
-			}
-		}
-		a, ok := index[id]
+		pKey, pLabel := canonicalProvider(ev.Provider)
+		a, ok := index[pKey]
 		if !ok {
-			a = &chanAgg{provider: ev.Provider}
+			a = &chanAgg{provider: pKey, key: pKey, label: pLabel}
 			if ev.Account != "" {
 				a.account = ev.Account
 			}
-			index[id] = a
-			order = append(order, id)
+			index[pKey] = a
+			order = append(order, pKey)
 		}
 		if a.account == "" && ev.Account != "" {
 			a.account = ev.Account
 		}
-		a.provider = ev.Provider
 		a.add(ev)
 	}
 	sort.Slice(order, func(i, j int) bool { return index[order[i]].calls > index[order[j]].calls })
 	out := make([]gin.H, 0, len(order))
 	for _, id := range order {
 		a := index[id]
-		ident := identity[id]
+		ident := identity[a.key]
 		account := ident.account
 		if account == "" {
 			account = a.account
@@ -471,7 +498,8 @@ func buildChannelShare(events []usagestore.Event, identity map[string]accountIde
 			"source":                 "",
 			"account_snapshot":       account,
 			"auth_label_snapshot":    label,
-			"auth_provider_snapshot": a.provider,
+			"auth_provider_snapshot": a.key,
+			"provider_label":         a.label,
 			"calls":                  a.calls,
 			"tokens":                 a.total,
 			"cost":                   a.cost,
@@ -500,12 +528,14 @@ func buildRecentFailures(events []usagestore.Event, identity map[string]accountI
 		if label == "" {
 			label = account
 		}
+		pKey, pLabel := canonicalProvider(ev.Provider)
 		out = append(out, gin.H{
 			"timestamp_ms":           ev.Timestamp.UnixMilli(),
 			"model":                  ev.Model,
 			"account_snapshot":       pickAccount(identity, ev),
 			"auth_label_snapshot":    pickLabel(identity, ev),
-			"auth_provider_snapshot": ev.Provider,
+			"auth_provider_snapshot": pKey,
+			"provider_label":         pLabel,
 			"endpoint":               ev.Endpoint,
 			"duration_ms":            ev.Duration,
 			"fail_status_code":       ev.StatusCod,
@@ -558,6 +588,7 @@ func buildEventsPage(events []usagestore.Event, identity map[string]accountIdent
 		if label == "" {
 			label = account
 		}
+		pKey, pLabel := canonicalProvider(ev.Provider)
 		out = append(out, gin.H{
 			"id":                     ev.ID,
 			"timestamp_ms":           ev.Timestamp.UnixMilli(),
@@ -568,7 +599,8 @@ func buildEventsPage(events []usagestore.Event, identity map[string]accountIdent
 			"endpoint":               ev.Endpoint,
 			"account_snapshot":       pickAccount(identity, ev),
 			"auth_label_snapshot":    pickLabel(identity, ev),
-			"auth_provider_snapshot": ev.Provider,
+			"auth_provider_snapshot": pKey,
+			"provider_label":         pLabel,
 			"input_tokens":           ev.Input,
 			"output_tokens":          ev.Output,
 			"cached_tokens":          ev.Cached,

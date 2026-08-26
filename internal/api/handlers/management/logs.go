@@ -560,18 +560,26 @@ type logReadResult struct {
 // assets). They drown out meaningful router events on the Console Log page,
 // so the logs endpoint filters them while keeping client traffic lines
 // (e.g. POST /v1/chat/completions), lifecycle messages, and errors.
+func filterNoiseLines(lines []string) []string {
+	filtered := make([]string, 0, len(lines))
+	for _, l := range lines {
+		if !isNoiseAccessLine(l) {
+			filtered = append(filtered, l)
+		}
+	}
+	return filtered
+}
+
 var noiseAccessSubstrings = []string{
 	"/v0/management/",
 	"/management.html",
 	"/favicon",
 	"/assets/",
 	"/healthz",
+	"gin_logger.go",
 }
 
 func isNoiseAccessLine(line string) bool {
-	if !strings.Contains(line, "gin_logger.go") {
-		return false
-	}
 	for _, s := range noiseAccessSubstrings {
 		if strings.Contains(line, s) {
 			return true
@@ -581,13 +589,7 @@ func isNoiseAccessLine(line string) bool {
 }
 
 func writeLogsResponse(c *gin.Context, lines []string, lineCount int, latest int64, nextCursor string, cursorReset bool) {
-	filtered := make([]string, 0, len(lines))
-	for _, l := range lines {
-		if !isNoiseAccessLine(l) {
-			filtered = append(filtered, l)
-		}
-	}
-	lines = filtered
+	lines = filterNoiseLines(lines)
 	if lines == nil {
 		lines = []string{}
 	}

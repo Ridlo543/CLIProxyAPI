@@ -69,7 +69,7 @@ type Auth struct {
 	Unavailable bool `json:"unavailable"`
 	// ProxyURL overrides the global proxy setting for this auth if provided.
 	ProxyURL string `json:"proxy_url,omitempty"`
-	// ProxyPool selects a named proxy pool when ProxyURL is empty.
+	// ProxyPool assigns this credential to a named proxy pool.
 	ProxyPool string `json:"proxy_pool,omitempty"`
 	// Attributes stores provider specific metadata needed by executors (immutable configuration).
 	Attributes map[string]string `json:"attributes,omitempty"`
@@ -98,8 +98,20 @@ type Auth struct {
 	Success int64 `json:"-"`
 	Failed  int64 `json:"-"`
 
-	recentRequests recentRequestRing `json:"-"`
 	indexAssigned  bool              `json:"-"`
+	recentRequests recentRequestRing `json:"-"`
+}
+
+// ProxyPoolStatus describes the health and summary of a named proxy pool.
+type ProxyPoolStatus struct {
+	Name         string   `json:"name"`
+	Strategy     string   `json:"strategy"`
+	Strict       bool     `json:"strict"`
+	EntryCount   int      `json:"entry_count"`
+	Healthy      int      `json:"healthy"`
+	Cooling      int      `json:"cooling"`
+	FailureCount uint64   `json:"failure_count"`
+	URLs         []string `json:"urls,omitempty"`
 }
 
 const (
@@ -176,6 +188,27 @@ type QuotaState struct {
 	NextRecoverAt time.Time `json:"next_recover_at"`
 	// BackoffLevel stores the progressive cooldown exponent used for rate limits.
 	BackoffLevel int `json:"backoff_level,omitempty"`
+	// ObservedAt is the time the current Signals snapshot was observed.
+	ObservedAt time.Time `json:"observed_at,omitempty"`
+	// Signals stores bounded, provider-specific quota watermark values observed
+	// from upstream response headers or websocket quota events. It is a snapshot
+	// of one upstream response, not an accumulation across responses, so an
+	// expired watermark cannot linger after the response that produced it.
+	// Cooldown transitions must use applyCooldownFields so they cannot replace
+	// this snapshot.
+	Signals map[string]string `json:"signals,omitempty"`
+}
+
+// Clone returns an independent copy of the quota state.
+func (q QuotaState) Clone() QuotaState {
+	copyQuota := q
+	if len(q.Signals) > 0 {
+		copyQuota.Signals = make(map[string]string, len(q.Signals))
+		for key, value := range q.Signals {
+			copyQuota.Signals[key] = value
+		}
+	}
+	return copyQuota
 }
 
 // ModelState captures the execution state for a specific model under an auth entry.
@@ -266,6 +299,7 @@ func (a *Auth) Clone() *Auth {
 		return nil
 	}
 	copyAuth := *a
+	copyAuth.Quota = a.Quota.Clone()
 	if len(a.Attributes) > 0 {
 		copyAuth.Attributes = make(map[string]string, len(a.Attributes))
 		for key, value := range a.Attributes {
@@ -408,6 +442,7 @@ func (m *ModelState) Clone() *ModelState {
 		return nil
 	}
 	copyState := *m
+	copyState.Quota = m.Quota.Clone()
 	if m.LastError != nil {
 		copyState.LastError = &Error{
 			Code:       m.LastError.Code,
@@ -425,9 +460,6 @@ func (a *Auth) ProxyInfo() string {
 	}
 	proxyStr := strings.TrimSpace(a.ProxyURL)
 	if proxyStr == "" {
-		if strings.TrimSpace(a.ProxyPool) != "" {
-			return "via proxy pool"
-		}
 		return ""
 	}
 	if idx := strings.Index(proxyStr, "://"); idx > 0 {

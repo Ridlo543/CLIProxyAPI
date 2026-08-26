@@ -1,32 +1,22 @@
 package management
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/proxyutil"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
-
-const configRevisionMismatchCode = "config_revision_mismatch"
-
-func configContentETag(data []byte) string {
-	return fmt.Sprintf("\"%x\"", sha256.Sum256(data))
-}
 
 const (
 	latestReleaseURL       = "https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest"
@@ -46,6 +36,14 @@ type releaseInfo struct {
 	Name    string `json:"name"`
 }
 
+func setLatestReleaseRequestHeaders(req *http.Request) {
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", latestReleaseUserAgent)
+	if token := util.ResolveGitHubToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+}
+
 // GetLatestVersion returns the latest release version from GitHub without downloading assets.
 func (h *Handler) GetLatestVersion(c *gin.Context) {
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -63,8 +61,7 @@ func (h *Handler) GetLatestVersion(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "request_create_failed", "message": err.Error()})
 		return
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", latestReleaseUserAgent)
+	setLatestReleaseRequestHeaders(req)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -158,33 +155,6 @@ func (h *Handler) PutConfigYAML(c *gin.Context) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if expected := strings.TrimSpace(c.GetHeader("If-Match")); expected != "" {
-		// RFC 7232: "*" means "apply only if the resource exists".
-		if expected == "*" {
-			if _, errStat := os.Stat(h.configFilePath); errStat != nil {
-				c.JSON(http.StatusPreconditionFailed, gin.H{
-					"error":   configRevisionMismatchCode,
-					"message": "config file does not exist",
-				})
-				return
-			}
-		} else {
-			current, errRead := os.ReadFile(h.configFilePath)
-			if errRead != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "read_failed", "message": "failed to read current config"})
-				return
-			}
-			currentETag := configContentETag(current)
-			if expected != currentETag {
-				c.Header("ETag", currentETag)
-				c.JSON(http.StatusPreconditionFailed, gin.H{
-					"error":   configRevisionMismatchCode,
-					"message": "config changed since it was loaded",
-				})
-				return
-			}
-		}
-	}
 	if WriteConfig(h.configFilePath, body) != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "write_failed", "message": "failed to write config"})
 		return
@@ -196,17 +166,12 @@ func (h *Handler) PutConfigYAML(c *gin.Context) {
 		return
 	}
 	h.cfg = newCfg
-	// Echo the new content's ETag so conditional clients can chain saves
-	// without an extra GET round trip.
-	c.Header("ETag", configContentETag(body))
 	c.JSON(http.StatusOK, gin.H{"ok": true, "changed": []string{"config"}})
 }
 
 // GetConfigYAML returns the raw config.yaml file bytes without re-encoding.
 // It preserves comments and original formatting/styles.
 func (h *Handler) GetConfigYAML(c *gin.Context) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
 	data, err := os.ReadFile(h.configFilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -219,7 +184,6 @@ func (h *Handler) GetConfigYAML(c *gin.Context) {
 	c.Header("Content-Type", "application/yaml; charset=utf-8")
 	c.Header("Cache-Control", "no-store")
 	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("ETag", configContentETag(data))
 	// Write raw bytes as-is
 	_, _ = c.Writer.Write(data)
 }
@@ -378,27 +342,4 @@ func (h *Handler) PutProxyURL(c *gin.Context) {
 func (h *Handler) DeleteProxyURL(c *gin.Context) {
 	h.cfg.ProxyURL = ""
 	h.persist(c)
-}
-
-// GetProxyPools returns sanitized named-pool configuration and runtime health.
-func (h *Handler) GetProxyPools(c *gin.Context) {
-	h.mu.Lock()
-	manager := h.authManager
-	h.mu.Unlock()
-	if manager == nil {
-		c.JSON(http.StatusOK, []coreauth.ProxyPoolStatus{})
-		return
-	}
-	statuses := manager.ProxyPoolStatuses()
-	for i := range statuses {
-		for j := range statuses[i].URLs {
-			if strings.EqualFold(strings.TrimSpace(statuses[i].URLs[j]), "direct") {
-				statuses[i].URLs[j] = "direct"
-			} else {
-				statuses[i].URLs[j] = proxyutil.Redact(statuses[i].URLs[j])
-			}
-		}
-	}
-	sort.Slice(statuses, func(i, j int) bool { return strings.ToLower(statuses[i].Name) < strings.ToLower(statuses[j].Name) })
-	c.JSON(http.StatusOK, statuses)
 }

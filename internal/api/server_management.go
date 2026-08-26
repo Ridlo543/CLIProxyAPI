@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementasset"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/panelasset"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -150,6 +151,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PUT("/api-key-policies", s.mgmt.PutAPIKeyPolicies)
 		mgmt.GET("/api-key-policies/usage", s.mgmt.GetAPIKeyPolicyUsage)
 		mgmt.POST("/openai-compatibility/:name/import-models", s.mgmt.ImportOpenAICompatModels)
+		mgmt.GET("/openai-compatibility/:name/upstream-get", s.mgmt.GetOpenAICompatUpstreamGet)
 		mgmt.POST("/provider-probe", s.mgmt.ProbeProvider)
 		// Combos (isolated feature — see internal/config/config_combos.go).
 		mgmt.GET("/combos", s.mgmt.ListCombos)
@@ -330,6 +332,20 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
+
+	// 1. Priority 1: If an embedded AinyRouter panel is compiled into the binary, serve it directly.
+	// This prevents ever falling back to or being hijacked by external CPAMP assets.
+	if panelasset.Available() {
+		staticDir := managementasset.StaticDir(s.configFilePath)
+		if strings.TrimSpace(staticDir) != "" {
+			if installedPath, err := panelasset.Install(staticDir); err == nil && installedPath != "" {
+				c.File(installedPath)
+				return
+			}
+		}
+	}
+
+	// 2. Priority 2: On-disk management.html in static directory
 	filePath := managementasset.FilePath(s.configFilePath)
 	if strings.TrimSpace(filePath) == "" {
 		c.AbortWithStatus(http.StatusNotFound)
@@ -338,8 +354,6 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 
 	if _, err := os.Stat(filePath); err != nil {
 		if os.IsNotExist(err) {
-			// Synchronously ensure management.html is available with a detached context.
-			// Control panel bootstrap should not be canceled by client disconnects.
 			if !managementasset.EnsureLatestManagementHTML(context.Background(), managementasset.StaticDir(s.configFilePath), cfg.ProxyURL, cfg.RemoteManagement.PanelGitHubRepository) {
 				c.AbortWithStatus(http.StatusNotFound)
 				return

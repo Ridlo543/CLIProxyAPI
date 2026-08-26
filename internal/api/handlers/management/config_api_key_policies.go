@@ -139,7 +139,7 @@ func (h *Handler) ImportOpenAICompatModels(c *gin.Context) {
 	}
 
 	// free_only restricts imports to the provider's officially free tier,
-// so a keyless/free listing never pulls in paid models by accident.
+	// so a keyless/free listing never pulls in paid models by accident.
 	freeOnly := c.Query("free_only") == "true"
 	added, skipped := mergeDiscoveredModels(entry.Models, body, freeOnly)
 
