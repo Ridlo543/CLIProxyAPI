@@ -1,7 +1,12 @@
-// Package usagestore keeps an in-memory ring of per-request usage events so
-// the management API can serve full analytics natively, without any external
-// aggregation service. Events are additionally appended to a JSONL file so
-// history survives router restarts.
+// Package usagestore keeps per-request usage events for the management
+// analytics API. Storage model:
+//
+//   - Hot window: the current and previous month are held fully in memory
+//     (bounded ring) so default dashboard ranges answer without disk I/O.
+//   - Permanent archive: every event is appended to a monthly JSONL file
+//     (usage-YYYY-MM.jsonl). Nothing is ever truncated — history is kept
+//     forever, and older months are read lazily (with a tiny LRU cache)
+//     when a query reaches past the hot window.
 package usagestore
 
 import (
@@ -9,6 +14,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,9 +25,9 @@ import (
 )
 
 const (
-	defaultMaxEvents = 100_000
-	maxEventAge      = 30 * 24 * time.Hour
-	maxFileSizeBytes = 64 << 20 // rotate the JSONL above this size
+	hotMaxEvents   = 300_000 // bounded ring for the two hot months
+	maxEventAge    = 0       // archived months are permanent
+	archiveLRUSize = 4       // parsed month-files kept around
 )
 
 // Event is one settled provider request as seen by the usage pipeline.
@@ -53,24 +59,85 @@ type Event struct {
 	Cost          float64 `json:"cost"`
 }
 
-// Store is a bounded, thread-safe event ring backed by an append-only JSONL
-// file so analytics survive restarts.
 type Store struct {
 	mu     sync.Mutex
-	events []Event
+	hot    []Event // current + previous month, oldest first
 	nextID int64
 
-	filePath string
+	dir      string
+	curMonth string
 	file     *os.File
 	writer   *bufio.Writer
+
+	cacheMu sync.Mutex
+	cache   map[string][]Event // archive file name -> parsed events
+	lru     []string           // most-recently-used first
 }
 
 var global = &Store{}
 
-// Default returns the process-wide store.
 func Default() *Store { return global }
 
-// Add inserts an event into the ring and persists it when configured.
+func monthKey(t time.Time) string { return t.Format("2006-01") }
+func fileName(m string) string    { return "usage-" + m + ".jsonl" }
+
+// Configure points the store at a directory of monthly JSONL files and
+// loads the hot window (current + previous month) into memory.
+func (s *Store) Configure(dir string) error {
+	global.mu.Lock()
+	defer global.mu.Unlock()
+	if global.dir != "" || strings.TrimSpace(dir) == "" {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	global.dir = dir
+	global.cache = make(map[string][]Event)
+	global.lru = nil
+	now := time.Now()
+	for _, m := range []string{monthKey(now.AddDate(0, -1, 0)), monthKey(now)} {
+		p := filepath.Join(dir, fileName(m))
+		evs := readEventsFile(p)
+		for _, ev := range evs {
+			if ev.ID > global.nextID {
+				global.nextID = ev.ID
+			}
+			global.hot = append(global.hot, ev)
+		}
+	}
+	global.pruneLocked(now)
+	f, err := os.OpenFile(filepath.Join(dir, fileName(monthKey(now))),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	global.curMonth = monthKey(now)
+	global.file = f
+	global.writer = bufio.NewWriterSize(f, 32*1024)
+	log.Infof("usagestore: %d hot events loaded from %s", len(global.hot), dir)
+	return nil
+}
+
+// Configure is the package-level helper used at startup.
+func Configure(dir string) error { return Default().Configure(dir) }
+
+// Close flushes and releases open handles (shutdown/tests).
+func (s *Store) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.writer != nil {
+		_ = s.writer.Flush()
+	}
+	if s.file != nil {
+		err := s.file.Close()
+		s.file, s.writer = nil, nil
+		return err
+	}
+	return nil
+}
+
+// Add inserts an event into the hot window and appends it to its month file.
 func (s *Store) Add(ev Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -88,91 +155,80 @@ func (s *Store) Add(ev Event) {
 			Reasoning:     ev.Reasoning,
 		})
 	}
-	s.events = append(s.events, ev)
+	s.hot = append(s.hot, ev)
+	m := monthKey(ev.Timestamp)
+	if m != s.curMonth && s.dir != "" {
+		s.rollToLocked(m)
+	} else {
+		s.persistLocked(ev)
+	}
 	s.pruneLocked(time.Now())
-	s.persistLocked(ev)
 }
 
-// Query returns the events whose timestamp falls within [from, to], oldest
-// first. The slice is a copy and safe to iterate without the lock.
+// Query returns events within [from, to], oldest first. Ranges reaching
+// beyond the hot window transparently read archived month files.
 func (s *Store) Query(from, to time.Time) []Event {
+	out := make([]Event, 0, 1024)
+
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]Event, 0, len(s.events))
-	for _, ev := range s.events {
+	for _, ev := range s.hot {
 		if !ev.Timestamp.Before(from) && !ev.Timestamp.After(to) {
 			out = append(out, ev)
 		}
 	}
+	dir := s.dir
+	s.mu.Unlock()
+
+	// Archive months strictly older than the previous month are not in
+	// memory; read them lazily through the LRU-cached parser. Only months
+	// that actually have an archive file on disk are visited.
+	nowM := monthKey(time.Now())
+	prevM := monthKey(time.Now().AddDate(0, -1, 0))
+	if dir != "" {
+		for _, m := range archiveMonthsOnDisk(dir, from, to, nowM, prevM) {
+			out = append(out, s.archived(filepath.Join(dir, fileName(m)))...)
+		}
+	}
+
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// archiveMonthsOnDisk lists month keys that (a) exist as archive files and
+// (b) overlap [from, to], excluding the two hot months.
+func archiveMonthsOnDisk(dir string, from, to time.Time, hotMonths ...string) []string {
+	skip := make(map[string]bool, len(hotMonths))
+	for _, m := range hotMonths {
+		skip[m] = true
+	}
+	lo, hi := monthKey(from), monthKey(to)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		n := e.Name()
+		if e.IsDir() || !strings.HasPrefix(n, "usage-") || !strings.HasSuffix(n, ".jsonl") {
+			continue
+		}
+		m := strings.TrimSuffix(strings.TrimPrefix(n, "usage-"), ".jsonl")
+		if len(m) != 7 || skip[m] || m < lo || m > hi {
+			continue
+		}
+		out = append(out, m)
+	}
+	sort.Strings(out)
 	return out
 }
 
 func (s *Store) pruneLocked(now time.Time) {
-	cutoff := now.Add(-maxEventAge)
-	drop := 0
-	for drop < len(s.events) && s.events[drop].Timestamp.Before(cutoff) {
-		drop++
-	}
-	if drop > 0 {
-		s.events = append(s.events[:0], s.events[drop:]...)
-	}
-	if overflow := len(s.events) - defaultMaxEvents; overflow > 0 {
-		s.events = append(s.events[:0], s.events[overflow:]...)
+	// Hot window is bounded by count only; month boundaries decide what is
+	// served from memory vs archive, so nothing is dropped by age here.
+	if overflow := len(s.hot) - hotMaxEvents; overflow > 0 {
+		s.hot = append(s.hot[:0], s.hot[overflow:]...)
 	}
 }
-
-// Configure loads prior events from the given JSONL path and keeps appending
-// new ones there. Safe to call once during startup; a failure disables
-// persistence without affecting in-memory analytics.
-func (s *Store) Configure(path string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.filePath != "" || strings.TrimSpace(path) == "" {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	if err := s.loadLocked(path); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	s.filePath = path
-	s.file = f
-	s.writer = bufio.NewWriterSize(f, 32*1024)
-	log.Infof("usagestore: %d historical events loaded from %s", len(s.events), path)
-	return nil
-}
-
-func (s *Store) loadLocked(path string) error {
-	for _, p := range []string{rotatePath(path), path} {
-		data, err := os.ReadFile(p)
-		if err != nil {
-			continue
-		}
-		for _, line := range strings.Split(string(data), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			var ev Event
-			if json.Unmarshal([]byte(line), &ev) != nil || ev.Timestamp.IsZero() {
-				continue
-			}
-			if ev.ID > s.nextID {
-				s.nextID = ev.ID
-			}
-			s.events = append(s.events, ev)
-		}
-	}
-	s.pruneLocked(time.Now())
-	return nil
-}
-
-func rotatePath(path string) string { return path + ".1" }
 
 func (s *Store) persistLocked(ev Event) {
 	if s.writer == nil {
@@ -185,28 +241,81 @@ func (s *Store) persistLocked(ev Event) {
 	if _, err := s.writer.Write(append(line, '\n')); err != nil {
 		return
 	}
-	if err := s.writer.Flush(); err != nil {
-		return
-	}
-	if st, statErr := s.file.Stat(); statErr == nil && st.Size() > maxFileSizeBytes {
-		s.rotateLocked()
-	}
+	_ = s.writer.Flush()
 }
 
-func (s *Store) rotateLocked() {
+func (s *Store) rollToLocked(month string) {
+	if s.writer != nil {
+		_ = s.writer.Flush()
+	}
 	if s.file != nil {
 		_ = s.file.Close()
 	}
-	_ = os.Rename(s.filePath, rotatePath(s.filePath))
-	f, err := os.OpenFile(s.filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(filepath.Join(s.dir, fileName(month)),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		s.file = nil
-		s.writer = nil
-		log.Errorf("usagestore: rotation failed: %v", err)
+		log.Errorf("usagestore: roll to %s failed: %v", month, err)
+		s.file, s.writer = nil, nil
 		return
 	}
+	s.curMonth = month
 	s.file = f
 	s.writer = bufio.NewWriterSize(f, 32*1024)
+}
+
+// archived returns parsed events for an archive file, caching the result.
+// Archive events get stable sequential IDs that continue after the hot
+// window's IDs so cursor pagination stays consistent for the process
+// lifetime.
+func (s *Store) archived(path string) []Event {
+	s.cacheMu.Lock()
+	if evs, ok := s.cache[path]; ok {
+		s.cacheMu.Unlock()
+		return evs
+	}
+	s.cacheMu.Unlock()
+
+	evs := readEventsFile(path)
+	s.mu.Lock()
+	for i := range evs {
+		s.nextID++
+		evs[i].ID = s.nextID
+	}
+	base := s.nextID
+	s.mu.Unlock()
+	s.cacheMu.Lock()
+	s.cache[path] = evs
+	s.lru = append([]string{path}, s.lru...)
+	if len(s.lru) > archiveLRUSize {
+		for _, victim := range s.lru[archiveLRUSize:] {
+			delete(s.cache, victim)
+		}
+		s.lru = s.lru[:archiveLRUSize]
+	}
+	s.cacheMu.Unlock()
+	_ = base
+	return evs
+}
+
+func readEventsFile(path string) []Event {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	out := make([]Event, 0, 4096)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var ev Event
+		if json.Unmarshal([]byte(line), &ev) != nil || ev.Timestamp.IsZero() {
+			continue
+		}
+		out = append(out, ev)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Timestamp.Before(out[j].Timestamp) })
+	return out
 }
 
 // RecordFromUsage converts a pipeline usage record into a stored event.
@@ -240,27 +349,7 @@ func RecordFromUsage(record coreusage.Record, statusCode int) Event {
 		ev.StatusCod = 200
 	}
 	if ev.Failed && ev.StatusCod <= 0 {
-		// Upstream never returned a status (transport-level failure).
 		ev.StatusCod = 502
 	}
 	return ev
-}
-
-// Configure wires persistence onto the default store (package-level helper).
-func Configure(path string) error { return global.Configure(path) }
-
-// Close flushes and releases the persistence file. Used on shutdown/tests.
-func (s *Store) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.writer != nil {
-		_ = s.writer.Flush()
-	}
-	if s.file != nil {
-		err := s.file.Close()
-		s.file = nil
-		s.writer = nil
-		return err
-	}
-	return nil
 }

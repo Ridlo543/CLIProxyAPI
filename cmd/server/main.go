@@ -595,7 +595,7 @@ func main() {
 	}
 	redisqueue.SetUsageStatisticsEnabled(cfg.UsageStatisticsEnabled)
 	redisqueue.SetRetentionSeconds(cfg.RedisUsageQueueRetentionSeconds)
-	if err = usagestore.Configure(filepath.Join(cfg.AuthDir, "usage-events.jsonl")); err != nil {
+	if err = usagestore.Configure(filepath.Join(cfg.AuthDir, "usage")); err != nil {
 		log.Errorf("usage persistence disabled: %v", err)
 	}
 	coreauth.SetQuotaCooldownDisabled(cfg.DisableCooling)
