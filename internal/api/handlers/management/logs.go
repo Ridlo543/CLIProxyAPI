@@ -75,10 +75,19 @@ func (h *Handler) GetLogs(c *gin.Context) {
 		return
 	}
 
-	limit, errLimit := parseLimit(c.Query("limit"))
+	// Accept the native `limit` parameter and the panel's legacy `tail`
+	// alias. Omitting both preserves the upstream full-scan behavior.
+	rawLimit := strings.TrimSpace(c.Query("limit"))
+	if rawLimit == "" {
+		rawLimit = strings.TrimSpace(c.Query("tail"))
+	}
+	limit, errLimit := parseLimit(rawLimit)
 	if errLimit != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid limit: %v", errLimit)})
 		return
+	}
+	if limit > 10000 {
+		limit = 10000
 	}
 
 	cutoff := parseCutoff(c.Query("after"))
