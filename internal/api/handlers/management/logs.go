@@ -555,7 +555,41 @@ type logReadResult struct {
 	nextCursor string
 }
 
+// noiseAccessSubstrings are Gin access-log request paths that only reflect
+// the control panel talking to itself (health probes, config polling, UI
+// assets). They drown out meaningful router events on the Console Log page,
+// so the logs endpoint filters them while keeping client traffic lines
+// (e.g. POST /v1/chat/completions), lifecycle messages, and errors.
+func filterNoiseLines(lines []string) []string {
+	filtered := make([]string, 0, len(lines))
+	for _, l := range lines {
+		if !isNoiseAccessLine(l) {
+			filtered = append(filtered, l)
+		}
+	}
+	return filtered
+}
+
+var noiseAccessSubstrings = []string{
+	"/v0/management/",
+	"/management.html",
+	"/favicon",
+	"/assets/",
+	"/healthz",
+	"gin_logger.go",
+}
+
+func isNoiseAccessLine(line string) bool {
+	for _, s := range noiseAccessSubstrings {
+		if strings.Contains(line, s) {
+			return true
+		}
+	}
+	return false
+}
+
 func writeLogsResponse(c *gin.Context, lines []string, lineCount int, latest int64, nextCursor string, cursorReset bool) {
+	lines = filterNoiseLines(lines)
 	if lines == nil {
 		lines = []string{}
 	}

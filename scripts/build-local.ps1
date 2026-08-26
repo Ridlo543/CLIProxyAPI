@@ -32,7 +32,7 @@ $htmlPath = Join-Path $panelDir "dist-management\index.html"
 if (-not (Test-Path $htmlPath)) { throw "panel output missing: $htmlPath" }
 $targetDir = Join-Path $PSScriptRoot "..\internal\panelasset\panel"
 New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
-"$marker`n" + (Get-Content $htmlPath -Raw) |
+"$marker`n" + (Get-Content $htmlPath -Raw -Encoding utf8) |
     Out-File -FilePath (Join-Path $targetDir "management.html") -Encoding utf8 -NoNewline
 
 Write-Host "== 3/3 building ainyrouter.exe =="
