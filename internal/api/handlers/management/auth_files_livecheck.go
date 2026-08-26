@@ -1,6 +1,7 @@
 package management
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -46,10 +47,20 @@ func (h *Handler) TestAuthFile(c *gin.Context) {
 		"disabled":    found.Disabled,
 		"unavailable": found.Unavailable,
 	}
-	verdict := "Healthy — credential registered and serving models"
+	// Report the underlying health even when the operator switch is off: an
+	// explicit test must never be masked by the disabled flag alone.
+	underlyingHealthy := !found.Unavailable && len(models) > 0
+	var verdict string
 	switch {
+	case found.Disabled && found.Unavailable:
+		verdict = "Disabled by operator, and currently unavailable"
+		if found.StatusMessage != "" {
+			verdict += ": " + found.StatusMessage
+		}
+	case found.Disabled && len(models) > 0:
+		verdict = fmt.Sprintf("Disabled by operator — credential itself is healthy and serves %d models", len(models))
 	case found.Disabled:
-		verdict = "Account is disabled by operator"
+		verdict = "Disabled by operator — no models are currently registered for this credential"
 	case found.Unavailable:
 		verdict = "Temporarily unavailable"
 		if found.StatusMessage != "" {
@@ -57,17 +68,19 @@ func (h *Handler) TestAuthFile(c *gin.Context) {
 		}
 	case len(models) == 0:
 		verdict = "No models are currently registered for this credential"
+	default:
+		verdict = "Healthy — credential registered and serving models"
 	}
 	lastError := ""
 	if found.LastError != nil {
 		lastError = found.LastError.Message
 		state["last_error"] = lastError
-		if !found.Disabled && !found.Unavailable && len(models) > 0 {
-			verdict = "Serving models, but a recent error occurred: " + lastError
+		if !found.Unavailable && len(models) > 0 {
+			verdict += "; recent error: " + lastError
 		}
 	}
 
-	ok := !found.Disabled && !found.Unavailable && len(models) > 0
+	ok := underlyingHealthy
 	c.JSON(http.StatusOK, gin.H{
 		"ok":                ok,
 		"name":              found.FileName,
