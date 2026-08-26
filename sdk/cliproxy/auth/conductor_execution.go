@@ -1443,6 +1443,11 @@ func (m *Manager) executorFor(provider string) ProviderExecutor {
 // roundTripperContextKey is an unexported context key type to avoid collisions.
 type roundTripperContextKey struct{}
 
+// ProxyRoundTripper exports roundTripperFor for management API tool calls.
+func (m *Manager) ProxyRoundTripper(auth *Auth) http.RoundTripper {
+	return m.roundTripperFor(auth)
+}
+
 // roundTripperFor retrieves an HTTP RoundTripper for the given auth if a provider is registered.
 func (m *Manager) roundTripperFor(auth *Auth) http.RoundTripper {
 	m.mu.RLock()

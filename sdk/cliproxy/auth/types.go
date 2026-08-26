@@ -98,8 +98,20 @@ type Auth struct {
 	Success int64 `json:"-"`
 	Failed  int64 `json:"-"`
 
-	recentRequests recentRequestRing `json:"-"`
 	indexAssigned  bool              `json:"-"`
+	recentRequests recentRequestRing `json:"-"`
+}
+
+// ProxyPoolStatus describes the health and summary of a named proxy pool.
+type ProxyPoolStatus struct {
+	Name         string   `json:"name"`
+	Strategy     string   `json:"strategy"`
+	Strict       bool     `json:"strict"`
+	EntryCount   int      `json:"entry_count"`
+	Healthy      int      `json:"healthy"`
+	Cooling      int      `json:"cooling"`
+	FailureCount uint64   `json:"failure_count"`
+	URLs         []string `json:"urls,omitempty"`
 }
 
 const (
