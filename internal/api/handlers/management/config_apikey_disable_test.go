@@ -27,7 +27,9 @@ func TestToggleConfigAPIKeyExcludedAll_XAI(t *testing.T) {
 		}},
 	}
 	idGen := synthesizer.NewStableIDGenerator()
-	authID, _ := idGen.Next("xai:apikey", "xai-test", "https://api.x.ai/v1", "", "", "")
+	// Mirror the production ID inputs exactly (key, base, proxy-url, proxy-pool,
+	// prefix, sorted headers); trailing parts change the stable hash.
+	authID, _ := idGen.Next("xai:apikey", "xai-test", "https://api.x.ai/v1", "", "", "", "")
 	auth := &coreauth.Auth{
 		ID:       authID,
 		Provider: "xai",
@@ -55,7 +57,7 @@ func TestToggleConfigAPIKeyExcludedAll_Codex(t *testing.T) {
 		}},
 	}
 	idGen := synthesizer.NewStableIDGenerator()
-	authID, _ := idGen.Next("codex:apikey", "sk-test", "https://example.com/v1", "", "", "")
+	authID, _ := idGen.Next("codex:apikey", "sk-test", "https://example.com/v1", "", "", "", "")
 	auth := &coreauth.Auth{
 		ID:       authID,
 		Provider: "codex",
@@ -90,7 +92,7 @@ func TestToggleConfigAPIKeyExcludedAll_Vertex_NoBaseURL(t *testing.T) {
 		}},
 	}
 	idGen := synthesizer.NewStableIDGenerator()
-	authID, _ := idGen.Next("vertex:apikey", "vertex-key-only", "", "")
+	authID, _ := idGen.Next("vertex:apikey", "vertex-key-only", "", "", "")
 	auth := &coreauth.Auth{
 		ID:       authID,
 		Provider: "vertex",
@@ -122,8 +124,8 @@ func TestToggleConfigAPIKeyExcludedAll_EmptyKeyWithBaseURL(t *testing.T) {
 		}},
 	}
 	idGen := synthesizer.NewStableIDGenerator()
-	claudeID, _ := idGen.Next("claude:apikey", "", "https://custom-claude.example.com", "", "", "")
-	geminiID, _ := idGen.Next("gemini:apikey", "", "https://custom-gemini.example.com", "", "", "")
+	claudeID, _ := idGen.Next("claude:apikey", "", "https://custom-claude.example.com", "", "", "", "")
+	geminiID, _ := idGen.Next("gemini:apikey", "", "https://custom-gemini.example.com", "", "", "", "")
 
 	claudeAuth := &coreauth.Auth{
 		ID:       claudeID,

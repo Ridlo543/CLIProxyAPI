@@ -3203,6 +3203,82 @@
       ]
     },
     {
+      "id": "kimi-k2.5-thinking",
+      "object": "model",
+      "created": 1769472000,
+      "owned_by": "moonshot",
+      "type": "kimi",
+      "display_name": "Kimi K2.5 Thinking",
+      "description": "Kimi K2.5 Thinking - Extended reasoning variant of Kimi K2.5",
+      "context_length": 262144,
+      "max_completion_tokens": 32768,
+      "thinking": {
+        "zero_allowed": true,
+        "levels": [
+          "low",
+          "high"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "kimi-for-coding",
+      "object": "model",
+      "created": 1769472000,
+      "owned_by": "moonshot",
+      "type": "kimi",
+      "display_name": "Kimi for Coding",
+      "description": "Kimi for Coding - Moonshot AI's coding-tuned model",
+      "context_length": 262144,
+      "max_completion_tokens": 32768,
+      "supportedInputModalities": [
+        "text"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "kimi-for-coding-highspeed",
+      "object": "model",
+      "created": 1769472000,
+      "owned_by": "moonshot",
+      "type": "kimi",
+      "display_name": "Kimi for Coding Highspeed",
+      "description": "Kimi for Coding Highspeed - Low-latency coding-tuned model",
+      "context_length": 262144,
+      "max_completion_tokens": 32768,
+      "supportedInputModalities": [
+        "text"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "kimi-latest",
+      "object": "model",
+      "created": 1769472000,
+      "owned_by": "moonshot",
+      "type": "kimi",
+      "display_name": "Kimi Latest",
+      "description": "Kimi Latest - Moonshot AI's rolling latest model alias",
+      "context_length": 262144,
+      "max_completion_tokens": 32768,
+      "supportedInputModalities": [
+        "text"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },    {
       "id": "kimi-k2.6",
       "object": "model",
       "created": 1776729600,
@@ -3687,6 +3763,160 @@
         "max": 65535,
         "dynamic_allowed": true,
         "levels": [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gemini-3.5-flash-high",
+      "object": "model",
+      "owned_by": "antigravity",
+      "type": "antigravity",
+      "display_name": "Gemini 3.5 Flash",
+      "name": "gemini-3.5-flash-high",
+      "description": "Gemini 3.5 Flash (High)",
+      "context_length": 1048576,
+      "max_completion_tokens": 65535,
+      "thinking": {
+        "min": 1,
+        "max": 65535,
+        "dynamic_allowed": true,
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gemini-3.6-flash-low",
+      "object": "model",
+      "owned_by": "antigravity",
+      "type": "antigravity",
+      "display_name": "Gemini 3.6 Flash",
+      "name": "gemini-3.6-flash-low",
+      "description": "Gemini 3.6 Flash (Low)",
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "thinking": {
+        "min": 1,
+        "max": 65535,
+        "dynamic_allowed": true,
+        "levels": [
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gemini-3.6-flash-medium",
+      "object": "model",
+      "owned_by": "antigravity",
+      "type": "antigravity",
+      "display_name": "Gemini 3.6 Flash",
+      "name": "gemini-3.6-flash-medium",
+      "description": "Gemini 3.6 Flash (Medium)",
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "thinking": {
+        "min": 1,
+        "max": 65535,
+        "dynamic_allowed": true,
+        "levels": [
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gemini-3.7-flash-low",
+      "object": "model",
+      "owned_by": "antigravity",
+      "type": "antigravity",
+      "display_name": "Gemini 3.7 Flash",
+      "name": "gemini-3.7-flash-low",
+      "description": "Gemini 3.7 Flash (Low)",
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "thinking": {
+        "min": 1,
+        "max": 65535,
+        "dynamic_allowed": true,
+        "levels": [
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gemini-3.7-flash-medium",
+      "object": "model",
+      "owned_by": "antigravity",
+      "type": "antigravity",
+      "display_name": "Gemini 3.7 Flash",
+      "name": "gemini-3.7-flash-medium",
+      "description": "Gemini 3.7 Flash (Medium)",
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "thinking": {
+        "min": 1,
+        "max": 65535,
+        "dynamic_allowed": true,
+        "levels": [
+          "minimal",
           "low",
           "medium",
           "high"

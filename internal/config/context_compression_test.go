@@ -22,6 +22,10 @@ func TestContextCompressionValidationFailsClosed(t *testing.T) {
 	if err := base.Validate(); err == nil {
 		t.Fatal("unverified TARE accepted")
 	}
+	base.Engine = ContextCompressionRTKTARE
+	if err := base.Validate(); err == nil {
+		t.Fatal("unverified rtk_tare accepted")
+	}
 }
 
 func TestLoadContextCompressionBundledTAREFallback(t *testing.T) {
@@ -120,5 +124,45 @@ func TestContextCompressionNormalizesHyphenAliasToCanonicalUnderscore(t *testing
 	}
 	if !strings.Contains(string(out), "tare_structural") {
 		t.Fatalf("canonical yaml=%s", out)
+	}
+}
+
+func TestContextCompressionNormalizesCombinedAliasToCanonicalValue(t *testing.T) {
+	for _, alias := range []string{"rtk+tare", "rtk_tare"} {
+		var cfg Config
+		if err := yaml.Unmarshal([]byte("context-compression:\n  engine: "+alias+"\n"), &cfg); err != nil {
+			t.Fatal(err)
+		}
+		cfg.ContextCompression.applyDefaults()
+		if cfg.ContextCompression.Engine != ContextCompressionRTKTARE {
+			t.Fatalf("alias=%q engine=%q", alias, cfg.ContextCompression.Engine)
+		}
+		out, err := yaml.Marshal(cfg.ContextCompression)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(out), "rtk_tare") || strings.Contains(string(out), "rtk+tare") {
+			t.Fatalf("alias=%q canonical yaml=%s", alias, out)
+		}
+	}
+}
+
+func TestLoadContextCompressionBundledTAREFallbackForCombined(t *testing.T) {
+	const checksum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	binaryPath := filepath.Join(t.TempDir(), "tare")
+	t.Setenv(bundledTAREBinaryEnv, binaryPath)
+	t.Setenv(bundledTARESHA256Env, checksum)
+	t.Setenv(bundledTAREVersionEnv, "0.2.0")
+	t.Setenv(bundledTAREManifestIDEnv, "tare-cli-0.2.0-a8d74e91")
+
+	cfg := loadCompressionConfig(t, "context-compression:\n  engine: rtk+tare\n")
+	if cfg.ContextCompression.Engine != ContextCompressionRTKTARE ||
+		cfg.ContextCompression.TARE.BinaryPath != binaryPath || cfg.ContextCompression.TARE.SHA256 != checksum ||
+		len(cfg.ContextCompression.TARE.AllowedVersions) != 1 || cfg.ContextCompression.TARE.AllowedVersions[0] != "0.2.0" ||
+		cfg.ContextCompression.TARE.ManifestID != "tare-cli-0.2.0-a8d74e91" {
+		t.Fatalf("bundled identity not applied for combined engine: %#v", cfg.ContextCompression)
+	}
+	if err := cfg.ContextCompression.Validate(); err != nil {
+		t.Fatalf("combined with bundled identity rejected: %v", err)
 	}
 }

@@ -40,6 +40,7 @@ const codexAlphaSearchSourceFormat = "codex-alpha-search"
 // setupRoutes configures the API routes for the server.
 // It defines the endpoints and associates them with their respective handlers.
 func (s *Server) setupRoutes() {
+	ConfigureAPIKeyPolicies(s.cfg)
 	healthzHandler := func(c *gin.Context) {
 		if c.Request.Method == http.MethodHead {
 			c.Status(http.StatusOK)
@@ -52,6 +53,10 @@ func (s *Server) setupRoutes() {
 	s.engine.HEAD("/healthz", healthzHandler)
 
 	s.engine.GET("/management.html", s.serveManagementControlPanel)
+	// Assets referenced by the embedded single-file panel. Only these explicit
+	// paths are exposed; arbitrary files in the config/static dir stay private.
+	s.engine.GET("/favicon.svg", s.serveManagementAsset("favicon.svg"))
+	s.engine.GET("/providers/*path", s.serveManagementProviderAsset)
 	openaiHandlers := openai.NewOpenAIAPIHandler(s.handlers)
 	geminiHandlers := gemini.NewGeminiAPIHandler(s.handlers)
 	claudeCodeHandlers := claude.NewClaudeCodeAPIHandler(s.handlers)
@@ -60,11 +65,11 @@ func (s *Server) setupRoutes() {
 
 	// OpenAI compatible API routes
 	v1 := s.engine.Group("/v1")
-	v1.Use(AuthMiddleware(s.accessManager))
+	v1.Use(AuthMiddleware(s.accessManager), APIKeyPolicyMiddleware())
 	{
-		v1.GET("/models", s.unifiedModelsHandler(openaiHandlers, claudeCodeHandlers))
-		v1.POST("/chat/completions", openaiHandlers.ChatCompletions)
-		v1.POST("/completions", openaiHandlers.Completions)
+		v1.GET("/models", s.combosAugmentModels(s.unifiedModelsHandler(openaiHandlers, claudeCodeHandlers)))
+		v1.POST("/chat/completions", s.combosChatWrapper(openaiHandlers.ChatCompletions))
+		v1.POST("/completions", s.combosChatWrapper(openaiHandlers.Completions))
 		v1.POST("/images/generations", openaiHandlers.ImagesGenerations)
 		v1.POST("/images/edits", openaiHandlers.ImagesEdits)
 		v1.POST("/videos", openaiHandlers.XAIVideosGenerations)
@@ -72,10 +77,10 @@ func (s *Server) setupRoutes() {
 		v1.POST("/videos/edits", openaiHandlers.XAIVideosEdits)
 		v1.POST("/videos/extensions", openaiHandlers.XAIVideosExtensions)
 		v1.GET("/videos/:request_id", openaiHandlers.XAIVideosRetrieve)
-		v1.POST("/messages", claudeCodeHandlers.ClaudeMessages)
+		v1.POST("/messages", s.combosChatWrapper(claudeCodeHandlers.ClaudeMessages))
 		v1.POST("/messages/count_tokens", claudeCodeHandlers.ClaudeCountTokens)
 		v1.GET("/responses", openaiResponsesHandlers.ResponsesWebsocket)
-		v1.POST("/responses", openaiResponsesHandlers.Responses)
+		v1.POST("/responses", s.combosChatWrapper(openaiResponsesHandlers.Responses))
 		v1.POST("/responses/compact", openaiResponsesHandlers.Compact)
 		v1.POST("/alpha/search", s.codexAlphaSearch)
 		v1.POST("/live", s.codexLiveHandler.Handle)
@@ -100,7 +105,7 @@ func (s *Server) setupRoutes() {
 	s.engine.POST("/v1/realtime/calls/:call_id/refer", standardAuth, s.codexLiveHandler.HandleSIPControl)
 
 	openaiV1 := s.engine.Group("/openai/v1")
-	openaiV1.Use(AuthMiddleware(s.accessManager))
+	openaiV1.Use(AuthMiddleware(s.accessManager), APIKeyPolicyMiddleware())
 	{
 		openaiV1.POST("/videos", openaiHandlers.VideosCreate)
 		openaiV1.GET("/videos/:video_id/content", openaiHandlers.VideosContent)
@@ -109,7 +114,7 @@ func (s *Server) setupRoutes() {
 
 	// Codex CLI direct route aliases (chatgpt_base_url compatible)
 	codexDirect := s.engine.Group("/backend-api/codex")
-	codexDirect.Use(AuthMiddleware(s.accessManager))
+	codexDirect.Use(AuthMiddleware(s.accessManager), APIKeyPolicyMiddleware())
 	{
 		codexDirect.GET("/responses", openaiResponsesHandlers.ResponsesWebsocket)
 		codexDirect.POST("/responses", openaiResponsesHandlers.Responses)
@@ -119,7 +124,7 @@ func (s *Server) setupRoutes() {
 
 	// Gemini compatible API routes
 	v1beta := s.engine.Group("/v1beta")
-	v1beta.Use(AuthMiddleware(s.accessManager))
+	v1beta.Use(AuthMiddleware(s.accessManager), APIKeyPolicyMiddleware())
 	{
 		v1beta.GET("/models", s.geminiModelsHandler(geminiHandlers))
 		v1beta.POST("/interactions", geminiHandlers.Interactions)
@@ -127,8 +132,24 @@ func (s *Server) setupRoutes() {
 		v1beta.GET("/models/*action", s.geminiGetHandler(geminiHandlers))
 	}
 
-	// Root endpoint
+	// Root endpoint: open the management dashboard directly (9Router-style).
+	// When the control panel is unavailable (headless/docker builds without
+	// the asset), fall back to the legacy API summary, also kept at /api-info.
 	s.engine.GET("/", func(c *gin.Context) {
+		if _, ok := s.managementPanelFile(); ok {
+			c.Redirect(http.StatusFound, "/management.html")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message": "CLI Proxy API Server",
+			"endpoints": []string{
+				"POST /v1/chat/completions",
+				"POST /v1/completions",
+				"GET /v1/models",
+			},
+		})
+	})
+	s.engine.GET("/api-info", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "CLI Proxy API Server",
 			"endpoints": []string{

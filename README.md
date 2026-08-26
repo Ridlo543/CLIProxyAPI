@@ -2,6 +2,73 @@
 
 English | [中文](README_CN.md) | [日本語](README_JA.md)
 
+## AinyRouter fork — run locally like 9Router
+
+### Install (end users, Windows)
+
+```powershell
+irm https://raw.githubusercontent.com/Ridlo543/CLIProxyAPI/ainyrouter-control-plane/install.ps1 | iex
+```
+
+Then open a NEW terminal:
+
+```text
+ainyrouter        # server + console menu (Web UI / Hide to Tray / Exit)
+```
+
+The installer prints a fresh **management key**; the dashboard will ask for it
+once on first run. Everything lives under `%LOCALAPPDATA%\AinyRouter`.
+
+### Build from source
+
+```powershell
+pwsh scripts\build-local.ps1      # panel -> embed -> ainyrouter.exe
+pwsh scripts\install-user.ps1     # same install as above, from your build
+pwsh scripts\tray-e2e.ps1         # guided tray interaction test
+```
+
+Linux (systemd user service):
+
+```bash
+bash scripts/install-systemd.sh   # binary + config + panel + systemd unit
+systemctl --user status ainyrouter
+```
+
+Releases are cut by pushing an `ainyrouter-v*` tag (`ainyrouter-release`
+workflow): `ainyrouter-windows-amd64.zip`, `ainyrouter-linux-amd64.tar.gz`,
+and the one-line `install.ps1` are attached automatically.
+
+### The console menu
+
+```
+AinyRouter dev
+  🚀 Server: http://localhost:18400
+========================================
+
+ 1) Web UI (Open in Browser)
+ 2) Hide to Tray (Background)
+ q) Exit
+> 
+```
+
+- **1** opens the management dashboard — the router serves it directly at
+  `http://localhost:18400/` (root redirects to `/management.html`).
+- **2** hides this window to the system tray (Windows); restore or quit from the tray icon.
+- `q` shuts the server down cleanly.
+
+Install the embedded panel into an existing deployment:
+
+```powershell
+.\ainyrouter.exe -panel-install --config .\config.yaml
+```
+
+Other useful modes: `-service install|start|stop|status|run` (run as a Windows
+service), `--no-menu` for plain log output, and `AINYROUTER_HEADLESS=1` to
+force headless runs. On Linux/macOS the same binary works; hide-to-tray falls
+back to your init system.
+
+---
+
 If you want to use CLIProxyAPI on your desktop, we recommend our [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) desktop client. It provides a graphical configuration UI, automatic updates, system tray integration, and one-click start/stop for the CLIProxyAPI service.
 
 CLIProxyAPI is a proxy server that provides OpenAI/Gemini/Claude/Codex/Grok compatible API interfaces for CLI.

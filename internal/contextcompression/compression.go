@@ -43,7 +43,7 @@ type Stats struct {
 
 // SanitizeStats enforces the telemetry boundary even for alternate engine implementations.
 func SanitizeStats(stats Stats) Stats {
-	validEngines := map[string]bool{"off": true, "rtk": true, "tare_structural": true}
+	validEngines := map[string]bool{"off": true, "rtk": true, "tare_structural": true, "rtk_tare": true}
 	validReasons := map[string]bool{"disabled": true, "applied": true, "no_eligible": true, "unavailable": true, "checksum_required": true, "checksum_mismatch": true, "version_mismatch": true, "spawn_error": true, "nonzero": true, "timeout": true, "queue_timeout": true, "aborted": true, "shutdown": true, "input_limit": true, "stdout_limit": true, "stderr_limit": true, "stdin_error": true, "invalid_utf8": true, "not_smaller": true, "unknown": true, "opt_out": true, "invalid_json": true}
 	if !validEngines[stats.Engine] {
 		stats.Engine = ""
@@ -95,10 +95,13 @@ func (r *Runtime) Apply(ctx context.Context, raw []byte, cfg config.ContextCompr
 		return raw, finish()
 	}
 	slotCap := cfg.RawCapBytes
+	combined := cfg.Engine == config.ContextCompressionRTKTARE
 	if cfg.Engine == config.ContextCompressionTARE || cfg.Engine == "tare-structural" {
 		cfg.Engine = config.ContextCompressionTARE
+	}
+	if cfg.Engine == config.ContextCompressionTARE || combined {
 		slotCap = maxTARESlotBytes
-		stats.Engine = config.ContextCompressionTARE
+		stats.Engine = cfg.Engine
 	}
 	slots := collectSlots(body, slotCap)
 	if cfg.Engine == config.ContextCompressionRTK {
@@ -116,10 +119,12 @@ func (r *Runtime) Apply(ctx context.Context, raw []byte, cfg config.ContextCompr
 		return raw, finish()
 	}
 	var ok bool
-	switch cfg.Engine {
-	case config.ContextCompressionRTK:
+	switch {
+	case combined:
+		ok = r.applyRTKTare(ctx, slots, cfg, &stats)
+	case cfg.Engine == config.ContextCompressionRTK:
 		ok = applyRTK(slots, cfg.MinBytes, &stats)
-	case config.ContextCompressionTARE:
+	case cfg.Engine == config.ContextCompressionTARE:
 		if r == nil || r.tare == nil {
 			stats.Reason = "shutdown"
 			return raw, finish()
@@ -141,4 +146,61 @@ func (r *Runtime) Apply(ctx context.Context, raw []byte, cfg config.ContextCompr
 	stats.Applied = true
 	stats.Reason = "applied"
 	return out, finish()
+}
+
+// applyRTKTare runs TARE structurally first, then applies RTK to the slots the
+// TARE pass left unchanged. The underlying TARE engine is all-or-nothing per
+// call, so slots are submitted individually to get true partial success.
+// A single-slot call that reports success had its write closure applied to the
+// decoded body, which is the ground truth for per-slot change detection; the
+// slot's text field is a value copy and never reflects TARE output. Stats are
+// merged only from successful calls so failed attempts cannot double count. A
+// missing TARE runtime degrades gracefully to RTK-only.
+func (r *Runtime) applyRTKTare(ctx context.Context, slots []slot, cfg config.ContextCompressionConfig, stats *Stats) bool {
+	tareCompressed := make([]bool, len(slots))
+	if r != nil && r.tare != nil {
+		for i := range slots {
+			scratch := Stats{}
+			if !r.tare.compress(ctx, slots[i:i+1], cfg.TARE, &scratch) {
+				continue
+			}
+			tareCompressed[i] = true
+			stats.CacheHits += scratch.CacheHits
+			stats.BytesBefore += scratch.BytesBefore
+			stats.BytesAfter += scratch.BytesAfter
+			if stats.Version == "" {
+				stats.Version = scratch.Version
+			}
+			if stats.ManifestID == "" {
+				stats.ManifestID = scratch.ManifestID
+			}
+		}
+	}
+	compressedByTare := 0
+	remaining := make([]slot, 0, len(slots))
+	for i := range slots {
+		if tareCompressed[i] {
+			compressedByTare++
+			continue
+		}
+		if len([]byte(slots[i].text)) >= cfg.MinBytes {
+			remaining = append(remaining, slots[i])
+		}
+	}
+	rtkCompressed := 0
+	if len(remaining) > 0 {
+		scratch := Stats{}
+		if applyRTK(remaining, cfg.MinBytes, &scratch) {
+			rtkCompressed = scratch.Compressed
+		}
+		stats.BytesBefore += scratch.BytesBefore
+		stats.BytesAfter += scratch.BytesAfter
+	}
+	stats.Compressed = compressedByTare + rtkCompressed
+	if stats.Compressed == 0 {
+		stats.Reason = "no_eligible"
+		return false
+	}
+	stats.Reason = "applied"
+	return true
 }

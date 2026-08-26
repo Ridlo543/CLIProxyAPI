@@ -1,0 +1,76 @@
+# AinyRouter release: tagged builds with the embedded control panel.
+#
+# The single-file panel is vendored into internal/panelasset/panel (refresh it
+# with scripts/build-local.ps1 before tagging), so no cross-repo checkout is
+# needed here.
+#
+# Produces:
+#   ainyrouter-windows-amd64.zip
+#   ainyrouter-linux-amd64.tar.gz
+#   install.ps1 (one-line remote installer entry point)
+name: ainyrouter-release
+
+on:
+  push:
+    tags: ['ainyrouter-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            archive: ainyrouter-windows-amd64.zip
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            archive: ainyrouter-linux-amd64.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        shell: pwsh
+        run: |
+          $ext = if ('${{ matrix.goos }}' -eq 'windows') { '.exe' } else { '' }
+          $env:GOOS='${{ matrix.goos }}'; $env:GOARCH='${{ matrix.goarch }}'; $env:CGO_ENABLED='0'
+          go build -ldflags "-s -w -X main.Version=${{ github.ref_name }} -X main.Commit=${{ github.sha }}" -o "dist/ainyrouter$ext" ./cmd/server
+          Copy-Item README.md dist/
+          New-Item -ItemType Directory -Force -Path dist/scripts | Out-Null
+          Copy-Item scripts/install-user.ps1 dist/scripts/ -ErrorAction SilentlyContinue
+      - name: Package
+        shell: pwsh
+        run: |
+          if ('${{ matrix.goos }}' -eq 'windows') {
+            Compress-Archive -Path dist/* -DestinationPath '${{ matrix.archive }}'
+          } else {
+            tar -czf '${{ matrix.archive }}' -C dist .
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          path: ${{ matrix.archive }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ainyrouter-*
+          merge-multiple: true
+          path: release
+      - run: cp scripts/install.ps1 release/install.ps1
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release/*

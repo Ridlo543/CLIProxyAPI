@@ -35,8 +35,10 @@ func (h *Host) callHostModelExecuteStream(ctx context.Context, request []byte) (
 	streamID := ""
 	if h.modelStreams != nil {
 		streamID = h.modelStreams.open(req.HostCallbackID, stream.Chunks, cancel)
+		// Ownership transferred: registry close and callback cleanup own cancel.
+		cancel = nil
 	}
-	if streamID == "" {
+	if cancel != nil {
 		cancel()
 		return nil, fmt.Errorf("host model stream bridge is unavailable")
 	}

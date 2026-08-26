@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/combos"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers"
@@ -196,6 +197,8 @@ func (h *Host) ApplyConfig(ctx context.Context, cfg *config.Config) {
 	if h == nil || !h.lockApply(ctx) {
 		return
 	}
+	// Combos: keep the runtime snapshot in sync at boot and on every save.
+	combos.SyncFromConfig(cfg)
 	defer h.unlockApply()
 	if ctx == nil {
 		ctx = context.Background()

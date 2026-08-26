@@ -102,7 +102,9 @@ func fakeTAREConfig(t *testing.T) config.ContextCompressionConfig {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(data)
-	return config.ContextCompressionConfig{Engine: config.ContextCompressionTARE, MinBytes: 500, RawCapBytes: 10 * 1024 * 1024, TARE: config.TAREStructuralConfig{BinaryPath: binary, SHA256: fmt.Sprintf("%x", sum), AllowedVersions: []string{"0.2.0"}, ManifestID: "tare-cli-test", ProcessTimeoutMS: 300, QueueTimeoutMS: 50, InputLimitBytes: 1024*1024 + 1024, StdoutLimitBytes: 1024 * 1024, StderrLimitBytes: 64 * 1024, GlobalConcurrency: 1, CacheEntries: 128, CacheBytes: 16 * 1024 * 1024}}
+	// ProcessTimeoutMS must tolerate -race overhead on shared CI runners:
+	// the budget guards the real binary in production, not this fake script.
+	return config.ContextCompressionConfig{Engine: config.ContextCompressionTARE, MinBytes: 500, RawCapBytes: 10 * 1024 * 1024, TARE: config.TAREStructuralConfig{BinaryPath: binary, SHA256: fmt.Sprintf("%x", sum), AllowedVersions: []string{"0.2.0"}, ManifestID: "tare-cli-test", ProcessTimeoutMS: 8000, QueueTimeoutMS: 4000, InputLimitBytes: 1024*1024 + 1024, StdoutLimitBytes: 1024 * 1024, StderrLimitBytes: 64 * 1024, GlobalConcurrency: 1, CacheEntries: 128, CacheBytes: 16 * 1024 * 1024}}
 }
 func marked(v string) string { return "[[FAKE_TARE_COMPRESS]]" + v + "[[/FAKE_TARE_COMPRESS]]" }
 
@@ -274,9 +276,50 @@ func TestSanitizeStatsSchema(t *testing.T) {
 	if got := SanitizeStats(valid); got != valid {
 		t.Fatalf("valid=%+v", got)
 	}
+	if got := SanitizeStats(Stats{Engine: config.ContextCompressionRTKTARE, Reason: "applied"}); got.Engine != config.ContextCompressionRTKTARE {
+		t.Fatalf("combined engine stripped: %+v", got)
+	}
 	invalid := SanitizeStats(Stats{Engine: "credential", Reason: "control\n", Selected: -1, Compressed: -2, BytesBefore: -3, BytesAfter: -4, CacheHits: -5, ElapsedMS: -6, Version: "Bearer token", ManifestID: "../secret"})
 	if invalid.Engine != "" || invalid.Reason != "" || invalid.Selected != 0 || invalid.Compressed != 0 || invalid.BytesBefore != 0 || invalid.BytesAfter != 0 || invalid.CacheHits != 0 || invalid.ElapsedMS != 0 || invalid.Version != "" || invalid.ManifestID != "" {
 		t.Fatalf("invalid=%+v", invalid)
+	}
+}
+
+func TestRTKTareCombinedCompressesRemainingSlots(t *testing.T) {
+	defaultTARE.reset()
+	t.Cleanup(defaultTARE.reset)
+	cfg := fakeTAREConfig(t)
+	cfg.Engine = config.ContextCompressionRTKTARE
+	lines := make([]string, 600)
+	for i := range lines {
+		lines[i] = "same repeated build output line"
+	}
+	raw, _ := json.Marshal(map[string]any{"messages": []any{
+		map[string]any{"role": "tool", "content": marked("structural payload")},
+		map[string]any{"role": "tool", "content": strings.Join(lines, "\n")},
+	}})
+	out, stats := Apply(context.Background(), raw, cfg, false)
+	sanitized := SanitizeStats(stats)
+	if !stats.Applied || stats.Engine != config.ContextCompressionRTKTARE || stats.Compressed != 2 || stats.Reason != "applied" {
+		t.Fatalf("stats=%+v", stats)
+	}
+	if len(out) >= len(raw) || sanitized.Engine != config.ContextCompressionRTKTARE {
+		t.Fatalf("sanitized=%+v sizes=%d/%d", sanitized, len(out), len(raw))
+	}
+}
+
+func TestRTKTareDegradesToRTKWhenRuntimeUnavailable(t *testing.T) {
+	broken := &Runtime{}
+	lines := make([]string, 600)
+	for i := range lines {
+		lines[i] = "same repeated build output line"
+	}
+	raw, _ := json.Marshal(map[string]any{"messages": []any{map[string]any{"role": "tool", "content": strings.Join(lines, "\n")}}})
+	cfg := fakeTAREConfig(t)
+	cfg.Engine = config.ContextCompressionRTKTARE
+	out, stats := broken.Apply(context.Background(), raw, cfg, false)
+	if !stats.Applied || stats.Reason != "applied" || stats.Engine != config.ContextCompressionRTKTARE || len(out) >= len(raw) {
+		t.Fatalf("stats=%+v sizes=%d/%d", stats, len(out), len(raw))
 	}
 }
 
@@ -367,6 +410,9 @@ func TestTAREChecksumVersionAbortQueueAndCacheLimits(t *testing.T) {
 	}
 	t.Setenv("FAKE_TARE_MODE", "timeout")
 	cfg.TARE.ProcessTimeoutMS = 500
+	// Restore the tight queue budget: this case asserts the SECOND caller
+	// aborts with queue_timeout while the first still holds the single slot.
+	cfg.TARE.QueueTimeoutMS = 50
 	first := make(chan Stats, 1)
 	go func() { _, v := Apply(context.Background(), raw, cfg, false); first <- v }()
 	time.Sleep(30 * time.Millisecond)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"fmt"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/apikeypolicy"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -128,6 +129,9 @@ func (h *Handler) SetConfig(cfg *config.Config) {
 	h.mu.Lock()
 	h.cfg = cfg
 	h.mu.Unlock()
+	if cfg != nil {
+		apikeypolicy.Default().Replace(cfg.APIKeyPolicies)
+	}
 }
 
 // SetAuthManager updates the auth manager reference used by management endpoints.

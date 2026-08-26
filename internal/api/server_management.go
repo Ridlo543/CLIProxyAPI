@@ -30,6 +30,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/config", s.mgmt.GetConfig)
 		mgmt.GET("/config.yaml", s.mgmt.GetConfigYAML)
 		mgmt.PUT("/config.yaml", s.mgmt.PutConfigYAML)
+		mgmt.GET("/context-compression/tare-binary", s.mgmt.GetTareBinaryInfo)
 		mgmt.GET("/latest-version", s.mgmt.GetLatestVersion)
 		mgmt.GET("/plugins", s.mgmt.ListPlugins)
 		mgmt.GET("/plugin-store", s.mgmt.ListPluginStore)
@@ -65,6 +66,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PATCH("/proxy-url", s.mgmt.PutProxyURL)
 		mgmt.DELETE("/proxy-url", s.mgmt.DeleteProxyURL)
 		mgmt.GET("/proxy-pools", s.mgmt.GetProxyPools)
+		mgmt.GET("/provider-usage/antigravity", s.mgmt.GetAntigravityCredits)
 
 		mgmt.POST("/api-call", s.mgmt.APICall)
 
@@ -83,6 +85,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.DELETE("/api-keys", s.mgmt.DeleteAPIKeys)
 		mgmt.GET("/api-key-usage", s.mgmt.GetAPIKeyUsage)
 		mgmt.GET("/usage-queue", s.mgmt.GetUsageQueue)
+		mgmt.POST("/monitoring/analytics", s.mgmt.PostMonitoringAnalytics)
 
 		mgmt.GET("/gemini-api-key", s.mgmt.GetGeminiKeys)
 		mgmt.PUT("/gemini-api-key", s.mgmt.PutGeminiKeys)
@@ -143,6 +146,19 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PUT("/openai-compatibility", s.mgmt.PutOpenAICompat)
 		mgmt.PATCH("/openai-compatibility", s.mgmt.PatchOpenAICompat)
 		mgmt.DELETE("/openai-compatibility", s.mgmt.DeleteOpenAICompat)
+		mgmt.GET("/api-key-policies", s.mgmt.GetAPIKeyPolicies)
+		mgmt.PUT("/api-key-policies", s.mgmt.PutAPIKeyPolicies)
+		mgmt.GET("/api-key-policies/usage", s.mgmt.GetAPIKeyPolicyUsage)
+		mgmt.POST("/openai-compatibility/:name/import-models", s.mgmt.ImportOpenAICompatModels)
+		mgmt.POST("/provider-probe", s.mgmt.ProbeProvider)
+		// Combos (isolated feature — see internal/config/config_combos.go).
+		mgmt.GET("/combos", s.mgmt.ListCombos)
+		mgmt.GET("/combos/:name", s.mgmt.GetCombo)
+		mgmt.POST("/combos", s.mgmt.CreateCombo)
+		mgmt.PUT("/combos/:name", s.mgmt.UpdateCombo)
+		mgmt.DELETE("/combos/:name", s.mgmt.DeleteCombo)
+		mgmt.GET("/oauth-model-alias/:channel", s.mgmt.GetOAuthModelAliasChannel)
+		mgmt.POST("/oauth-model-alias/:channel", s.mgmt.AddOAuthModelAliases)
 
 		mgmt.GET("/vertex-api-key", s.mgmt.GetVertexCompatKeys)
 		mgmt.PUT("/vertex-api-key", s.mgmt.PutVertexCompatKeys)
@@ -169,6 +185,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/model-definitions/:channel", s.mgmt.GetStaticModelDefinitions)
 		mgmt.GET("/auth-files/download", s.mgmt.DownloadAuthFile)
 		mgmt.POST("/auth-files", s.mgmt.UploadAuthFile)
+		mgmt.POST("/auth-files/test", s.mgmt.TestAuthFile)
 		mgmt.DELETE("/auth-files", s.mgmt.DeleteAuthFile)
 		mgmt.PATCH("/auth-files/status", s.mgmt.PatchAuthFileStatus)
 		mgmt.PATCH("/auth-files/fields", s.mgmt.PatchAuthFileFields)
@@ -288,6 +305,23 @@ func (s *Server) pluginResourceNoRoute(c *gin.Context) {
 		return
 	}
 	c.AbortWithStatus(http.StatusNotFound)
+}
+
+// managementPanelFile returns the on-disk management.html path when the
+// control panel is enabled and its asset exists.
+func (s *Server) managementPanelFile() (string, bool) {
+	cfg := s.cfg
+	if cfg == nil || cfg.Home.Enabled || cfg.RemoteManagement.DisableControlPanel {
+		return "", false
+	}
+	panelPath := managementasset.FilePath(s.configFilePath)
+	if panelPath == "" {
+		return "", false
+	}
+	if _, err := os.Stat(panelPath); err != nil {
+		return "", false
+	}
+	return panelPath, true
 }
 
 func (s *Server) serveManagementControlPanel(c *gin.Context) {

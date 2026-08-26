@@ -773,3 +773,33 @@ func antigravityWait(ctx context.Context, wait time.Duration) error {
 		return nil
 	}
 }
+
+// CreditsBalanceSnapshot is the exported view of antigravityCreditsBalance
+// for management APIs.
+type CreditsBalanceSnapshot struct {
+	CreditAmount    float64 `json:"credit_amount"`
+	MinCreditAmount float64 `json:"min_credit_amount"`
+	PaidTierID      string  `json:"paid_tier_id,omitempty"`
+	Known           bool    `json:"known"`
+}
+
+// AntigravityCreditsSnapshot returns the in-memory credits balance keyed by
+// auth ID so management endpoints can expose real provider quota data.
+func AntigravityCreditsSnapshot() map[string]CreditsBalanceSnapshot {
+	out := make(map[string]CreditsBalanceSnapshot)
+	antigravityCreditsBalanceByAuth.Range(func(key, value any) bool {
+		id, _ := key.(string)
+		bal, ok := value.(antigravityCreditsBalance)
+		if !ok || id == "" {
+			return true
+		}
+		out[id] = CreditsBalanceSnapshot{
+			CreditAmount:    bal.CreditAmount,
+			MinCreditAmount: bal.MinCreditAmount,
+			PaidTierID:      bal.PaidTierID,
+			Known:           bal.Known,
+		}
+		return true
+	})
+	return out
+}

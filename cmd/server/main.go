@@ -34,6 +34,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/store"
 	_ "github.com/router-for-me/CLIProxyAPI/v7/internal/translator"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/tui"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagestore"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
@@ -84,6 +85,10 @@ func main() {
 	var vertexImport string
 	var vertexImportPrefix string
 	var configPath string
+	var serviceAction string
+	var panelInstall bool
+	var forceMenu bool
+	var noMenu bool
 	var password string
 	var homeJWT string
 	var homeDisableClusterDiscovery bool
@@ -101,6 +106,10 @@ func main() {
 	flag.BoolVar(&kimiLogin, "kimi-login", false, "Login to Kimi using OAuth")
 	flag.BoolVar(&xaiLogin, "xai-login", false, "Login to xAI using OAuth")
 	flag.StringVar(&configPath, "config", DefaultConfigPath, "Configure File Path")
+	flag.StringVar(&serviceAction, "service", "", "Windows service management: install|remove|start|stop|status|run")
+	flag.BoolVar(&panelInstall, "panel-install", false, "Install the embedded management panel into the static dir")
+	flag.BoolVar(&forceMenu, "menu", false, "Show the interactive console menu (default on real terminals)")
+	flag.BoolVar(&noMenu, "no-menu", false, "Disable the interactive console menu")
 	flag.StringVar(&vertexImport, "vertex-import", "", "Import Vertex service account key JSON file")
 	flag.StringVar(&vertexImportPrefix, "vertex-import-prefix", "", "Prefix for Vertex model namespacing (use with -vertex-import)")
 	flag.StringVar(&password, "password", "", "")
@@ -145,6 +154,31 @@ func main() {
 
 	// Parse the command-line flags.
 	flag.Parse()
+
+	// Bare `ainyrouter` must work from any directory: fall back to the
+	// per-user install location when ./config.yaml does not exist.
+	configPath = cmd.ResolveConfigPath(configPath)
+
+	// Windows service management actions run before any application init:
+	// they only need the service registry, not a loaded configuration.
+	if serviceAction != "" && serviceAction != "run" {
+		if errService := cmd.HandleWindowsService(serviceAction, configPath); errService != nil {
+			fmt.Fprintf(os.Stderr, "service error: %v\n", errService)
+			os.Exit(1)
+		}
+		return
+	}
+	if panelInstall {
+		if errPanel := cmd.HandlePanelInstall(flag.CommandLine, configPath); errPanel != nil {
+			fmt.Fprintf(os.Stderr, "panel install error: %v\n", errPanel)
+			os.Exit(1)
+		}
+		return
+	}
+	if serviceAction == "run" && !cmd.IsWindowsServiceRun() {
+		fmt.Fprintf(os.Stderr, "service error: %v\n", cmd.ErrNotUnderServiceControl)
+		os.Exit(1)
+	}
 
 	// Core application variables.
 	var err error
@@ -561,6 +595,9 @@ func main() {
 	}
 	redisqueue.SetUsageStatisticsEnabled(cfg.UsageStatisticsEnabled)
 	redisqueue.SetRetentionSeconds(cfg.RedisUsageQueueRetentionSeconds)
+	if err = usagestore.Configure(filepath.Join(cfg.AuthDir, "usage")); err != nil {
+		log.Errorf("usage persistence disabled: %v", err)
+	}
 	coreauth.SetQuotaCooldownDisabled(cfg.DisableCooling)
 	coreauth.SetTransientErrorCooldownSeconds(cfg.TransientErrorCooldownSeconds)
 
@@ -752,6 +789,27 @@ func main() {
 			managementasset.StartAutoUpdater(context.Background(), configFilePath)
 			misc.StartAntigravityVersionUpdater(context.Background())
 			startModelCatalogUpdaters(localModel, cfg.Home.Enabled)
+			if serviceAction == "run" {
+				if errService := cmd.RunWindowsService(cfg, configFilePath, password, pluginHost, serverOptions...); errService != nil {
+					log.Errorf("windows service run failed: %v", errService)
+					os.Exit(1)
+				}
+				return
+			}
+			if cmd.ShouldUseConsoleMenu(forceMenu, noMenu, cmd.StdinIsTerminal()) {
+				if errMenu := cmd.RunConsoleMenu(cmd.ConsoleMenuOptions{
+					Cfg:           cfg,
+					ConfigPath:    configFilePath,
+					LocalPassword: password,
+					Host:          pluginHost,
+					ServerOptions: serverOptions,
+					Version:       Version,
+				}); errMenu != nil {
+					log.Errorf("console menu failed: %v", errMenu)
+					os.Exit(1)
+				}
+				return
+			}
 			cmd.StartServiceWithPluginHost(cfg, configFilePath, password, pluginHost, serverOptions...)
 		}
 	}

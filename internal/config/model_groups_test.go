@@ -34,6 +34,7 @@ func TestNormalizeModelGroupsRejectsInvalidDefinitions(t *testing.T) {
 		{"empty target", []ModelGroup{{Name: "auto", Models: []ModelGroupMember{{Provider: "p"}}}}, "must not be empty"},
 		{"duplicate member", []ModelGroup{{Name: "auto", Models: []ModelGroupMember{{Provider: "P", Model: "m"}, {Provider: "p", Model: "M"}}}}, "duplicate member"},
 		{"group reference", []ModelGroup{{Name: "auto", Models: []ModelGroupMember{{Provider: "p", Model: "other"}}}, {Name: "other", Models: []ModelGroupMember{{Provider: "q", Model: "m"}}}}, "references a model group"},
+		{"unknown strategy", []ModelGroup{{Name: "auto", Strategy: "random", Models: []ModelGroupMember{{Provider: "p", Model: "m"}}}}, "strategy must be"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -42,5 +43,26 @@ func TestNormalizeModelGroupsRejectsInvalidDefinitions(t *testing.T) {
 				t.Fatalf("error = %v, want containing %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeModelGroupsStrategy(t *testing.T) {
+	groups := []ModelGroup{
+		{Name: "a", Models: []ModelGroupMember{{Provider: "p", Model: "m"}}},
+		{Name: "b", Strategy: " Round-Robin ", Models: []ModelGroupMember{{Provider: "p", Model: "m"}}},
+		{Name: "c", Strategy: "ORDERED-FALLBACK", Models: []ModelGroupMember{{Provider: "p", Model: "m"}}},
+	}
+	got, err := NormalizeModelGroups(groups)
+	if err != nil {
+		t.Fatalf("NormalizeModelGroups() error = %v", err)
+	}
+	if got[0].Strategy != "" {
+		t.Fatalf("empty strategy = %q, want empty", got[0].Strategy)
+	}
+	if got[1].Strategy != "round-robin" {
+		t.Fatalf("round-robin strategy = %q", got[1].Strategy)
+	}
+	if got[2].Strategy != "ordered-fallback" {
+		t.Fatalf("ordered-fallback strategy = %q", got[2].Strategy)
 	}
 }

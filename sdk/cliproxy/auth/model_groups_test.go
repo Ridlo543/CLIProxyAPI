@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
@@ -55,21 +56,30 @@ func groupManager(t *testing.T, executors ...*groupExecutor) *Manager {
 }
 
 func TestExecuteModelGroupOrderedFallbackAndNonRetryableStop(t *testing.T) {
-	var attempts []string
-	first := &groupExecutor{provider: "first", err: &Error{HTTPStatus: http.StatusServiceUnavailable, Message: "down"}, attempts: &attempts}
-	second := &groupExecutor{provider: "second", attempts: &attempts}
-	m := groupManager(t, first, second)
-	targets := []ModelGroupTarget{{Provider: "first", Model: "one"}, {Provider: "second", Model: "two"}}
-	resp, err := m.ExecuteModelGroup(context.Background(), targets, cliproxyexecutor.Request{}, cliproxyexecutor.Options{})
-	if err != nil || string(resp.Payload) != "second" || len(attempts) != 2 || attempts[0] != "first/one" || attempts[1] != "second/two" {
-		t.Fatalf("response = %q, error = %v, attempts = %v", resp.Payload, err, attempts)
-	}
-	attempts = nil
-	first.err = &Error{HTTPStatus: http.StatusBadRequest, Message: "bad"}
-	_, err = m.ExecuteModelGroup(context.Background(), targets, cliproxyexecutor.Request{}, cliproxyexecutor.Options{})
-	if err == nil || len(attempts) != 1 {
-		t.Fatalf("error = %v, attempts = %v", err, attempts)
-	}
+	t.Run("ordered fallback on retryable error", func(t *testing.T) {
+		var attempts []string
+		first := &groupExecutor{provider: "first", err: &Error{HTTPStatus: http.StatusServiceUnavailable, Message: "down"}, attempts: &attempts}
+		second := &groupExecutor{provider: "second", attempts: &attempts}
+		m := groupManager(t, first, second)
+		targets := []ModelGroupTarget{{Provider: "first", Model: "one"}, {Provider: "second", Model: "two"}}
+		resp, err := m.ExecuteModelGroup(context.Background(), targets, cliproxyexecutor.Request{}, cliproxyexecutor.Options{})
+		if err != nil || string(resp.Payload) != "second" || len(attempts) != 2 || attempts[0] != "first/one" || attempts[1] != "second/two" {
+			t.Fatalf("response = %q, error = %v, attempts = %v", resp.Payload, err, attempts)
+		}
+	})
+	t.Run("non-retryable error stops immediately", func(t *testing.T) {
+		// Fresh manager: the fallback case above legitimately cools the first
+		// credential down after its 503, and availability must be honored.
+		var attempts []string
+		first := &groupExecutor{provider: "first", err: &Error{HTTPStatus: http.StatusBadRequest, Message: "bad"}, attempts: &attempts}
+		second := &groupExecutor{provider: "second", attempts: &attempts}
+		m := groupManager(t, first, second)
+		targets := []ModelGroupTarget{{Provider: "first", Model: "one"}, {Provider: "second", Model: "two"}}
+		_, err := m.ExecuteModelGroup(context.Background(), targets, cliproxyexecutor.Request{}, cliproxyexecutor.Options{})
+		if err == nil || len(attempts) != 1 {
+			t.Fatalf("error = %v, attempts = %v", err, attempts)
+		}
+	})
 }
 
 func TestExecuteModelGroupCancellationStopsImmediately(t *testing.T) {
@@ -85,21 +95,44 @@ func TestExecuteModelGroupCancellationStopsImmediately(t *testing.T) {
 
 func TestExecuteStreamModelGroupFallsBackOnlyBeforeResult(t *testing.T) {
 	var attempts []string
-	chunks := make(chan cliproxyexecutor.StreamChunk)
+	bootstrapStream := func() *cliproxyexecutor.StreamResult {
+		chunks := make(chan cliproxyexecutor.StreamChunk, 1)
+		chunks <- cliproxyexecutor.StreamChunk{Payload: []byte("data")}
+		close(chunks)
+		return &cliproxyexecutor.StreamResult{Chunks: chunks}
+	}
+	assertBootstrap := func(result *cliproxyexecutor.StreamResult) {
+		t.Helper()
+		select {
+		case chunk := <-result.Chunks:
+			if string(chunk.Payload) != "data" {
+				t.Fatalf("bootstrap payload = %q", chunk.Payload)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timed out reading stream bootstrap")
+		}
+	}
 	first := &groupExecutor{provider: "first", streamErr: &Error{HTTPStatus: http.StatusBadGateway, Message: "bootstrap"}, attempts: &attempts}
-	second := &groupExecutor{provider: "second", stream: &cliproxyexecutor.StreamResult{Chunks: chunks}, attempts: &attempts}
+	second := &groupExecutor{provider: "second", stream: bootstrapStream(), attempts: &attempts}
 	m := groupManager(t, first, second)
 	targets := []ModelGroupTarget{{Provider: "first", Model: "one"}, {Provider: "second", Model: "two"}}
 	result, err := m.ExecuteStreamModelGroup(context.Background(), targets, cliproxyexecutor.Request{}, cliproxyexecutor.Options{})
-	if err != nil || result != second.stream || len(attempts) != 2 {
+	if err != nil || result == nil || len(attempts) != 2 {
 		t.Fatalf("result = %p, error = %v, attempts = %v", result, err, attempts)
 	}
+	assertBootstrap(result)
+
+	// Use a fresh manager for the second case: the first case legitimately
+	// records the first credential as unavailable after its bootstrap error.
 	attempts = nil
-	first.streamErr, first.stream = nil, &cliproxyexecutor.StreamResult{Chunks: chunks}
+	first = &groupExecutor{provider: "first", stream: bootstrapStream(), attempts: &attempts}
+	second = &groupExecutor{provider: "second", stream: bootstrapStream(), attempts: &attempts}
+	m = groupManager(t, first, second)
 	result, err = m.ExecuteStreamModelGroup(context.Background(), targets, cliproxyexecutor.Request{}, cliproxyexecutor.Options{})
-	if err != nil || result != first.stream || len(attempts) != 1 {
+	if err != nil || result == nil || len(attempts) != 1 {
 		t.Fatalf("result = %p, error = %v, attempts = %v", result, err, attempts)
 	}
+	assertBootstrap(result)
 }
 
 func TestModelGroupFallbackErrorClassification(t *testing.T) {

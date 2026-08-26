@@ -757,3 +757,18 @@ func TestParseMetaFloat(t *testing.T) {
 		})
 	}
 }
+
+func TestAntigravityCreditsSnapshot(t *testing.T) {
+	resetAntigravityCreditsRetryState()
+	antigravityCreditsBalanceByAuth.Store("snap-1", antigravityCreditsBalance{
+		CreditAmount:    1200.5,
+		MinCreditAmount: 100,
+		PaidTierID:      "tier-pro",
+		Known:           true,
+	})
+	snap := AntigravityCreditsSnapshot()
+	bal, ok := snap["snap-1"]
+	if !ok || bal.CreditAmount != 1200.5 || !bal.Known || bal.PaidTierID != "tier-pro" {
+		t.Fatalf("snapshot entry = %+v ok=%v", bal, ok)
+	}
+}

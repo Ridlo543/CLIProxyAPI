@@ -36,6 +36,21 @@ var (
 	searchHeaderRE  = regexp.MustCompile(`^Result of search in '[^']*' \(total (\d+) files?\):`)
 	readNumberedRE  = regexp.MustCompile(`^\s*\d+\|`)
 	lsDateRE        = regexp.MustCompile(`\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+(\d{4}|\d{2}:\d{2})\s+`)
+	// Hot-path patterns below were previously compiled inside per-line loops.
+	// regexp compilation is expensive and runs on every compressed request, so
+	// they are hoisted here and shared.
+	windowsPathRE   = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
+	lsPermRE        = regexp.MustCompile(`^[-dlbcps][rwx-]{9}`)
+	lsTotalRE       = regexp.MustCompile(`(?m)^total \d+$`)
+	gitLogCommitRE  = regexp.MustCompile(`(?i)^(commit [0-9a-f]{7,40}|[*|/\\ ]+commit [0-9a-f]{7,40})$`)
+	gitLogMetaRE    = regexp.MustCompile(`(?i)^[*|/\\ ]*(Author|Date):`)
+	gitLogStatRE    = regexp.MustCompile(`^\d+ file\w* changed`)
+	gitLogOnelineRE = regexp.MustCompile(`(?i)^[*|/\\ ]+([0-9a-f]{7,40}\s+.+)`)
+	gitLogHashRE    = regexp.MustCompile(`(?i)^[0-9a-f]{7,40}\s+`)
+	gitLogGraphRE   = regexp.MustCompile(`^[*|/\\ ]+$`)
+	gitStatusChgRE  = regexp.MustCompile(`^\s*(modified|new file|deleted|renamed|both modified):\s+(.+)$`)
+	cargoLocRE      = regexp.MustCompile(`^\s*(-->|\||\d+\s*\||=)`)
+	buildSummaryRE  = regexp.MustCompile(`(?i)^(added|removed|changed|audited|installed) \d+ package|^finished |^build success|^successfully (installed|built)`)
 )
 
 func applyRTK(slots []slot, min int, stats *Stats) bool {
@@ -134,7 +149,7 @@ func autoDetectFilter(text string) *namedFilter {
 		all := true
 		for _, line := range nonEmpty {
 			v := strings.TrimSpace(line)
-			windowsPath := regexp.MustCompile(`^[A-Za-z]:[\\/]`).MatchString(v)
+			windowsPath := windowsPathRE.MatchString(v)
 			if (!windowsPath && strings.Contains(v, ":")) || !(windowsPath || strings.HasPrefix(v, ".") || strings.HasPrefix(v, "/") || strings.Contains(v, "/")) {
 				all = false
 				break
@@ -149,11 +164,11 @@ func autoDetectFilter(text string) *namedFilter {
 	}
 	lsRows := 0
 	for _, line := range lines {
-		if regexp.MustCompile(`^[-dlbcps][rwx-]{9}`).MatchString(line) {
+		if lsPermRE.MatchString(line) {
 			lsRows++
 		}
 	}
-	if regexp.MustCompile(`(?m)^total \d+$`).MatchString(head) || lsRows >= 3 {
+	if lsTotalRE.MatchString(head) || lsRows >= 3 {
 		return &namedFilter{"ls", lsFilter}
 	}
 	if searchHeaderRE.MatchString(head) {
@@ -186,7 +201,7 @@ func gitLogFilter(input string) string {
 			skipped++
 		}
 	}
-	commitRE := regexp.MustCompile(`(?i)^(commit [0-9a-f]{7,40}|[*|/\\ ]+commit [0-9a-f]{7,40})$`)
+	commitRE := gitLogCommitRE
 	for _, raw := range lines {
 		line := strings.TrimRight(raw, "\r\t ")
 		trimmed := strings.TrimSpace(line)
@@ -197,7 +212,7 @@ func gitLogFilter(input string) string {
 			continue
 		}
 		if inCommit {
-			if regexp.MustCompile(`(?i)^[*|/\\ ]*(Author|Date):`).MatchString(trimmed) {
+			if gitLogMetaRE.MatchString(trimmed) {
 				push(trimmed)
 				continue
 			}
@@ -209,7 +224,7 @@ func gitLogFilter(input string) string {
 				subjectSeen = true
 				continue
 			}
-			if regexp.MustCompile(`^\d+ file\w* changed`).MatchString(trimmed) {
+			if gitLogStatRE.MatchString(trimmed) {
 				push("  " + trimmed)
 				continue
 			}
@@ -218,15 +233,15 @@ func gitLogFilter(input string) string {
 			}
 			continue
 		}
-		if m := regexp.MustCompile(`(?i)^[*|/\\ ]+([0-9a-f]{7,40}\s+.+)`).FindStringSubmatch(trimmed); m != nil {
+		if m := gitLogOnelineRE.FindStringSubmatch(trimmed); m != nil {
 			push(m[1])
 			continue
 		}
-		if regexp.MustCompile(`(?i)^[0-9a-f]{7,40}\s+`).MatchString(trimmed) {
+		if gitLogHashRE.MatchString(trimmed) {
 			push(trimmed)
 			continue
 		}
-		if regexp.MustCompile(`^[*|/\\ ]+$`).MatchString(trimmed) && strings.ContainsAny(trimmed, "*|/\\") {
+		if gitLogGraphRE.MatchString(trimmed) && strings.ContainsAny(trimmed, "*|/\\") {
 			continue
 		}
 		push(trimmed)
@@ -600,7 +615,7 @@ func gitStatus(input string) string {
 			}
 			continue
 		}
-		if match := regexp.MustCompile(`^\s*(modified|new file|deleted|renamed|both modified):\s+(.+)$`).FindStringSubmatch(line); match != nil {
+		if match := gitStatusChgRE.FindStringSubmatch(line); match != nil {
 			switch match[1] {
 			case "both modified":
 				conflicts++
@@ -657,7 +672,7 @@ func buildOutput(input string) string {
 				inCargoError = false
 				continue
 			}
-			if regexp.MustCompile(`^\s*(-->|\||\d+\s*\||=)`).MatchString(line) {
+			if cargoLocRE.MatchString(line) {
 				errors = append(errors, line)
 				continue
 			}
@@ -680,7 +695,7 @@ func buildOutput(input string) string {
 			compiling++
 		case strings.HasPrefix(low, "downloading ") || strings.HasPrefix(low, "fetching "):
 			downloading++
-		case regexp.MustCompile(`(?i)^(added|removed|changed|audited|installed) \d+ package|^finished |^build success|^successfully (installed|built)`).MatchString(v):
+		case buildSummaryRE.MatchString(v):
 			summary = append(summary, line)
 		}
 	}
