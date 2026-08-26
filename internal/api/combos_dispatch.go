@@ -54,10 +54,10 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 			// skipped so an unknown model cannot cut the chain short.
 			providers := registry.GetGlobalRegistry().GetModelProviders(member.Model)
 			if len(providers) == 0 {
-				logrus.WithField("combo", combo.Name).Warnf("combos: skipping member %s: no provider serves model %q", combos.ModelID(member), member.Model)
+				logrus.WithField("combo", combo.Name).Warnf("[router] ⚠️ Combo %q skipping member %s: no provider serves model %q", combo.Name, combos.ModelID(member), member.Model)
 				continue
 			}
-			logrus.WithField("combo", combo.Name).Debugf("combos: attempt %s via providers %v", combos.ModelID(member), providers)
+			logrus.Infof("[router] 🔀 Combo %q (%s) -> routing request to %s (candidates: %v)", combo.Name, combo.Strategy, combos.ModelID(member), providers)
 			body, mErr := rewriteModelField(raw, member.Model)
 			if mErr != nil {
 				continue
@@ -74,13 +74,16 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 
 			status := w.StatusCode()
 			if status < http.StatusBadRequest {
+				logrus.Infof("[router] ✅ Combo %q completed via %s (HTTP %d)", combo.Name, combos.ModelID(member), status)
 				w.FlushHeld() // success: deliver whatever was streamed/buffered
 				return
 			}
 			if !combos.ShouldFallbackStatus(status) {
+				logrus.Warnf("[router] ❌ Combo %q client error on %s (HTTP %d)", combo.Name, combos.ModelID(member), status)
 				w.FlushHeld() // definite client error: do not mask it
 				return
 			}
+			logrus.Warnf("[router] ⚠️ Combo %q member %s returned HTTP %d -> falling back to next member", combo.Name, combos.ModelID(member), status)
 			if w.Passthrough() {
 				// Bytes already reached the client; cannot retry cleanly.
 				return
