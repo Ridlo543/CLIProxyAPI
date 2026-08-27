@@ -3,6 +3,7 @@ package responses
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 
 	translatorcommon "github.com/router-for-me/CLIProxyAPI/v7/internal/translator/common"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
@@ -41,6 +42,15 @@ func ConvertOpenAIResponsesRequestToCodex(modelName string, inputRawJSON []byte,
 	// Convert role "system" to "developer" in input array to comply with Codex API requirements.
 	rawJSON = convertSystemRoleToDeveloper(rawJSON)
 	rawJSON = normalizeCodexBuiltinTools(rawJSON)
+
+	// Map virtual Codex review models to upstream models (e.g. gpt-5.6-sol-review -> gpt-5.6-sol)
+	if currModel := gjson.GetBytes(rawJSON, "model"); currModel.Exists() && currModel.String() != "" {
+		if strings.HasSuffix(currModel.String(), "-review") {
+			rawJSON, _ = sjson.SetBytes(rawJSON, "model", strings.TrimSuffix(currModel.String(), "-review"))
+		}
+	} else if strings.HasSuffix(modelName, "-review") {
+		rawJSON, _ = sjson.SetBytes(rawJSON, "model", strings.TrimSuffix(modelName, "-review"))
+	}
 
 	return rawJSON
 }

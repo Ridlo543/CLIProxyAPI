@@ -69,8 +69,9 @@ func ConvertOpenAIRequestToCodex(modelName string, inputRawJSON []byte, stream b
 	// of coupling it to reasoning effort.
 	out, _ = sjson.SetBytes(out, "include", []string{"reasoning.encrypted_content"})
 
-	// Model
-	out, _ = sjson.SetBytes(out, "model", modelName)
+	// Map virtual Codex review models to upstream models (e.g. gpt-5.6-sol-review -> gpt-5.6-sol)
+	upstreamModel := strings.TrimSuffix(modelName, "-review")
+	out, _ = sjson.SetBytes(out, "model", upstreamModel)
 
 	// Build request-local tool metadata and name shortening map.
 	originalToolNameMap := map[string]string{}
