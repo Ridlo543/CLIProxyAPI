@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	log "github.com/sirupsen/logrus"
 )
 
 // Runtime owns TARE identity, cache, queue, and child process lifecycle for one API service.
@@ -145,6 +146,20 @@ func (r *Runtime) Apply(ctx context.Context, raw []byte, cfg config.ContextCompr
 	}
 	stats.Applied = true
 	stats.Reason = "applied"
+	savedBytes := len(raw) - len(out)
+	pct := float64(savedBytes) / float64(len(raw)) * 100.0
+
+	switch stats.Engine {
+	case config.ContextCompressionTARE, "tare-structural":
+		log.Infof("[TARE] 📦 -%.1f%% (%d slots, %dB → %dB in %dms)", pct, stats.Compressed, len(raw), len(out), stats.ElapsedMS)
+	case config.ContextCompressionRTK:
+		log.Infof("[RTK] ✂️ -%.1f%% (%d slots, saved %dB in %dms)", pct, stats.Compressed, savedBytes, stats.ElapsedMS)
+	case config.ContextCompressionRTKTARE:
+		log.Infof("[TOKEN-SAVER] ⚡ -%.1f%% (TARE+RTK: %d slots, %dB → %dB, saved %dB in %dms)", pct, stats.Compressed, len(raw), len(out), savedBytes, stats.ElapsedMS)
+	default:
+		log.Infof("[TOKEN-SAVER] ⚡ -%.1f%% (saved %dB, %dB → %dB in %dms)", pct, savedBytes, len(raw), len(out), stats.ElapsedMS)
+	}
+
 	return out, finish()
 }
 
