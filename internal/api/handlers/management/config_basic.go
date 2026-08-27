@@ -337,10 +337,11 @@ func (h *Handler) PutRoutingStrategy(c *gin.Context) {
 		Strategy           *string `json:"strategy"`
 		Sticky             *int    `json:"sticky"`
 		SessionAffinity    *bool   `json:"session-affinity"`
+		SessionAffinityAlt *bool   `json:"session_affinity"`
 		SessionAffinityTTL *string `json:"session-affinity-ttl"`
 	}
 	if errBindJSON := c.ShouldBindJSON(&body); errBindJSON != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body: " + errBindJSON.Error()})
 		return
 	}
 	stratVal := body.Value
@@ -364,6 +365,8 @@ func (h *Handler) PutRoutingStrategy(c *gin.Context) {
 	}
 	if body.SessionAffinity != nil {
 		h.cfg.Routing.SessionAffinity = *body.SessionAffinity
+	} else if body.SessionAffinityAlt != nil {
+		h.cfg.Routing.SessionAffinity = *body.SessionAffinityAlt
 	}
 	if body.SessionAffinityTTL != nil {
 		h.cfg.Routing.SessionAffinityTTL = strings.TrimSpace(*body.SessionAffinityTTL)
@@ -391,6 +394,7 @@ func (h *Handler) PutProviderRouting(c *gin.Context) {
 		Strategy           *string `json:"strategy"`
 		Sticky             *int    `json:"sticky"`
 		SessionAffinity    *bool   `json:"session-affinity"`
+		SessionAffinityAlt *bool   `json:"session_affinity"`
 		SessionAffinityTTL *string `json:"session-affinity-ttl"`
 	}
 	if errBind := c.ShouldBindJSON(&body); errBind != nil {
@@ -425,6 +429,8 @@ func (h *Handler) PutProviderRouting(c *gin.Context) {
 	}
 	if body.SessionAffinity != nil {
 		current.SessionAffinity = body.SessionAffinity
+	} else if body.SessionAffinityAlt != nil {
+		current.SessionAffinity = body.SessionAffinityAlt
 	}
 	if body.SessionAffinityTTL != nil {
 		current.SessionAffinityTTL = strings.TrimSpace(*body.SessionAffinityTTL)
