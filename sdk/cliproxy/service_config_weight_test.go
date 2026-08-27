@@ -10,14 +10,15 @@ import (
 )
 
 func TestWeightedRoundRobinRoutingSelector(t *testing.T) {
-	state := normalizedRoutingRuntimeState(&internalconfig.Config{
+	cfg := &internalconfig.Config{
 		Routing: internalconfig.RoutingConfig{Strategy: "wrr"},
-	})
+	}
+	state := normalizedRoutingRuntimeState(cfg)
 	if state.strategy != "weighted-round-robin" {
 		t.Fatalf("strategy = %q, want weighted-round-robin", state.strategy)
 	}
-	if _, ok := newRoutingSelector(state).(*coreauth.WeightedRoundRobinSelector); !ok {
-		t.Fatalf("selector type = %T, want *auth.WeightedRoundRobinSelector", newRoutingSelector(state))
+	if _, ok := newRoutingSelector(state, cfg).(*coreauth.WeightedRoundRobinSelector); !ok {
+		t.Fatalf("selector type = %T, want *auth.WeightedRoundRobinSelector", newRoutingSelector(state, cfg))
 	}
 }
 

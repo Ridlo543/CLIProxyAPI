@@ -245,6 +245,20 @@ type RoutingConfig struct {
 	// SessionAffinityTTL specifies how long session-to-auth bindings are retained.
 	// Default: 1h. Accepts duration strings like "30m", "1h", "2h30m".
 	SessionAffinityTTL string `yaml:"session-affinity-ttl,omitempty" json:"session-affinity-ttl,omitempty"`
+
+	// Providers configures per-provider routing strategy overrides.
+	// Keys are provider names (e.g. "antigravity", "codex", "claude", or compat provider names).
+	Providers map[string]ProviderRoutingConfig `yaml:"providers,omitempty" json:"providers,omitempty"`
+}
+
+// ProviderRoutingConfig specifies routing strategy and stickiness for a specific provider.
+type ProviderRoutingConfig struct {
+	// Strategy: "round-robin", "weighted-round-robin", "fill-first", or "inherit"/"default"
+	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
+	// SessionAffinity: nil = inherit global, true/false = override
+	SessionAffinity *bool `yaml:"session-affinity,omitempty" json:"session-affinity,omitempty"`
+	// SessionAffinityTTL: duration string or empty to inherit global
+	SessionAffinityTTL string `yaml:"session-affinity-ttl,omitempty" json:"session-affinity-ttl,omitempty"`
 }
 
 // OAuthModelAlias defines a model ID alias for a specific channel.

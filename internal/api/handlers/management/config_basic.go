@@ -312,26 +312,120 @@ func normalizeRoutingStrategy(strategy string) (string, bool) {
 func (h *Handler) GetRoutingStrategy(c *gin.Context) {
 	strategy, ok := normalizeRoutingStrategy(h.cfg.Routing.Strategy)
 	if !ok {
-		c.JSON(200, gin.H{"strategy": strings.TrimSpace(h.cfg.Routing.Strategy)})
+		c.JSON(200, gin.H{
+			"strategy":             strings.TrimSpace(h.cfg.Routing.Strategy),
+			"session-affinity":     h.cfg.Routing.SessionAffinity,
+			"session-affinity-ttl": h.cfg.Routing.SessionAffinityTTL,
+		})
 		return
 	}
-	c.JSON(200, gin.H{"strategy": strategy})
+	c.JSON(200, gin.H{
+		"strategy":             strategy,
+		"session-affinity":     h.cfg.Routing.SessionAffinity,
+		"session-affinity-ttl": h.cfg.Routing.SessionAffinityTTL,
+	})
 }
 func (h *Handler) PutRoutingStrategy(c *gin.Context) {
 	var body struct {
-		Value *string `json:"value"`
+		Value              *string `json:"value"`
+		Strategy           *string `json:"strategy"`
+		SessionAffinity    *bool   `json:"session-affinity"`
+		SessionAffinityTTL *string `json:"session-affinity-ttl"`
 	}
-	if errBindJSON := c.ShouldBindJSON(&body); errBindJSON != nil || body.Value == nil {
+	if errBindJSON := c.ShouldBindJSON(&body); errBindJSON != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 		return
 	}
-	normalized, ok := normalizeRoutingStrategy(*body.Value)
-	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid strategy"})
+	stratVal := body.Value
+	if stratVal == nil {
+		stratVal = body.Strategy
+	}
+	if stratVal != nil {
+		normalized, ok := normalizeRoutingStrategy(*stratVal)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid strategy"})
+			return
+		}
+		h.cfg.Routing.Strategy = normalized
+	}
+	if body.SessionAffinity != nil {
+		h.cfg.Routing.SessionAffinity = *body.SessionAffinity
+	}
+	if body.SessionAffinityTTL != nil {
+		h.cfg.Routing.SessionAffinityTTL = strings.TrimSpace(*body.SessionAffinityTTL)
+	}
+	h.persist(c)
+}
+
+// Provider Routing Overrides
+func (h *Handler) GetProviderRouting(c *gin.Context) {
+	if h.cfg.Routing.Providers == nil {
+		c.JSON(200, gin.H{"providers": map[string]config.ProviderRoutingConfig{}})
 		return
 	}
-	h.cfg.Routing.Strategy = normalized
+	c.JSON(200, gin.H{"providers": h.cfg.Routing.Providers})
+}
+
+func (h *Handler) PutProviderRouting(c *gin.Context) {
+	name := strings.ToLower(strings.TrimSpace(c.Param("name")))
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "provider name is required"})
+		return
+	}
+
+	var body struct {
+		Strategy           *string `json:"strategy"`
+		SessionAffinity    *bool   `json:"session-affinity"`
+		SessionAffinityTTL *string `json:"session-affinity-ttl"`
+	}
+	if errBind := c.ShouldBindJSON(&body); errBind != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+
+	if h.cfg.Routing.Providers == nil {
+		h.cfg.Routing.Providers = make(map[string]config.ProviderRoutingConfig)
+	}
+
+	current := h.cfg.Routing.Providers[name]
+	if body.Strategy != nil {
+		s := strings.TrimSpace(*body.Strategy)
+		if s != "" && s != "inherit" {
+			norm, ok := normalizeRoutingStrategy(s)
+			if !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid strategy"})
+				return
+			}
+			current.Strategy = norm
+		} else {
+			current.Strategy = ""
+		}
+	}
+	if body.SessionAffinity != nil {
+		current.SessionAffinity = body.SessionAffinity
+	}
+	if body.SessionAffinityTTL != nil {
+		current.SessionAffinityTTL = strings.TrimSpace(*body.SessionAffinityTTL)
+	}
+
+	// If all empty/nil, delete the provider override
+	if current.Strategy == "" && current.SessionAffinity == nil && current.SessionAffinityTTL == "" {
+		delete(h.cfg.Routing.Providers, name)
+	} else {
+		h.cfg.Routing.Providers[name] = current
+	}
+
 	h.persist(c)
+}
+
+func (h *Handler) DeleteProviderRouting(c *gin.Context) {
+	name := strings.ToLower(strings.TrimSpace(c.Param("name")))
+	if name != "" && h.cfg.Routing.Providers != nil {
+		delete(h.cfg.Routing.Providers, name)
+		h.persist(c)
+		return
+	}
+	c.JSON(200, gin.H{"status": "ok"})
 }
 
 // Proxy URL
