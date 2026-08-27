@@ -235,6 +235,10 @@ type RoutingConfig struct {
 	// Supported values: "round-robin" (default), "weighted-round-robin", "fill-first".
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
 
+	// Sticky defines the number of consecutive requests handled by each credential before rotating.
+	// 1 = rotate every request (default), 2, 3, 5, etc.
+	Sticky int `yaml:"sticky,omitempty" json:"sticky,omitempty"`
+
 	// SessionAffinity enables universal session-sticky routing for all clients.
 	// Explicit Claude Code, Codex, OpenCode, and pi session headers are preferred,
 	// followed by prompt_cache_key, Responses conversation IDs, legacy body IDs,
@@ -255,6 +259,8 @@ type RoutingConfig struct {
 type ProviderRoutingConfig struct {
 	// Strategy: "round-robin", "weighted-round-robin", "fill-first", or "inherit"/"default"
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
+	// Sticky: number of requests per account before rotation, 0 or empty to inherit global
+	Sticky int `yaml:"sticky,omitempty" json:"sticky,omitempty"`
 	// SessionAffinity: nil = inherit global, true/false = override
 	SessionAffinity *bool `yaml:"session-affinity,omitempty" json:"session-affinity,omitempty"`
 	// SessionAffinityTTL: duration string or empty to inherit global
