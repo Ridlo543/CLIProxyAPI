@@ -105,9 +105,11 @@ func (m *MultiProviderSelector) OnResult(res Result) {
 // credential enters cooldown, and indexing a monotonic counter into a shrinking slice
 // silently re-seats the rotation, which starves some credentials and hammers others.
 type RoundRobinSelector struct {
-	mu         sync.Mutex
-	lastPicked map[string]string
-	maxKeys    int
+	mu             sync.Mutex
+	lastPicked     map[string]string
+	pickCounts     map[string]int
+	StickyRequests int
+	maxKeys        int
 }
 
 // WeightedRoundRobinSelector provides smooth weighted round-robin selection.
@@ -461,14 +463,34 @@ func (s *RoundRobinSelector) Pick(ctx context.Context, provider, model string, o
 	if s.lastPicked == nil {
 		s.lastPicked = make(map[string]string)
 	}
+	if s.pickCounts == nil {
+		s.pickCounts = make(map[string]int)
+	}
 	limit := s.maxKeys
 	if limit <= 0 {
 		limit = 4096
 	}
 
 	s.ensureRotationKey(key, limit)
+
+	// If sticky request count is configured (> 1), reuse current auth until limit reached
+	sticky := s.StickyRequests
+	if sticky > 1 {
+		lastID := s.lastPicked[key]
+		count := s.pickCounts[key]
+		if lastID != "" && count < sticky {
+			for _, a := range available {
+				if a.ID == lastID {
+					s.pickCounts[key] = count + 1
+					return a, nil
+				}
+			}
+		}
+	}
+
 	picked := available[successorIndex(available, s.lastPicked[key])]
 	s.lastPicked[key] = picked.ID
+	s.pickCounts[key] = 1
 	return picked, nil
 }
 
