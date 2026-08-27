@@ -23,7 +23,82 @@ import (
 	cliproxysession "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/session"
 )
 
-// RoundRobinSelector provides a simple provider scoped round-robin selection strategy.
+// MultiProviderSelector routes credential selection according to per-provider routing rules,
+// falling back to a global default selector for unconfigured providers.
+type MultiProviderSelector struct {
+	mu        sync.RWMutex
+	global    Selector
+	providers map[string]Selector
+}
+
+// NewMultiProviderSelector creates a router that applies specific selectors per provider.
+func NewMultiProviderSelector(global Selector, providers map[string]Selector) *MultiProviderSelector {
+	if global == nil {
+		global = &RoundRobinSelector{}
+	}
+	m := &MultiProviderSelector{
+		global:    global,
+		providers: make(map[string]Selector),
+	}
+	for k, v := range providers {
+		if v != nil {
+			m.providers[strings.ToLower(strings.TrimSpace(k))] = v
+		}
+	}
+	return m
+}
+
+func (m *MultiProviderSelector) getSelector(provider string) Selector {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	pKey := strings.ToLower(strings.TrimSpace(provider))
+	if sel, ok := m.providers[pKey]; ok && sel != nil {
+		return sel
+	}
+	return m.global
+}
+
+func (m *MultiProviderSelector) Pick(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, auths []*Auth) (*Auth, error) {
+	return m.getSelector(provider).Pick(ctx, provider, model, opts, auths)
+}
+
+func (m *MultiProviderSelector) Stop() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if stoppable, ok := m.global.(StoppableSelector); ok && stoppable != nil {
+		stoppable.Stop()
+	}
+	for _, sel := range m.providers {
+		if stoppable, ok := sel.(StoppableSelector); ok && stoppable != nil {
+			stoppable.Stop()
+		}
+	}
+}
+
+func (m *MultiProviderSelector) InvalidateAuth(authID string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if inv, ok := m.global.(interface{ InvalidateAuth(string) }); ok && inv != nil {
+		inv.InvalidateAuth(authID)
+	}
+	for _, sel := range m.providers {
+		if inv, ok := sel.(interface{ InvalidateAuth(string) }); ok && inv != nil {
+			inv.InvalidateAuth(authID)
+		}
+	}
+}
+
+func (m *MultiProviderSelector) OnResult(res Result) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if onRes, ok := m.getSelector(res.Provider).(interface{ OnResult(Result) }); ok && onRes != nil {
+		onRes.OnResult(res)
+		return
+	}
+	if onRes, ok := m.global.(interface{ OnResult(Result) }); ok && onRes != nil {
+		onRes.OnResult(res)
+	}
+}
 //
 // Rotation continues from the identity of the previous pick rather than from a numeric
 // index. Candidate slices shrink whenever a retry excludes already tried credentials or a

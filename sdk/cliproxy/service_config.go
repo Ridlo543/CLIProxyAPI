@@ -54,9 +54,9 @@ func normalizedRoutingRuntimeState(cfg *config.Config) routingRuntimeState {
 	return state
 }
 
-func newRoutingSelector(state routingRuntimeState) coreauth.Selector {
+func buildSingleSelector(strategy string, sessionAffinity bool, sessionAffinityTTL time.Duration) coreauth.Selector {
 	var selector coreauth.Selector
-	switch state.strategy {
+	switch strategy {
 	case "weighted-round-robin":
 		selector = &coreauth.WeightedRoundRobinSelector{}
 	case "fill-first":
@@ -64,13 +64,50 @@ func newRoutingSelector(state routingRuntimeState) coreauth.Selector {
 	default:
 		selector = &coreauth.RoundRobinSelector{}
 	}
-	if state.sessionAffinity {
+	if sessionAffinity {
 		selector = coreauth.NewSessionAffinitySelectorWithConfig(coreauth.SessionAffinityConfig{
 			Fallback: selector,
-			TTL:      state.sessionAffinityTTL,
+			TTL:      sessionAffinityTTL,
 		})
 	}
 	return selector
+}
+
+func newRoutingSelector(state routingRuntimeState, cfg *config.Config) coreauth.Selector {
+	globalSelector := buildSingleSelector(state.strategy, state.sessionAffinity, state.sessionAffinityTTL)
+	if cfg == nil || len(cfg.Routing.Providers) == 0 {
+		return globalSelector
+	}
+
+	providerSelectors := make(map[string]coreauth.Selector)
+	for pName, pCfg := range cfg.Routing.Providers {
+		pStrat := strings.ToLower(strings.TrimSpace(pCfg.Strategy))
+		effStrat := state.strategy
+		switch pStrat {
+		case "weighted-round-robin", "weightedroundrobin", "wrr":
+			effStrat = "weighted-round-robin"
+		case "fill-first", "fillfirst", "ff":
+			effStrat = "fill-first"
+		case "round-robin", "roundrobin", "rr":
+			effStrat = "round-robin"
+		}
+
+		effAffinity := state.sessionAffinity
+		if pCfg.SessionAffinity != nil {
+			effAffinity = *pCfg.SessionAffinity
+		}
+
+		effTTL := state.sessionAffinityTTL
+		if ttl := strings.TrimSpace(pCfg.SessionAffinityTTL); ttl != "" {
+			if parsed, errParse := time.ParseDuration(ttl); errParse == nil && parsed > 0 {
+				effTTL = parsed
+			}
+		}
+
+		providerSelectors[pName] = buildSingleSelector(effStrat, effAffinity, effTTL)
+	}
+
+	return coreauth.NewMultiProviderSelector(globalSelector, providerSelectors)
 }
 
 func (s *Service) applyConfigUpdateWithAuthSynthesis(ctx context.Context, newCfg *config.Config, synthesizeConfigAuths bool) bool {
@@ -203,10 +240,8 @@ func (s *Service) applyManagerConfig(ctx context.Context, commit configCommit) b
 		return false
 	}
 	routingState := normalizedRoutingRuntimeState(commit.cfg)
-	if s.appliedRoutingState == nil || *s.appliedRoutingState != routingState {
-		s.coreManager.SetSelector(newRoutingSelector(routingState))
-		s.appliedRoutingState = &routingState
-	}
+	s.coreManager.SetSelector(newRoutingSelector(routingState, commit.cfg))
+	s.appliedRoutingState = &routingState
 	s.applyRetryConfig(commit.cfg)
 	store := s.resolveCooldownStateStore(commit.cfg)
 	if !s.coreManager.ApplyConfigWithCooldownStateStore(ctx, commit.cfg, store) {
