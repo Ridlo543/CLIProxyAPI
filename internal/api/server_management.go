@@ -162,6 +162,8 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.POST("/combos", s.mgmt.CreateCombo)
 		mgmt.PUT("/combos/:name", s.mgmt.UpdateCombo)
 		mgmt.DELETE("/combos/:name", s.mgmt.DeleteCombo)
+		mgmt.GET("/capacity-adapter", s.mgmt.GetCapacityAdapter)
+		mgmt.PUT("/capacity-adapter", s.mgmt.UpdateCapacityAdapter)
 		mgmt.GET("/oauth-model-alias/:channel", s.mgmt.GetOAuthModelAliasChannel)
 		mgmt.POST("/oauth-model-alias/:channel", s.mgmt.AddOAuthModelAliases)
 
