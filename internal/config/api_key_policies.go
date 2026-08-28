@@ -21,10 +21,20 @@ type APIKeyTokenLimit struct {
 
 // APIKeyPolicy attaches additive restrictions to one exact client key.
 type APIKeyPolicy struct {
-	Key       string            `yaml:"key" json:"key"`
+	Key       string            `yaml:"key,omitempty" json:"key,omitempty"`
+	APIKey    string            `yaml:"api-key,omitempty" json:"api-key,omitempty"`
+	Name      string            `yaml:"name,omitempty" json:"name,omitempty"`
 	Models    []string          `yaml:"models,omitempty" json:"models,omitempty"`
 	Providers []string          `yaml:"providers,omitempty" json:"providers,omitempty"`
 	Limit     *APIKeyTokenLimit `yaml:"token-limit,omitempty" json:"token-limit,omitempty"`
+}
+
+// EffectiveKey returns the key string from either Key or APIKey.
+func (p APIKeyPolicy) EffectiveKey() string {
+	if strings.TrimSpace(p.Key) != "" {
+		return strings.TrimSpace(p.Key)
+	}
+	return strings.TrimSpace(p.APIKey)
 }
 
 // NormalizeAPIKeyPolicies trims and validates the api-key-policies section.
@@ -33,10 +43,12 @@ func NormalizeAPIKeyPolicies(policies []APIKeyPolicy) ([]APIKeyPolicy, error) {
 	out := make([]APIKeyPolicy, 0, len(policies))
 	for i := range policies {
 		p := policies[i]
-		p.Key = strings.TrimSpace(p.Key)
-		if p.Key == "" {
+		effKey := p.EffectiveKey()
+		if effKey == "" {
 			return nil, fmt.Errorf("api-key-policies[%d]: key must not be empty", i)
 		}
+		p.Key = effKey
+		p.Name = strings.TrimSpace(p.Name)
 		if _, dup := seen[p.Key]; dup {
 			return nil, fmt.Errorf("api-key-policies[%d]: duplicate key", i)
 		}

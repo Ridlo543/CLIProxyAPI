@@ -468,6 +468,12 @@ func buildModelStats(events []usagestore.Event) []gin.H {
 		if len(a.tpsList) > 0 {
 			avgTps = round1(averageFloat(a.tpsList))
 		}
+		avgLatency := int64(average(a.latencies))
+		avgTTFT := int64(average(a.ttfts))
+		diffLatency := int64(0)
+		if avgLatency > avgTTFT && avgTTFT > 0 {
+			diffLatency = avgLatency - avgTTFT
+		}
 		out = append(out, gin.H{
 			"model":                 name,
 			"calls":                 a.calls,
@@ -482,7 +488,9 @@ func buildModelStats(events []usagestore.Event) []gin.H {
 			"cache_hit_rate":        cacheHit,
 			"total_tokens":          a.total,
 			"cost":                  a.cost,
-			"average_latency_ms":    int64(average(a.latencies)),
+			"average_latency_ms":    avgLatency,
+			"average_ttft_ms":       avgTTFT,
+			"diff_latency_ms":       diffLatency,
 			"avg_speed_tps":         avgTps,
 			"avg_tps":               avgTps,
 		})
@@ -538,6 +546,12 @@ func buildChannelShare(events []usagestore.Event, identity map[string]accountIde
 		if cacheTotal > 0 {
 			cacheHit = float64(a.cached+a.cacheRead) / float64(cacheTotal)
 		}
+		avgLatency := int64(average(a.latencies))
+		avgTTFT := int64(average(a.ttfts))
+		diffLatency := int64(0)
+		if avgLatency > avgTTFT && avgTTFT > 0 {
+			diffLatency = avgLatency - avgTTFT
+		}
 		out = append(out, gin.H{
 			"auth_index":             id,
 			"source":                 "",
@@ -552,7 +566,9 @@ func buildChannelShare(events []usagestore.Event, identity map[string]accountIde
 			"cache_hit_rate":         cacheHit,
 			"cost":                   a.cost,
 			"failure":                a.failure,
-			"average_latency_ms":     int64(average(a.latencies)),
+			"average_latency_ms":     avgLatency,
+			"average_ttft_ms":        avgTTFT,
+			"diff_latency_ms":        diffLatency,
 			"avg_speed_tps":          avgTps,
 			"avg_tps":                avgTps,
 		})

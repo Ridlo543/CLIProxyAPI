@@ -12,6 +12,8 @@ import (
 
 type clientKeyAgg struct {
 	key        string
+	name       string
+	maskedKey  string
 	calls      int64
 	success    int64
 	failed     int64
@@ -24,8 +26,18 @@ type clientKeyAgg struct {
 	lastUsedMs int64
 }
 
+func maskClientKey(key string) string {
+	k := strings.TrimSpace(key)
+	if len(k) <= 12 {
+		return k
+	}
+	prefix := k[:8]
+	suffix := k[len(k)-4:]
+	return prefix + "••••••••••••" + suffix
+}
+
 // GetClientAPIKeyUsage aggregates usage statistics per Client API Key
-// (configured in Endpoint & Keys / api-keys) from the event store.
+// currently configured in Endpoint & Keys (api-keys / key-policies).
 func (h *Handler) GetClientAPIKeyUsage(c *gin.Context) {
 	if h == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "handler unavailable"})
@@ -33,10 +45,43 @@ func (h *Handler) GetClientAPIKeyUsage(c *gin.Context) {
 	}
 
 	h.mu.Lock()
-	configuredKeys := append([]string(nil), h.cfg.APIKeys...)
+	configuredKeys := make([]string, 0, len(h.cfg.APIKeys))
+	keyNames := make(map[string]string)
+
+	for _, p := range h.cfg.KeyPolicies {
+		k := p.EffectiveKey()
+		if k != "" {
+			if strings.TrimSpace(p.Name) != "" {
+				keyNames[k] = strings.TrimSpace(p.Name)
+			}
+		}
+	}
 	for _, p := range h.cfg.APIKeyPolicies {
-		if strings.TrimSpace(p.Key) != "" {
-			configuredKeys = append(configuredKeys, strings.TrimSpace(p.Key))
+		k := p.EffectiveKey()
+		if k != "" {
+			if strings.TrimSpace(p.Name) != "" {
+				keyNames[k] = strings.TrimSpace(p.Name)
+			}
+		}
+	}
+
+	for _, rawKey := range h.cfg.APIKeys {
+		k := strings.TrimSpace(rawKey)
+		if k != "" {
+			configuredKeys = append(configuredKeys, k)
+		}
+	}
+	// Also add any keys defined in policies if not in api-keys list
+	for k := range keyNames {
+		found := false
+		for _, existing := range configuredKeys {
+			if existing == k {
+				found = true
+				break
+			}
+		}
+		if !found {
+			configuredKeys = append(configuredKeys, k)
 		}
 	}
 	h.mu.Unlock()
@@ -49,18 +94,20 @@ func (h *Handler) GetClientAPIKeyUsage(c *gin.Context) {
 
 	index := make(map[string]*clientKeyAgg)
 
-	// Ensure all configured keys exist in index
+	// ONLY initialize and include currently configured keys (no obsolete/deleted keys)
 	for _, k := range configuredKeys {
-		k = strings.TrimSpace(k)
-		if k == "" {
-			continue
+		name := keyNames[k]
+		if name == "" {
+			name = "client-key"
 		}
-		if _, ok := index[k]; !ok {
-			index[k] = &clientKeyAgg{key: k}
+		index[k] = &clientKeyAgg{
+			key:       k,
+			name:      name,
+			maskedKey: maskClientKey(k),
 		}
 	}
 
-	// Aggregate events by client api_key
+	// Aggregate events ONLY for valid configured keys
 	for _, ev := range events {
 		k := strings.TrimSpace(ev.APIKey)
 		if k == "" {
@@ -68,8 +115,8 @@ func (h *Handler) GetClientAPIKeyUsage(c *gin.Context) {
 		}
 		a, ok := index[k]
 		if !ok {
-			a = &clientKeyAgg{key: k}
-			index[k] = a
+			// Skip deleted / obsolete keys that are no longer in config
+			continue
 		}
 		a.calls++
 		if ev.Failed || ev.StatusCod >= 400 {
@@ -98,6 +145,8 @@ func (h *Handler) GetClientAPIKeyUsage(c *gin.Context) {
 
 	type ClientKeyUsageItem struct {
 		Key           string  `json:"key"`
+		Name          string  `json:"name"`
+		MaskedKey     string  `json:"masked_key"`
 		Calls         int64   `json:"calls"`
 		Success       int64   `json:"success"`
 		Failed        int64   `json:"failed"`
@@ -137,6 +186,8 @@ func (h *Handler) GetClientAPIKeyUsage(c *gin.Context) {
 
 		result = append(result, ClientKeyUsageItem{
 			Key:           a.key,
+			Name:          a.name,
+			MaskedKey:     a.maskedKey,
 			Calls:         a.calls,
 			Success:       a.success,
 			Failed:        a.failed,
