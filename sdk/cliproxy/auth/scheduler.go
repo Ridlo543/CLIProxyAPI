@@ -86,9 +86,8 @@ type readyBucket struct {
 // readyView holds the selection order for flat round-robin traversal.
 type readyView struct {
 	flat          []*scheduledAuth
-	cursor        int
+	lastPicked    string
 	pickCount     int
-	lastAuthID    string
 	weightedState smoothWeightedState
 }
 
@@ -96,9 +95,8 @@ type readyView struct {
 type cooldownQueue []*scheduledAuth
 
 type readyViewCursorState struct {
-	cursor        int
+	lastPicked    string
 	pickCount     int
-	lastAuthID    string
 	weightedState smoothWeightedState
 }
 
@@ -109,9 +107,8 @@ type readyBucketCursorState struct {
 
 func snapshotReadyViewCursors(view readyView) readyViewCursorState {
 	state := readyViewCursorState{
-		cursor:     view.cursor,
+		lastPicked: view.lastPicked,
 		pickCount:  view.pickCount,
-		lastAuthID: view.lastAuthID,
 	}
 	if len(view.weightedState.current) > 0 {
 		state.weightedState.current = make(map[string]int64, len(view.weightedState.current))
@@ -132,11 +129,8 @@ func restoreReadyViewCursors(view *readyView, state readyViewCursorState) {
 	if view == nil {
 		return
 	}
-	if len(view.flat) > 0 {
-		view.cursor = normalizeCursor(state.cursor, len(view.flat))
-		view.pickCount = state.pickCount
-		view.lastAuthID = state.lastAuthID
-	}
+	view.lastPicked = state.lastPicked
+	view.pickCount = state.pickCount
 	weights := scheduledWeightVector(view.flat)
 	if len(state.weightedState.current) == 0 || weightsConfigChanged(state.weightedState.weights, weights) {
 		return
@@ -151,17 +145,6 @@ func restoreReadyViewCursors(view *readyView, state readyViewCursorState) {
 	}
 	view.weightedState.current = current
 	view.weightedState.weights = weights
-}
-
-func normalizeCursor(cursor, size int) int {
-	if size <= 0 || cursor <= 0 {
-		return 0
-	}
-	cursor = cursor % size
-	if cursor < 0 {
-		cursor += size
-	}
-	return cursor
 }
 
 // newAuthScheduler constructs an empty scheduler configured for the supplied selector strategy.
@@ -1069,10 +1052,10 @@ func (v *readyView) pickRoundRobinSticky(stickyRequests int, predicate func(*sch
 		stickyRequests = 1
 	}
 
-	// If sticky count is active and lastAuthID still matches and satisfies predicate
-	if stickyRequests > 1 && v.lastAuthID != "" && v.pickCount < stickyRequests {
+	// If sticky count is active and lastPicked still matches and satisfies predicate
+	if stickyRequests > 1 && v.lastPicked != "" && v.pickCount < stickyRequests {
 		for _, entry := range v.flat {
-			if entry != nil && entry.auth != nil && entry.auth.ID == v.lastAuthID {
+			if entry != nil && entry.auth != nil && entry.auth.ID == v.lastPicked {
 				if predicate == nil || predicate(entry) {
 					v.pickCount++
 					return entry
@@ -1082,24 +1065,36 @@ func (v *readyView) pickRoundRobinSticky(stickyRequests int, predicate func(*sch
 		}
 	}
 
-	start := 0
-	if len(v.flat) > 0 {
-		start = v.cursor % len(v.flat)
-	}
+	start := scheduledSuccessorIndex(v.flat, v.lastPicked)
 	for offset := 0; offset < len(v.flat); offset++ {
 		index := (start + offset) % len(v.flat)
 		entry := v.flat[index]
+		if entry == nil || entry.auth == nil {
+			continue
+		}
 		if predicate != nil && !predicate(entry) {
 			continue
 		}
-		v.cursor = index + 1
+		v.lastPicked = entry.auth.ID
 		v.pickCount = 1
-		if entry != nil && entry.auth != nil {
-			v.lastAuthID = entry.auth.ID
-		}
 		return entry
 	}
 	return nil
+}
+
+// scheduledSuccessorIndex returns the index of the first scheduled candidate ordered after
+// lastID, wrapping to the start of the ring. Candidates in readyView arrive sorted by auth ID.
+func scheduledSuccessorIndex(entries []*scheduledAuth, lastID string) int {
+	if lastID == "" {
+		return 0
+	}
+	index := sort.Search(len(entries), func(i int) bool {
+		return entries[i].auth.ID > lastID
+	})
+	if index >= len(entries) {
+		return 0
+	}
+	return index
 }
 
 // pickWeighted returns the next ready entry using smooth weighted round-robin.
