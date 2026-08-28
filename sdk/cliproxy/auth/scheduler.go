@@ -36,6 +36,7 @@ const (
 type authScheduler struct {
 	mu                  sync.Mutex
 	strategy            schedulerStrategy
+	stickyRequests      int
 	providers           map[string]*providerScheduler
 	authProviders       map[string]string
 	mixedCursors        map[string]int
@@ -86,6 +87,8 @@ type readyBucket struct {
 type readyView struct {
 	flat          []*scheduledAuth
 	cursor        int
+	pickCount     int
+	lastAuthID    string
 	weightedState smoothWeightedState
 }
 
@@ -94,6 +97,8 @@ type cooldownQueue []*scheduledAuth
 
 type readyViewCursorState struct {
 	cursor        int
+	pickCount     int
+	lastAuthID    string
 	weightedState smoothWeightedState
 }
 
@@ -103,7 +108,11 @@ type readyBucketCursorState struct {
 }
 
 func snapshotReadyViewCursors(view readyView) readyViewCursorState {
-	state := readyViewCursorState{cursor: view.cursor}
+	state := readyViewCursorState{
+		cursor:     view.cursor,
+		pickCount:  view.pickCount,
+		lastAuthID: view.lastAuthID,
+	}
 	if len(view.weightedState.current) > 0 {
 		state.weightedState.current = make(map[string]int64, len(view.weightedState.current))
 		for authID, current := range view.weightedState.current {
@@ -125,6 +134,8 @@ func restoreReadyViewCursors(view *readyView, state readyViewCursorState) {
 	}
 	if len(view.flat) > 0 {
 		view.cursor = normalizeCursor(state.cursor, len(view.flat))
+		view.pickCount = state.pickCount
+		view.lastAuthID = state.lastAuthID
 	}
 	weights := scheduledWeightVector(view.flat)
 	if len(state.weightedState.current) == 0 || weightsConfigChanged(state.weightedState.weights, weights) {
@@ -155,8 +166,14 @@ func normalizeCursor(cursor, size int) int {
 
 // newAuthScheduler constructs an empty scheduler configured for the supplied selector strategy.
 func newAuthScheduler(selector Selector) *authScheduler {
+	strat := selectorStrategy(selector)
+	sticky := 1
+	if rr, ok := selector.(*RoundRobinSelector); ok && rr.StickyRequests > 0 {
+		sticky = rr.StickyRequests
+	}
 	return &authScheduler{
-		strategy:            selectorStrategy(selector),
+		strategy:            strat,
+		stickyRequests:      sticky,
 		providers:           make(map[string]*providerScheduler),
 		authProviders:       make(map[string]string),
 		mixedCursors:        make(map[string]int),
@@ -166,11 +183,16 @@ func newAuthScheduler(selector Selector) *authScheduler {
 
 // selectorStrategy maps a selector implementation to the scheduler semantics it should emulate.
 func selectorStrategy(selector Selector) schedulerStrategy {
-	switch selector.(type) {
+	switch s := selector.(type) {
 	case *FillFirstSelector:
 		return schedulerStrategyFillFirst
 	case *WeightedRoundRobinSelector:
 		return schedulerStrategyWeightedRoundRobin
+	case *SessionAffinitySelector:
+		if s != nil && s.fallback != nil {
+			return selectorStrategy(s.fallback)
+		}
+		return schedulerStrategyRoundRobin
 	case nil, *RoundRobinSelector:
 		return schedulerStrategyRoundRobin
 	default:
@@ -186,6 +208,14 @@ func (s *authScheduler) setSelector(selector Selector) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.strategy = selectorStrategy(selector)
+	s.stickyRequests = 1
+	if rr, ok := selector.(*RoundRobinSelector); ok && rr.StickyRequests > 0 {
+		s.stickyRequests = rr.StickyRequests
+	} else if sa, ok := selector.(*SessionAffinitySelector); ok && sa != nil && sa.fallback != nil {
+		if rrFallback, okFallback := sa.fallback.(*RoundRobinSelector); okFallback && rrFallback.StickyRequests > 0 {
+			s.stickyRequests = rrFallback.StickyRequests
+		}
+	}
 	clear(s.mixedCursors)
 	clear(s.mixedWeightedStates)
 }
@@ -260,7 +290,7 @@ func (s *authScheduler) pickSingleWithStrategy(ctx context.Context, provider, mo
 		return nil, &Error{Code: "auth_not_found", Message: "no auth available"}
 	}
 	predicate := scheduledAuthPredicate(eligibility, tried, pinnedAuthID, strategy == schedulerStrategyWeightedRoundRobin)
-	if picked := shard.pickReadyLocked(preferWebsocket, strategy, predicate); picked != nil {
+	if picked := shard.pickReadyLocked(preferWebsocket, strategy, s.stickyRequests, predicate); picked != nil {
 		return picked, nil
 	}
 	return nil, shard.unavailableErrorLocked(provider, model, predicate)
@@ -321,7 +351,7 @@ func (s *authScheduler) pickMixedWithStrategy(ctx context.Context, providers []s
 		}
 		shard := providerState.ensureModelLocked(modelKey, time.Now())
 		predicate := scheduledAuthPredicate(eligibility, tried, pinnedAuthID, strategy == schedulerStrategyWeightedRoundRobin)
-		if picked := shard.pickReadyLocked(false, strategy, predicate); picked != nil {
+		if picked := shard.pickReadyLocked(false, strategy, s.stickyRequests, predicate); picked != nil {
 			return picked, providerKey, nil
 		}
 		return nil, "", shard.unavailableErrorLocked("mixed", model, predicate)
@@ -361,7 +391,7 @@ func (s *authScheduler) pickMixedWithStrategy(ctx context.Context, providers []s
 			if shard == nil {
 				continue
 			}
-			picked := shard.pickReadyAtPriorityLocked(false, bestPriority, strategy, predicate)
+			picked := shard.pickReadyAtPriorityLocked(false, bestPriority, strategy, s.stickyRequests, predicate)
 			if picked != nil {
 				return picked, providerKey, nil
 			}
@@ -451,7 +481,7 @@ func (s *authScheduler) pickMixedWithStrategy(ctx context.Context, providers []s
 		if shard == nil {
 			continue
 		}
-		picked := shard.pickReadyAtPriorityLocked(false, bestPriority, schedulerStrategyRoundRobin, predicate)
+		picked := shard.pickReadyAtPriorityLocked(false, bestPriority, schedulerStrategyRoundRobin, s.stickyRequests, predicate)
 		if picked == nil {
 			continue
 		}
@@ -792,7 +822,7 @@ func (m *modelScheduler) promoteExpiredLocked(now time.Time) {
 }
 
 // pickReadyLocked selects the next ready auth from the highest available priority bucket.
-func (m *modelScheduler) pickReadyLocked(preferWebsocket bool, strategy schedulerStrategy, predicate func(*scheduledAuth) bool) *Auth {
+func (m *modelScheduler) pickReadyLocked(preferWebsocket bool, strategy schedulerStrategy, stickyRequests int, predicate func(*scheduledAuth) bool) *Auth {
 	if m == nil {
 		return nil
 	}
@@ -801,7 +831,7 @@ func (m *modelScheduler) pickReadyLocked(preferWebsocket bool, strategy schedule
 	if !okPriority {
 		return nil
 	}
-	return m.pickReadyAtPriorityLocked(preferWebsocket, priorityReady, strategy, predicate)
+	return m.pickReadyAtPriorityLocked(preferWebsocket, priorityReady, strategy, stickyRequests, predicate)
 }
 
 // highestReadyPriorityLocked returns the highest priority bucket that still has a matching ready auth.
@@ -837,7 +867,7 @@ func (m *modelScheduler) highestReadyPriorityLocked(preferWebsocket bool, predic
 
 // pickReadyAtPriorityLocked selects the next ready auth from a specific priority bucket.
 // The caller must ensure expired entries are already promoted when needed.
-func (m *modelScheduler) pickReadyAtPriorityLocked(preferWebsocket bool, priority int, strategy schedulerStrategy, predicate func(*scheduledAuth) bool) *Auth {
+func (m *modelScheduler) pickReadyAtPriorityLocked(preferWebsocket bool, priority int, strategy schedulerStrategy, stickyRequests int, predicate func(*scheduledAuth) bool) *Auth {
 	if m == nil {
 		return nil
 	}
@@ -856,7 +886,7 @@ func (m *modelScheduler) pickReadyAtPriorityLocked(preferWebsocket bool, priorit
 	case schedulerStrategyWeightedRoundRobin:
 		picked = view.pickWeighted(predicate)
 	default:
-		picked = view.pickRoundRobin(predicate)
+		picked = view.pickRoundRobinSticky(stickyRequests, predicate)
 	}
 	if picked == nil || picked.auth == nil {
 		return nil
@@ -1027,9 +1057,31 @@ func (v *readyView) pickFirst(predicate func(*scheduledAuth) bool) *scheduledAut
 
 // pickRoundRobin returns the next ready entry using flat round-robin traversal.
 func (v *readyView) pickRoundRobin(predicate func(*scheduledAuth) bool) *scheduledAuth {
+	return v.pickRoundRobinSticky(1, predicate)
+}
+
+// pickRoundRobinSticky returns the next ready entry using flat round-robin with sticky count.
+func (v *readyView) pickRoundRobinSticky(stickyRequests int, predicate func(*scheduledAuth) bool) *scheduledAuth {
 	if len(v.flat) == 0 {
 		return nil
 	}
+	if stickyRequests <= 0 {
+		stickyRequests = 1
+	}
+
+	// If sticky count is active and lastAuthID still matches and satisfies predicate
+	if stickyRequests > 1 && v.lastAuthID != "" && v.pickCount < stickyRequests {
+		for _, entry := range v.flat {
+			if entry != nil && entry.auth != nil && entry.auth.ID == v.lastAuthID {
+				if predicate == nil || predicate(entry) {
+					v.pickCount++
+					return entry
+				}
+				break
+			}
+		}
+	}
+
 	start := 0
 	if len(v.flat) > 0 {
 		start = v.cursor % len(v.flat)
@@ -1041,6 +1093,10 @@ func (v *readyView) pickRoundRobin(predicate func(*scheduledAuth) bool) *schedul
 			continue
 		}
 		v.cursor = index + 1
+		v.pickCount = 1
+		if entry != nil && entry.auth != nil {
+			v.lastAuthID = entry.auth.ID
+		}
 		return entry
 	}
 	return nil
