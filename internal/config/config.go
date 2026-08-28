@@ -151,6 +151,7 @@ type Config struct {
 	// Combos defines named model combinations (see config_combos.go). Managed
 	// entirely by the combos feature to keep upstream merges conflict-free.
 	Combos []ComboConfig `yaml:"combos,omitempty" json:"combos,omitempty"`
+	CapacityAdapter CapacityAdapterConfig `yaml:"capacity-adapter,omitempty" json:"capacity_adapter,omitempty"`
 
 	// VertexCompatAPIKey defines Vertex AI-compatible API key configurations for third-party providers.
 	// Used for services that use Vertex AI-style paths but with simple API key authentication.

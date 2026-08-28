@@ -89,5 +89,50 @@ func (c ComboConfig) Clone() ComboConfig {
 	return out
 }
 
+// CapacityAdapterPoolConfig defines an auto-switching model pool for a specific input modality (e.g. vision).
+type CapacityAdapterPoolConfig struct {
+	Enabled    bool            `yaml:"enabled" json:"enabled"`
+	RoundRobin bool            `yaml:"round_robin" json:"round_robin"`
+	Models     []ComboModelRef `yaml:"models" json:"models"`
+}
+
+// CapacityAdapterConfig holds capacity adapter settings across modalities.
+type CapacityAdapterConfig struct {
+	Vision CapacityAdapterPoolConfig `yaml:"vision" json:"vision"`
+	Audio  CapacityAdapterPoolConfig `yaml:"audio" json:"audio"`
+}
+
+func (c *CapacityAdapterConfig) Normalize() {
+	if c.Vision.Models == nil {
+		c.Vision.Models = []ComboModelRef{}
+	}
+	if c.Audio.Models == nil {
+		c.Audio.Models = []ComboModelRef{}
+	}
+	for i := range c.Vision.Models {
+		c.Vision.Models[i].Provider = strings.TrimSpace(c.Vision.Models[i].Provider)
+		c.Vision.Models[i].Model = strings.TrimSpace(c.Vision.Models[i].Model)
+	}
+	for i := range c.Audio.Models {
+		c.Audio.Models[i].Provider = strings.TrimSpace(c.Audio.Models[i].Provider)
+		c.Audio.Models[i].Model = strings.TrimSpace(c.Audio.Models[i].Model)
+	}
+}
+
+func (c CapacityAdapterConfig) Clone() CapacityAdapterConfig {
+	out := c
+	if c.Vision.Models != nil {
+		out.Vision.Models = append([]ComboModelRef(nil), c.Vision.Models...)
+	} else {
+		out.Vision.Models = []ComboModelRef{}
+	}
+	if c.Audio.Models != nil {
+		out.Audio.Models = append([]ComboModelRef(nil), c.Audio.Models...)
+	} else {
+		out.Audio.Models = []ComboModelRef{}
+	}
+	return out
+}
+
 // MinComboModels is the smallest useful combo size.
 const MinComboModels = 2

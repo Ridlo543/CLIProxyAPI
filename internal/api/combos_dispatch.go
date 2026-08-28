@@ -15,6 +15,7 @@ import (
 	"github.com/tidwall/gjson"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/combos"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 )
 
@@ -37,14 +38,43 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 		_ = c.Request.Body.Close()
 
 		model := gjson.GetBytes(raw, "model").String()
+		requiresVision := combos.RequestRequiresVision(raw)
+		var chain []config.ComboModelRef
+
 		combo, found := combos.Find(model)
-		if !found {
+		if found {
+			chain = combos.Order(combo)
+			// If request requires vision, prepend vision adapter models if members lack vision
+			if requiresVision {
+				hasVisionMember := false
+				for _, m := range chain {
+					if combos.HasVisionCapability(m.Model) {
+						hasVisionMember = true
+						break
+					}
+				}
+				if !hasVisionMember {
+					visionPool := combos.GetVisionAdapterModels()
+					if len(visionPool) > 0 {
+						logrus.Infof("[router] 👁️ Vision adapter triggered for combo %q -> routing to %v first", combo.Name, visionPool)
+						chain = append(visionPool, chain...)
+					}
+				}
+			}
+		} else if requiresVision && !combos.HasVisionCapability(model) {
+			// Single model request that cannot process vision -> auto-route to Vision Adapter Pool
+			visionPool := combos.GetVisionAdapterModels()
+			if len(visionPool) > 0 {
+				logrus.Infof("[router] 👁️ Vision adapter triggered for single model %q -> auto-switching to %v", model, visionPool)
+				chain = append(visionPool, config.ComboModelRef{Model: model})
+			}
+		}
+
+		if len(chain) == 0 {
 			c.Request.Body = io.NopCloser(bytes.NewReader(raw))
 			next(c)
 			return
 		}
-
-		chain := combos.Order(combo)
 		originalWriter := c.Writer
 		var lastWriter *combosResponseWriter
 

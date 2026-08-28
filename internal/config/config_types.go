@@ -235,7 +235,8 @@ type RoutingConfig struct {
 	// Supported values: "round-robin" (default), "weighted-round-robin", "fill-first".
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
 
-	// Sticky controls request count stickiness (number of consecutive requests per credential before rotating; default: 1).
+	// Sticky defines the number of consecutive requests handled by each credential before rotating.
+	// 1 = rotate every request (default), 2, 3, 5, etc.
 	Sticky int `yaml:"sticky,omitempty" json:"sticky,omitempty"`
 
 	// SessionAffinity enables universal session-sticky routing for all clients.
@@ -243,7 +244,7 @@ type RoutingConfig struct {
 	// followed by prompt_cache_key, Responses conversation IDs, legacy body IDs,
 	// execution or derived session identity, and the existing message-content hash fallback.
 	// Automatic failover is always enabled when bound auth becomes unavailable.
-	SessionAffinity bool `yaml:"session-affinity,omitempty" json:"session-affinity,omitempty"`
+	SessionAffinity bool `yaml:"session-affinity" json:"session-affinity"`
 
 	// SessionAffinityTTL specifies how long session-to-auth bindings are retained.
 	// Default: 1h. Accepts duration strings like "30m", "1h", "2h30m".
@@ -258,8 +259,8 @@ type RoutingConfig struct {
 type ProviderRoutingConfig struct {
 	// Strategy: "round-robin", "weighted-round-robin", "fill-first", or "inherit"/"default"
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
-	// Sticky controls request count stickiness override for this provider (number of consecutive requests).
-	Sticky *int `yaml:"sticky,omitempty" json:"sticky,omitempty"`
+	// Sticky: number of requests per account before rotation, 0 or empty to inherit global
+	Sticky int `yaml:"sticky,omitempty" json:"sticky,omitempty"`
 	// SessionAffinity: nil = inherit global, true/false = override
 	SessionAffinity *bool `yaml:"session-affinity,omitempty" json:"session-affinity,omitempty"`
 	// SessionAffinityTTL: duration string or empty to inherit global

@@ -35,6 +35,7 @@ func ConvertOpenAIResponsesRequestToCodex(modelName string, inputRawJSON []byte,
 	rawJSON = deleteCodexRequestFields(rawJSON, "truncation", "prompt_cache_options", "prompt_cache_retention")
 	rawJSON = stripCodexResponsesCacheBreakpoints(rawJSON)
 	rawJSON = applyResponsesCompactionCompatibility(rawJSON)
+	rawJSON = normalizeCodexInputImages(rawJSON)
 
 	// Delete the user field as it is not supported by the Codex upstream.
 	rawJSON = deleteCodexRequestFields(rawJSON, "user")
@@ -246,6 +247,70 @@ func convertSystemRoleToDeveloperWithInput(rawJSON []byte, inputResult gjson.Res
 	}
 	updated, errSetInput := sjson.SetRawBytes(rawJSON, "input", inputRaw)
 	if errSetInput != nil {
+		return rawJSON
+	}
+	return updated
+}
+
+// normalizeCodexInputImages standardizes OpenAI Responses image parts to the
+// exact {type: "input_image", image_url: "...", detail: "..."} expected by Codex OAuth.
+func normalizeCodexInputImages(rawJSON []byte) []byte {
+	input := gjson.GetBytes(rawJSON, "input")
+	if !input.IsArray() {
+		return rawJSON
+	}
+
+	inputItems := input.Array()
+	changed := false
+	rebuiltInput := make([][]byte, 0, len(inputItems))
+
+	for _, item := range inputItems {
+		itemRaw := []byte(item.Raw)
+		content := item.Get("content")
+		if content.IsArray() {
+			parts := content.Array()
+			rebuiltParts := make([][]byte, 0, len(parts))
+			contentChanged := false
+			for _, part := range parts {
+				partType := part.Get("type").String()
+				if partType == "image_url" || partType == "input_image" {
+					url := part.Get("image_url.url").String()
+					if url == "" {
+						url = part.Get("image_url").String()
+					}
+					if url == "" {
+						url = part.Get("url").String()
+					}
+					detail := part.Get("image_url.detail").String()
+					if detail == "" {
+						detail = part.Get("detail").String()
+					}
+					if detail == "" {
+						detail = "auto"
+					}
+					normalizedPart := []byte(`{"type":"input_image","image_url":""}`)
+					normalizedPart, _ = sjson.SetBytes(normalizedPart, "image_url", url)
+					normalizedPart, _ = sjson.SetBytes(normalizedPart, "detail", detail)
+					rebuiltParts = append(rebuiltParts, normalizedPart)
+					contentChanged = true
+				} else {
+					rebuiltParts = append(rebuiltParts, []byte(part.Raw))
+				}
+			}
+			if contentChanged {
+				if updated, err := sjson.SetRawBytes(itemRaw, "content", translatorcommon.JoinRawArray(rebuiltParts)); err == nil {
+					itemRaw = updated
+					changed = true
+				}
+			}
+		}
+		rebuiltInput = append(rebuiltInput, itemRaw)
+	}
+	if !changed {
+		return rawJSON
+	}
+	updated, err := sjson.SetRawBytes(rawJSON, "input", translatorcommon.JoinRawArray(rebuiltInput))
+	if err != nil {
 		return rawJSON
 	}
 	return updated

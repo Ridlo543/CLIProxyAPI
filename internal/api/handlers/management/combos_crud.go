@@ -133,3 +133,28 @@ func (h *Handler) DeleteCombo(c *gin.Context) {
 		return
 	}
 }
+
+// GetCapacityAdapter handles GET /v0/management/capacity-adapter.
+func (h *Handler) GetCapacityAdapter(c *gin.Context) {
+	h.mu.Lock()
+	adapter := h.cfg.CapacityAdapter.Clone()
+	h.mu.Unlock()
+	c.JSON(http.StatusOK, adapter)
+}
+
+// UpdateCapacityAdapter handles PUT /v0/management/capacity-adapter.
+func (h *Handler) UpdateCapacityAdapter(c *gin.Context) {
+	var in config.CapacityAdapterConfig
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+		return
+	}
+	in.Normalize()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.cfg.CapacityAdapter = in.Clone()
+	saved := h.cfg.CapacityAdapter.Clone()
+	if !h.persistCombos(c, http.StatusOK, saved) {
+		return
+	}
+}

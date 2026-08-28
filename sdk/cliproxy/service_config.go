@@ -47,7 +47,7 @@ func normalizedRoutingRuntimeState(cfg *config.Config) routingRuntimeState {
 	case "fill-first", "fillfirst", "ff":
 		state.strategy = "fill-first"
 	}
-	if cfg.Routing.Sticky > 1 {
+	if cfg.Routing.Sticky > 0 {
 		state.sticky = cfg.Routing.Sticky
 	}
 	state.sessionAffinity = cfg.Routing.SessionAffinity
@@ -67,7 +67,9 @@ func buildSingleSelector(strategy string, sticky int, sessionAffinity bool, sess
 	case "fill-first":
 		selector = &coreauth.FillFirstSelector{}
 	default:
-		selector = &coreauth.RoundRobinSelector{StickyRequests: sticky}
+		selector = &coreauth.RoundRobinSelector{
+			StickyRequests: sticky,
+		}
 	}
 	if sessionAffinity {
 		selector = coreauth.NewSessionAffinitySelectorWithConfig(coreauth.SessionAffinityConfig{
@@ -98,8 +100,8 @@ func newRoutingSelector(state routingRuntimeState, cfg *config.Config) coreauth.
 		}
 
 		effSticky := state.sticky
-		if pCfg.Sticky != nil && *pCfg.Sticky > 0 {
-			effSticky = *pCfg.Sticky
+		if pCfg.Sticky > 0 {
+			effSticky = pCfg.Sticky
 		}
 
 		effAffinity := state.sessionAffinity

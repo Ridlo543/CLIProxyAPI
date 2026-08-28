@@ -473,22 +473,27 @@ func (s *RoundRobinSelector) Pick(ctx context.Context, provider, model string, o
 
 	s.ensureRotationKey(key, limit)
 
-	// If sticky request count is configured (> 1), reuse current auth until limit reached
-	sticky := s.StickyRequests
-	if sticky > 1 {
-		lastID := s.lastPicked[key]
-		count := s.pickCounts[key]
-		if lastID != "" && count < sticky {
-			for _, a := range available {
-				if a.ID == lastID {
-					s.pickCounts[key] = count + 1
-					return a, nil
-				}
+	// Check if we should stick with the last picked auth (Sticky count > 1)
+	stickyThreshold := s.StickyRequests
+	if stickyThreshold <= 0 {
+		stickyThreshold = 1
+	}
+
+	lastID := s.lastPicked[key]
+	currentCount := s.pickCounts[key]
+
+	if lastID != "" && currentCount < stickyThreshold {
+		// Check if last picked is still in available candidates
+		for _, cand := range available {
+			if cand != nil && cand.ID == lastID {
+				s.pickCounts[key] = currentCount + 1
+				return cand, nil
 			}
 		}
 	}
 
-	picked := available[successorIndex(available, s.lastPicked[key])]
+	// Rotate to next successor
+	picked := available[successorIndex(available, lastID)]
 	s.lastPicked[key] = picked.ID
 	s.pickCounts[key] = 1
 	return picked, nil
@@ -514,6 +519,7 @@ func successorIndex(available []*Auth, lastID string) int {
 func (s *RoundRobinSelector) ensureRotationKey(key string, limit int) {
 	if _, ok := s.lastPicked[key]; !ok && len(s.lastPicked) >= limit {
 		s.lastPicked = make(map[string]string)
+		s.pickCounts = make(map[string]int)
 	}
 }
 

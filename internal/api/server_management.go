@@ -81,6 +81,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.POST("/reset-quota", s.mgmt.ResetQuota)
 
 		mgmt.GET("/api-keys", s.mgmt.GetAPIKeys)
+		mgmt.GET("/api-keys/usage", s.mgmt.GetClientAPIKeyUsage)
 		mgmt.PUT("/api-keys", s.mgmt.PutAPIKeys)
 		mgmt.PATCH("/api-keys", s.mgmt.PatchAPIKeys)
 		mgmt.DELETE("/api-keys", s.mgmt.DeleteAPIKeys)
@@ -162,6 +163,8 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.POST("/combos", s.mgmt.CreateCombo)
 		mgmt.PUT("/combos/:name", s.mgmt.UpdateCombo)
 		mgmt.DELETE("/combos/:name", s.mgmt.DeleteCombo)
+		mgmt.GET("/capacity-adapter", s.mgmt.GetCapacityAdapter)
+		mgmt.PUT("/capacity-adapter", s.mgmt.UpdateCapacityAdapter)
 		mgmt.GET("/oauth-model-alias/:channel", s.mgmt.GetOAuthModelAliasChannel)
 		mgmt.POST("/oauth-model-alias/:channel", s.mgmt.AddOAuthModelAliases)
 

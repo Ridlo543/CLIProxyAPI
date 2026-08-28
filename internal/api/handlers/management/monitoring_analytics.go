@@ -1,6 +1,7 @@
 package management
 
 import (
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -222,6 +223,8 @@ type agg struct {
 	cost        float64
 	latencies   []int64
 	ttfts       []int64
+	handshakes  []int64
+	tpsList     []float64
 }
 
 func (a *agg) add(ev usagestore.Event) {
@@ -244,9 +247,18 @@ func (a *agg) add(ev usagestore.Event) {
 	}
 	if ev.LatencyMs > 0 {
 		a.latencies = append(a.latencies, ev.LatencyMs)
+		if ev.Output > 0 {
+			durationSec := float64(ev.LatencyMs) / 1000.0
+			if durationSec > 0 {
+				a.tpsList = append(a.tpsList, float64(ev.Output)/durationSec)
+			}
+		}
 	}
 	if ev.TTFTMs > 0 {
 		a.ttfts = append(a.ttfts, ev.TTFTMs)
+	}
+	if ev.HandshakeMs > 0 {
+		a.handshakes = append(a.handshakes, ev.HandshakeMs)
 	}
 }
 
@@ -267,6 +279,21 @@ func average(values []int64) float64 {
 		sum += v
 	}
 	return float64(sum) / float64(len(values))
+}
+
+func averageFloat(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, v := range values {
+		sum += v
+	}
+	return sum / float64(len(values))
+}
+
+func round1(v float64) float64 {
+	return math.Round(v*10) / 10
 }
 
 func buildSummary(events []usagestore.Event, from, to, now time.Time) gin.H {
@@ -309,6 +336,10 @@ func buildSummary(events []usagestore.Event, from, to, now time.Time) gin.H {
 	for m := range zeroModels {
 		zeroList = append(zeroList, m)
 	}
+	avgTps := 0.0
+	if len(a.tpsList) > 0 {
+		avgTps = round1(averageFloat(a.tpsList))
+	}
 	return gin.H{
 		"total_calls":           a.calls,
 		"success_calls":         a.success,
@@ -332,6 +363,8 @@ func buildSummary(events []usagestore.Event, from, to, now time.Time) gin.H {
 		"average_latency_ms":       int64(average(a.latencies)),
 		"p95_latency_ms":           percentile(a.latencies, 0.95),
 		"p95_ttft_ms":              percentile(a.ttfts, 0.95),
+		"avg_tps":                  avgTps,
+		"avg_speed_tps":            avgTps,
 		"zero_token_calls":         a.zeroToken,
 		"rpm_30m":                  rpm,
 		"tpm_30m":                  tpm30,
@@ -435,6 +468,17 @@ func buildModelStats(events []usagestore.Event) []gin.H {
 		if cacheTotal > 0 {
 			cacheHit = float64(a.cached+a.cacheRead) / float64(cacheTotal)
 		}
+		avgTps := 0.0
+		if len(a.tpsList) > 0 {
+			avgTps = round1(averageFloat(a.tpsList))
+		}
+		avgLatency := int64(average(a.latencies))
+		avgTTFT := int64(average(a.ttfts))
+		avgHandshake := int64(average(a.handshakes))
+		diffLatency := int64(0)
+		if avgLatency > avgTTFT && avgTTFT > 0 {
+			diffLatency = avgLatency - avgTTFT
+		}
 		out = append(out, gin.H{
 			"model":                 name,
 			"calls":                 a.calls,
@@ -449,6 +493,12 @@ func buildModelStats(events []usagestore.Event) []gin.H {
 			"cache_hit_rate":        cacheHit,
 			"total_tokens":          a.total,
 			"cost":                  a.cost,
+			"average_latency_ms":    avgLatency,
+			"average_ttft_ms":       avgTTFT,
+			"average_handshake_ms":  avgHandshake,
+			"diff_latency_ms":       diffLatency,
+			"avg_speed_tps":         avgTps,
+			"avg_tps":               avgTps,
 		})
 	}
 	return out
@@ -493,6 +543,22 @@ func buildChannelShare(events []usagestore.Event, identity map[string]accountIde
 		if label == "" {
 			label = account
 		}
+		avgTps := 0.0
+		if len(a.tpsList) > 0 {
+			avgTps = round1(averageFloat(a.tpsList))
+		}
+		cacheTotal := a.cached + a.cacheRead + a.cacheCreate
+		cacheHit := 0.0
+		if cacheTotal > 0 {
+			cacheHit = float64(a.cached+a.cacheRead) / float64(cacheTotal)
+		}
+		avgLatency := int64(average(a.latencies))
+		avgTTFT := int64(average(a.ttfts))
+		avgHandshake := int64(average(a.handshakes))
+		diffLatency := int64(0)
+		if avgLatency > avgTTFT && avgTTFT > 0 {
+			diffLatency = avgLatency - avgTTFT
+		}
 		out = append(out, gin.H{
 			"auth_index":             id,
 			"source":                 "",
@@ -502,9 +568,17 @@ func buildChannelShare(events []usagestore.Event, identity map[string]accountIde
 			"provider_label":         a.label,
 			"calls":                  a.calls,
 			"tokens":                 a.total,
+			"input_tokens":           a.input,
+			"output_tokens":          a.output,
+			"cache_hit_rate":         cacheHit,
 			"cost":                   a.cost,
 			"failure":                a.failure,
-			"average_latency_ms":     int64(average(a.latencies)),
+			"average_latency_ms":     avgLatency,
+			"average_ttft_ms":        avgTTFT,
+			"average_handshake_ms":   avgHandshake,
+			"diff_latency_ms":        diffLatency,
+			"avg_speed_tps":          avgTps,
+			"avg_tps":                avgTps,
 		})
 	}
 	return out
@@ -610,6 +684,7 @@ func buildEventsPage(events []usagestore.Event, identity map[string]accountIdent
 			"total_tokens":           ev.Total,
 			"latency_ms":             ev.LatencyMs,
 			"ttft_ms":                ev.TTFTMs,
+			"handshake_ms":           ev.HandshakeMs,
 			"duration_ms":            ev.Duration,
 			"cost":                   ev.Cost,
 			"failed":                 ev.Failed,

@@ -41,10 +41,11 @@ type Event struct {
 	AuthType  string    `json:"auth_type"`
 	APIKey    string    `json:"api_key,omitempty"`
 	Account   string    `json:"account,omitempty"`
-	Endpoint  string    `json:"endpoint,omitempty"`
-	LatencyMs int64     `json:"latency_ms"`
-	TTFTMs    int64     `json:"ttft_ms"`
-	Duration  int64     `json:"duration_ms,omitempty"`
+	Endpoint    string    `json:"endpoint,omitempty"`
+	LatencyMs   int64     `json:"latency_ms"`
+	TTFTMs      int64     `json:"ttft_ms"`
+	HandshakeMs int64     `json:"handshake_ms,omitempty"`
+	Duration    int64     `json:"duration_ms,omitempty"`
 	Failed    bool      `json:"failed"`
 	StatusCod int       `json:"status_code,omitempty"`
 	FailBody  string    `json:"fail_body,omitempty"`
@@ -331,6 +332,7 @@ func RecordFromUsage(record coreusage.Record, statusCode int) Event {
 		APIKey:        record.APIKey,
 		LatencyMs:     record.Latency.Milliseconds(),
 		TTFTMs:        record.TTFT.Milliseconds(),
+		HandshakeMs:   record.Handshake.Milliseconds(),
 		Duration:      record.Latency.Milliseconds(),
 		Input:         detail.InputTokens,
 		Output:        detail.OutputTokens,

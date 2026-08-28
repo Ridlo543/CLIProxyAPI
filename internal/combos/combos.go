@@ -16,10 +16,13 @@ import (
 )
 
 var (
-	mu       sync.RWMutex
-	snapshot []config.ComboConfig
+	mu              sync.RWMutex
+	snapshot        []config.ComboConfig
+	capacityAdapter config.CapacityAdapterConfig
 	// rrIndex tracks per-combo rotation state for round-robin strategy.
 	rrIndex sync.Map // combo name(lowercased) -> *atomic.Uint64
+	// adapterRR tracks capacity adapter rotation
+	adapterRR atomic.Uint64
 )
 
 // SyncFromConfig replaces the in-memory snapshot. Called by
@@ -30,9 +33,68 @@ func SyncFromConfig(cfg *config.Config) {
 		c.Normalize()
 		list = append(list, c.Clone())
 	}
+	adapter := cfg.CapacityAdapter
+	adapter.Normalize()
+
 	mu.Lock()
 	snapshot = list
+	capacityAdapter = adapter.Clone()
 	mu.Unlock()
+}
+
+func SnapshotCapacityAdapter() config.CapacityAdapterConfig {
+	mu.RLock()
+	defer mu.RUnlock()
+	return capacityAdapter.Clone()
+}
+
+// GetVisionAdapterModels returns the ordered models to route vision requests to.
+func GetVisionAdapterModels() []config.ComboModelRef {
+	mu.RLock()
+	capCfg := capacityAdapter.Vision
+	mu.RUnlock()
+	if !capCfg.Enabled || len(capCfg.Models) == 0 {
+		return nil
+	}
+	models := append([]config.ComboModelRef(nil), capCfg.Models...)
+	if len(models) > 1 && capCfg.RoundRobin {
+		idx := int(adapterRR.Add(1)-1) % len(models)
+		return append(append([]config.ComboModelRef(nil), models[idx:]...), models[:idx]...)
+	}
+	return models
+}
+
+// HasVisionCapability reports if a given model natively supports image understanding.
+func HasVisionCapability(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	// Models that definitely do not support images (e.g. text-only code review models or embeddings)
+	if strings.Contains(m, "-review") || strings.Contains(m, "embed") {
+		return false
+	}
+	// Models known to support vision
+	if strings.Contains(m, "flash") ||
+		strings.Contains(m, "pro") ||
+		strings.Contains(m, "gemini") ||
+		strings.Contains(m, "claude") ||
+		strings.Contains(m, "gpt-4") ||
+		strings.Contains(m, "gpt-5") ||
+		strings.Contains(m, "vision") ||
+		strings.Contains(m, "vl") ||
+		strings.Contains(m, "qwen") ||
+		strings.Contains(m, "glm") {
+		return true
+	}
+	return false
+}
+
+// RequestRequiresVision inspects request payload for images.
+func RequestRequiresVision(rawJSON []byte) bool {
+	s := string(rawJSON)
+	return strings.Contains(s, `"image_url"`) ||
+		strings.Contains(s, `"input_image"`) ||
+		strings.Contains(s, `"image/`) ||
+		strings.Contains(s, `"inline_data"`) ||
+		strings.Contains(s, `"inlineData"`)
 }
 
 func Snapshot() []config.ComboConfig {

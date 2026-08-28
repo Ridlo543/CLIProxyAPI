@@ -64,6 +64,7 @@ type SDKConfig struct {
 	// An empty list preserves the legacy behaviour where every key may call
 	// every model and provider without token budgets.
 	APIKeyPolicies []APIKeyPolicy `yaml:"api-key-policies,omitempty" json:"-"`
+	KeyPolicies    []APIKeyPolicy `yaml:"key-policies,omitempty" json:"-"`
 
 	// PassthroughHeaders controls whether upstream response headers are forwarded to downstream clients.
 	// Default is false (disabled).

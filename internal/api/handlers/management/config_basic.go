@@ -28,7 +28,7 @@ func (h *Handler) GetConfig(c *gin.Context) {
 		c.JSON(200, gin.H{})
 		return
 	}
-	c.JSON(200, new(*h.cfg))
+	c.JSON(200, h.cfg)
 }
 
 type releaseInfo struct {
@@ -337,10 +337,11 @@ func (h *Handler) PutRoutingStrategy(c *gin.Context) {
 		Strategy           *string `json:"strategy"`
 		Sticky             *int    `json:"sticky"`
 		SessionAffinity    *bool   `json:"session-affinity"`
+		SessionAffinityAlt *bool   `json:"session_affinity"`
 		SessionAffinityTTL *string `json:"session-affinity-ttl"`
 	}
 	if errBindJSON := c.ShouldBindJSON(&body); errBindJSON != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body: " + errBindJSON.Error()})
 		return
 	}
 	stratVal := body.Value
@@ -356,10 +357,16 @@ func (h *Handler) PutRoutingStrategy(c *gin.Context) {
 		h.cfg.Routing.Strategy = normalized
 	}
 	if body.Sticky != nil {
-		h.cfg.Routing.Sticky = *body.Sticky
+		if *body.Sticky > 0 {
+			h.cfg.Routing.Sticky = *body.Sticky
+		} else {
+			h.cfg.Routing.Sticky = 1
+		}
 	}
 	if body.SessionAffinity != nil {
 		h.cfg.Routing.SessionAffinity = *body.SessionAffinity
+	} else if body.SessionAffinityAlt != nil {
+		h.cfg.Routing.SessionAffinity = *body.SessionAffinityAlt
 	}
 	if body.SessionAffinityTTL != nil {
 		h.cfg.Routing.SessionAffinityTTL = strings.TrimSpace(*body.SessionAffinityTTL)
@@ -387,6 +394,7 @@ func (h *Handler) PutProviderRouting(c *gin.Context) {
 		Strategy           *string `json:"strategy"`
 		Sticky             *int    `json:"sticky"`
 		SessionAffinity    *bool   `json:"session-affinity"`
+		SessionAffinityAlt *bool   `json:"session_affinity"`
 		SessionAffinityTTL *string `json:"session-affinity-ttl"`
 	}
 	if errBind := c.ShouldBindJSON(&body); errBind != nil {
@@ -413,21 +421,23 @@ func (h *Handler) PutProviderRouting(c *gin.Context) {
 		}
 	}
 	if body.Sticky != nil {
-		if *body.Sticky <= 0 {
-			current.Sticky = nil
+		if *body.Sticky > 0 {
+			current.Sticky = *body.Sticky
 		} else {
-			current.Sticky = body.Sticky
+			current.Sticky = 0
 		}
 	}
 	if body.SessionAffinity != nil {
 		current.SessionAffinity = body.SessionAffinity
+	} else if body.SessionAffinityAlt != nil {
+		current.SessionAffinity = body.SessionAffinityAlt
 	}
 	if body.SessionAffinityTTL != nil {
 		current.SessionAffinityTTL = strings.TrimSpace(*body.SessionAffinityTTL)
 	}
 
-	// If all empty/nil, delete the provider override
-	if current.Strategy == "" && current.Sticky == nil && current.SessionAffinity == nil && current.SessionAffinityTTL == "" {
+	// If all empty/nil/zero, delete the provider override
+	if current.Strategy == "" && current.Sticky == 0 && current.SessionAffinity == nil && current.SessionAffinityTTL == "" {
 		delete(h.cfg.Routing.Providers, name)
 	} else {
 		h.cfg.Routing.Providers[name] = current
