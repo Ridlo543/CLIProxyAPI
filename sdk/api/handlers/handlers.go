@@ -465,6 +465,13 @@ func (h *BaseAPIHandler) GetContextWithCancel(handler interfaces.APIHandler, c *
 	if endpoint != "" {
 		newCtx = logging.WithEndpoint(newCtx, endpoint)
 	}
+	if c != nil {
+		if rawStart, exists := c.Get("REQUEST_START_TIME"); exists {
+			if startT, ok := rawStart.(time.Time); ok && !startT.IsZero() {
+				newCtx = coreusage.WithClientHandshakeStart(newCtx, startT)
+			}
+		}
+	}
 	if c != nil && c.Request != nil {
 		newCtx = logging.WithClientRequestMetadata(newCtx, logging.ClientRequestMetadata{
 			ClientIP:      requestClientIP(c.Request),

@@ -22,22 +22,23 @@ import (
 )
 
 type UsageReporter struct {
-	provider        string
-	executorType    string
-	model           string
-	alias           string
-	authID          string
-	authIndex       string
-	authMu          sync.RWMutex
-	accessTokenHash string
-	authType        string
-	apiKey          string
-	source          string
-	reasoning       string
-	serviceTier     string
-	generate        bool
-	requestedAt     time.Time
-	ttftMu          sync.RWMutex
+	provider          string
+	executorType      string
+	model             string
+	alias             string
+	authID            string
+	authIndex         string
+	authMu            sync.RWMutex
+	accessTokenHash   string
+	authType          string
+	apiKey            string
+	source            string
+	reasoning         string
+	serviceTier       string
+	generate          bool
+	requestedAt       time.Time
+	handshakeDuration time.Duration
+	ttftMu            sync.RWMutex
 	ttft            time.Duration
 	ttftStart       time.Time
 	ttftSet         bool
@@ -64,12 +65,19 @@ func NewUsageReporter(ctx context.Context, provider, model string, auth *cliprox
 	if alias == "" {
 		alias = model
 	}
+	handshakeDuration := time.Duration(0)
+	clientStart := usage.ClientHandshakeStartFromContext(ctx)
+	now := time.Now()
+	if !clientStart.IsZero() && now.After(clientStart) {
+		handshakeDuration = now.Sub(clientStart)
+	}
 	reporter := &UsageReporter{
-		provider:    provider,
-		model:       model,
-		alias:       strings.TrimSpace(alias),
-		requestedAt: time.Now(),
-		apiKey:      apiKey,
+		provider:          provider,
+		model:             model,
+		alias:             strings.TrimSpace(alias),
+		requestedAt:       now,
+		handshakeDuration: handshakeDuration,
+		apiKey:            apiKey,
 		source:      resolveUsageSource(auth, apiKey),
 		authType:    resolveUsageAuthType(auth),
 		reasoning:   usage.ReasoningEffortFromContext(ctx),
@@ -299,6 +307,7 @@ func (r *UsageReporter) buildRecordForModel(model string, detail usage.Detail, f
 		RequestedAt:         r.requestedAt,
 		Latency:             r.latency(),
 		TTFT:                r.ttftDuration(),
+		Handshake:           r.handshakeDuration,
 		Failed:              failed,
 		Fail:                fail,
 		Detail:              detail,

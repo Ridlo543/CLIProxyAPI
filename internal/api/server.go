@@ -157,6 +157,10 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		}
 	}
 
+	engine.Use(func(c *gin.Context) {
+		c.Set("REQUEST_START_TIME", time.Now())
+		c.Next()
+	})
 	engine.Use(corsMiddleware())
 	wd, err := os.Getwd()
 	if err != nil {

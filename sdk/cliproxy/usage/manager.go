@@ -48,6 +48,7 @@ type Record struct {
 	RequestedAt time.Time
 	Latency     time.Duration
 	TTFT        time.Duration
+	Handshake   time.Duration
 	Failed      bool
 	Fail        Failure
 	Detail      Detail
@@ -78,6 +79,29 @@ type requestedModelAliasContextKey struct{}
 type reasoningEffortContextKey struct{}
 type serviceTierContextKey struct{}
 type generateContextKey struct{}
+type clientHandshakeStartContextKey struct{}
+
+// WithClientHandshakeStart records the exact arrival timestamp of the client HTTP request.
+func WithClientHandshakeStart(ctx context.Context, start time.Time) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if start.IsZero() {
+		return ctx
+	}
+	return context.WithValue(ctx, clientHandshakeStartContextKey{}, start)
+}
+
+// ClientHandshakeStartFromContext retrieves the client HTTP request arrival timestamp.
+func ClientHandshakeStartFromContext(ctx context.Context) time.Time {
+	if ctx == nil {
+		return time.Time{}
+	}
+	if t, ok := ctx.Value(clientHandshakeStartContextKey{}).(time.Time); ok {
+		return t
+	}
+	return time.Time{}
+}
 
 // WithRequestedModelAlias stores the client-requested model name for usage sinks.
 func WithRequestedModelAlias(ctx context.Context, alias string) context.Context {

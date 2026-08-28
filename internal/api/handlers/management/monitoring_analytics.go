@@ -223,6 +223,7 @@ type agg struct {
 	cost        float64
 	latencies   []int64
 	ttfts       []int64
+	handshakes  []int64
 	tpsList     []float64
 }
 
@@ -255,6 +256,9 @@ func (a *agg) add(ev usagestore.Event) {
 	}
 	if ev.TTFTMs > 0 {
 		a.ttfts = append(a.ttfts, ev.TTFTMs)
+	}
+	if ev.HandshakeMs > 0 {
+		a.handshakes = append(a.handshakes, ev.HandshakeMs)
 	}
 }
 
@@ -470,6 +474,7 @@ func buildModelStats(events []usagestore.Event) []gin.H {
 		}
 		avgLatency := int64(average(a.latencies))
 		avgTTFT := int64(average(a.ttfts))
+		avgHandshake := int64(average(a.handshakes))
 		diffLatency := int64(0)
 		if avgLatency > avgTTFT && avgTTFT > 0 {
 			diffLatency = avgLatency - avgTTFT
@@ -490,6 +495,7 @@ func buildModelStats(events []usagestore.Event) []gin.H {
 			"cost":                  a.cost,
 			"average_latency_ms":    avgLatency,
 			"average_ttft_ms":       avgTTFT,
+			"average_handshake_ms":  avgHandshake,
 			"diff_latency_ms":       diffLatency,
 			"avg_speed_tps":         avgTps,
 			"avg_tps":               avgTps,
@@ -548,6 +554,7 @@ func buildChannelShare(events []usagestore.Event, identity map[string]accountIde
 		}
 		avgLatency := int64(average(a.latencies))
 		avgTTFT := int64(average(a.ttfts))
+		avgHandshake := int64(average(a.handshakes))
 		diffLatency := int64(0)
 		if avgLatency > avgTTFT && avgTTFT > 0 {
 			diffLatency = avgLatency - avgTTFT
@@ -568,6 +575,7 @@ func buildChannelShare(events []usagestore.Event, identity map[string]accountIde
 			"failure":                a.failure,
 			"average_latency_ms":     avgLatency,
 			"average_ttft_ms":        avgTTFT,
+			"average_handshake_ms":   avgHandshake,
 			"diff_latency_ms":        diffLatency,
 			"avg_speed_tps":          avgTps,
 			"avg_tps":                avgTps,
@@ -676,6 +684,7 @@ func buildEventsPage(events []usagestore.Event, identity map[string]accountIdent
 			"total_tokens":           ev.Total,
 			"latency_ms":             ev.LatencyMs,
 			"ttft_ms":                ev.TTFTMs,
+			"handshake_ms":           ev.HandshakeMs,
 			"duration_ms":            ev.Duration,
 			"cost":                   ev.Cost,
 			"failed":                 ev.Failed,

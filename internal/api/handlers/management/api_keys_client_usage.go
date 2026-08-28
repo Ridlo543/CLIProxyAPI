@@ -11,19 +11,20 @@ import (
 )
 
 type clientKeyAgg struct {
-	key        string
-	name       string
-	maskedKey  string
-	calls      int64
-	success    int64
-	failed     int64
-	input      int64
-	output     int64
-	total      int64
-	latencies  []int64
-	ttfts      []int64
-	tpsList    []float64
-	lastUsedMs int64
+	key         string
+	name        string
+	maskedKey   string
+	calls       int64
+	success     int64
+	failed      int64
+	input       int64
+	output      int64
+	total       int64
+	latencies   []int64
+	ttfts       []int64
+	handshakes  []int64
+	tpsList     []float64
+	lastUsedMs  int64
 }
 
 func maskClientKey(key string) string {
@@ -133,6 +134,9 @@ func (h *Handler) GetClientAPIKeyUsage(c *gin.Context) {
 		if ev.TTFTMs > 0 {
 			a.ttfts = append(a.ttfts, ev.TTFTMs)
 		}
+		if ev.HandshakeMs > 0 {
+			a.handshakes = append(a.handshakes, ev.HandshakeMs)
+		}
 		if ev.Output > 0 && ev.LatencyMs > 0 {
 			tps := (float64(ev.Output) / float64(ev.LatencyMs)) * 1000.0
 			a.tpsList = append(a.tpsList, tps)
@@ -144,21 +148,22 @@ func (h *Handler) GetClientAPIKeyUsage(c *gin.Context) {
 	}
 
 	type ClientKeyUsageItem struct {
-		Key           string  `json:"key"`
-		Name          string  `json:"name"`
-		MaskedKey     string  `json:"masked_key"`
-		Calls         int64   `json:"calls"`
-		Success       int64   `json:"success"`
-		Failed        int64   `json:"failed"`
-		SuccessRate   float64 `json:"success_rate"`
-		InputTokens   int64   `json:"input_tokens"`
-		OutputTokens  int64   `json:"output_tokens"`
-		TotalTokens   int64   `json:"total_tokens"`
-		AvgLatencyMs  int64   `json:"avg_latency_ms"`
-		AvgTTFTMs     int64   `json:"avg_ttft_ms"`
-		DiffLatencyMs int64   `json:"diff_latency_ms"`
-		AvgSpeedTPS   float64 `json:"avg_speed_tps"`
-		LastUsedMs    int64   `json:"last_used_ms"`
+		Key            string  `json:"key"`
+		Name           string  `json:"name"`
+		MaskedKey      string  `json:"masked_key"`
+		Calls          int64   `json:"calls"`
+		Success        int64   `json:"success"`
+		Failed         int64   `json:"failed"`
+		SuccessRate    float64 `json:"success_rate"`
+		InputTokens    int64   `json:"input_tokens"`
+		OutputTokens   int64   `json:"output_tokens"`
+		TotalTokens    int64   `json:"total_tokens"`
+		AvgLatencyMs   int64   `json:"avg_latency_ms"`
+		AvgTTFTMs      int64   `json:"avg_ttft_ms"`
+		AvgHandshakeMs int64   `json:"avg_handshake_ms"`
+		DiffLatencyMs  int64   `json:"diff_latency_ms"`
+		AvgSpeedTPS    float64 `json:"avg_speed_tps"`
+		LastUsedMs     int64   `json:"last_used_ms"`
 	}
 
 	result := make([]ClientKeyUsageItem, 0, len(index))
@@ -175,6 +180,10 @@ func (h *Handler) GetClientAPIKeyUsage(c *gin.Context) {
 		if len(a.ttfts) > 0 {
 			avgTTFT = int64(average(a.ttfts))
 		}
+		avgHandshake := int64(0)
+		if len(a.handshakes) > 0 {
+			avgHandshake = int64(average(a.handshakes))
+		}
 		diffLatency := int64(0)
 		if avgLatency > avgTTFT && avgTTFT > 0 {
 			diffLatency = avgLatency - avgTTFT
@@ -185,21 +194,22 @@ func (h *Handler) GetClientAPIKeyUsage(c *gin.Context) {
 		}
 
 		result = append(result, ClientKeyUsageItem{
-			Key:           a.key,
-			Name:          a.name,
-			MaskedKey:     a.maskedKey,
-			Calls:         a.calls,
-			Success:       a.success,
-			Failed:        a.failed,
-			SuccessRate:   successRate,
-			InputTokens:   a.input,
-			OutputTokens:  a.output,
-			TotalTokens:   a.total,
-			AvgLatencyMs:  avgLatency,
-			AvgTTFTMs:     avgTTFT,
-			DiffLatencyMs: diffLatency,
-			AvgSpeedTPS:   avgSpeed,
-			LastUsedMs:    a.lastUsedMs,
+			Key:            a.key,
+			Name:           a.name,
+			MaskedKey:      a.maskedKey,
+			Calls:          a.calls,
+			Success:        a.success,
+			Failed:         a.failed,
+			SuccessRate:    successRate,
+			InputTokens:    a.input,
+			OutputTokens:   a.output,
+			TotalTokens:    a.total,
+			AvgLatencyMs:   avgLatency,
+			AvgTTFTMs:      avgTTFT,
+			AvgHandshakeMs: avgHandshake,
+			DiffLatencyMs:  diffLatency,
+			AvgSpeedTPS:    avgSpeed,
+			LastUsedMs:     a.lastUsedMs,
 		})
 	}
 
