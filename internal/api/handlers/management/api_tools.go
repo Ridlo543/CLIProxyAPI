@@ -161,6 +161,21 @@ func (h *Handler) APICall(c *gin.Context) {
 		}
 		reqHeaders[key] = strings.ReplaceAll(value, "$TOKEN$", token)
 	}
+	// Auto-inject OpenAI-Account-ID for Codex wham usage probes if available in auth metadata
+	if auth != nil && strings.EqualFold(auth.Provider, "codex") {
+		if accountID := stringValue(auth.Metadata, "account_id"); accountID != "" {
+			hasAccountIDHeader := false
+			for k := range reqHeaders {
+				if strings.EqualFold(k, "OpenAI-Account-ID") {
+					hasAccountIDHeader = true
+					break
+				}
+			}
+			if !hasAccountIDHeader {
+				reqHeaders["OpenAI-Account-ID"] = accountID
+			}
+		}
+	}
 
 	var requestBody io.Reader
 	if body.Data != "" {
