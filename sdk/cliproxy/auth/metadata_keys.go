@@ -1,29 +1,41 @@
 package auth
 
 // CanonicalCredentialMetadataKey returns the canonical snake_case name for
-// credential metadata keys that previously also accepted config-style aliases.
+// credential metadata keys that previously also accepted config-style aliases or camelCase.
 func CanonicalCredentialMetadataKey(key string) string {
 	switch key {
-	case "api-key":
+	case "api-key", "apiKey":
 		return "api_key"
-	case "base-url":
+	case "base-url", "baseUrl":
 		return "base_url"
-	case "disable-cooling":
+	case "disable-cooling", "disableCooling":
 		return "disable_cooling"
-	case "excluded-models":
+	case "excluded-models", "excludedModels":
 		return "excluded_models"
-	case "fingerprint-profile":
+	case "fingerprint-profile", "fingerprintProfile":
 		return "fingerprint_profile"
-	case "model-aliases":
+	case "model-aliases", "modelAliases":
 		return "model_aliases"
-	case "proxy-url":
+	case "proxy-url", "proxyUrl":
 		return "proxy_url"
-	case "request-retry":
+	case "request-retry", "requestRetry":
 		return "request_retry"
-	case "request-scoped-errors":
+	case "request-scoped-errors", "requestScopedErrors":
 		return "request_scoped_errors"
-	case "tool-prefix-disabled":
+	case "tool-prefix-disabled", "toolPrefixDisabled":
 		return "tool_prefix_disabled"
+	case "accessToken":
+		return "access_token"
+	case "refreshToken":
+		return "refresh_token"
+	case "idToken":
+		return "id_token"
+	case "expiresAt":
+		return "expired"
+	case "expiresIn":
+		return "expires_in"
+	case "provider":
+		return "type"
 	default:
 		return key
 	}

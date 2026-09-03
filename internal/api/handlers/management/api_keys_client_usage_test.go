@@ -58,13 +58,13 @@ func TestGetClientAPIKeyUsage_ReturnsAggregatedKeys(t *testing.T) {
 
 	var payload struct {
 		ClientKeys []struct {
-			Key           string  `json:"key"`
-			Calls         int64   `json:"calls"`
-			Success       int64   `json:"success"`
-			TotalTokens   int64   `json:"total_tokens"`
-			AvgLatencyMs  int64   `json:"avg_latency_ms"`
-			AvgTTFTMs     int64   `json:"avg_ttft_ms"`
-			DiffLatencyMs int64   `json:"diff_latency_ms"`
+			Key           string `json:"key"`
+			Calls         int64  `json:"calls"`
+			Success       int64  `json:"success"`
+			TotalTokens   int64  `json:"total_tokens"`
+			AvgLatencyMs  int64  `json:"avg_latency_ms"`
+			AvgTTFTMs     int64  `json:"avg_ttft_ms"`
+			DiffLatencyMs int64  `json:"diff_latency_ms"`
 		} `json:"client_keys"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {

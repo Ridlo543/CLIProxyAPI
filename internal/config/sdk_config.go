@@ -81,13 +81,42 @@ type SDKConfig struct {
 	NonStreamKeepAliveInterval int `yaml:"nonstream-keepalive-interval,omitempty" json:"nonstream-keepalive-interval,omitempty"`
 }
 
-// ContextCompressionConfig configures the single inline request compression engine.
+// ContextCompressionConfig configures request compression engines (RTK, TARE, Kompact, Token Savior).
 // TARE executable identity fields are intentionally excluded from JSON management surfaces.
 type ContextCompressionConfig struct {
 	Engine      string               `yaml:"engine" json:"engine"`
 	MinBytes    int                  `yaml:"min-bytes,omitempty" json:"min-bytes,omitempty"`
 	RawCapBytes int                  `yaml:"raw-cap-bytes,omitempty" json:"raw-cap-bytes,omitempty"`
 	TARE        TAREStructuralConfig `yaml:"tare-structural,omitempty" json:"-"`
+	Kompact     KompactConfig        `yaml:"kompact,omitempty" json:"kompact,omitempty"`
+	TokenSavior TokenSaviorConfig    `yaml:"token-savior,omitempty" json:"token-savior,omitempty"`
+}
+
+// KompactConfig configures connection to the external Kompact context optimization proxy.
+type KompactConfig struct {
+	Enabled           bool   `yaml:"enabled" json:"enabled"`
+	Host              string `yaml:"host,omitempty" json:"host,omitempty"`
+	Port              int    `yaml:"port,omitempty" json:"port,omitempty"`
+	TimeoutMS         int    `yaml:"timeout-ms,omitempty" json:"timeout-ms,omitempty"`
+	Toon              bool   `yaml:"toon,omitempty" json:"toon,omitempty"`
+	ObservationMasker bool   `yaml:"observation-masker,omitempty" json:"observation-masker,omitempty"`
+	CacheAligner      bool   `yaml:"cache-aligner,omitempty" json:"cache-aligner,omitempty"`
+	JSONCrusher       bool   `yaml:"json-crusher,omitempty" json:"json-crusher,omitempty"`
+	CodeCompressor    bool   `yaml:"code-compressor,omitempty" json:"code-compressor,omitempty"`
+	LogCompressor     bool   `yaml:"log-compressor,omitempty" json:"log-compressor,omitempty"`
+	HTMLStripper      bool   `yaml:"html-stripper,omitempty" json:"html-stripper,omitempty"`
+	ContentCompressor bool   `yaml:"content-compressor,omitempty" json:"content-compressor,omitempty"`
+}
+
+// TokenSaviorConfig configures connection to the external Token Savior daemon.
+type TokenSaviorConfig struct {
+	Enabled     bool   `yaml:"enabled" json:"enabled"`
+	Host        string `yaml:"host,omitempty" json:"host,omitempty"`
+	Port        int    `yaml:"port,omitempty" json:"port,omitempty"`
+	TimeoutMS   int    `yaml:"timeout-ms,omitempty" json:"timeout-ms,omitempty"`
+	Profile     string `yaml:"profile,omitempty" json:"profile,omitempty"`
+	BashCompact bool   `yaml:"bash-compact,omitempty" json:"bash-compact,omitempty"`
+	BashRewrite bool   `yaml:"bash-rewrite,omitempty" json:"bash-rewrite,omitempty"`
 }
 
 // TAREStructuralConfig contains only bounded process and verified-identity settings.

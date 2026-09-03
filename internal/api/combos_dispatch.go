@@ -161,11 +161,54 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 			return
 		}
 		for _, cmb := range combos.Snapshot() {
-			parsed.Data = append(parsed.Data, map[string]any{
+			entry := map[string]any{
 				"id":       cmb.Name,
 				"object":   "model",
 				"owned_by": "combos",
-			})
+				"type":     "combos",
+			}
+			ctxLen := cmb.ContextLength
+			maxTok := cmb.MaxTokens
+			if maxTok <= 0 {
+				maxTok = cmb.MaxCompletionTokens
+			}
+
+			// If not explicitly configured, inherit from primary/fallback model
+			if len(cmb.Models) > 0 {
+				primary := cmb.Models[0]
+				info := registry.LookupStaticModelInfo(primary.Model)
+				if info != nil {
+					if ctxLen <= 0 && info.ContextLength > 0 {
+						ctxLen = info.ContextLength
+					}
+					if maxTok <= 0 {
+						if info.MaxCompletionTokens > 0 {
+							maxTok = info.MaxCompletionTokens
+						} else if info.OutputTokenLimit > 0 {
+							maxTok = info.OutputTokenLimit
+						}
+					}
+				} else {
+					// Fallback default: 1,000,000 (1M) context length and 128,000 (128k) max completion tokens
+					if ctxLen <= 0 {
+						ctxLen = 1000000
+					}
+					if maxTok <= 0 {
+						maxTok = 128000
+					}
+				}
+			}
+			if ctxLen > 0 {
+				entry["context_length"] = ctxLen
+				entry["max_context_length"] = ctxLen
+				entry["inputTokenLimit"] = ctxLen
+			}
+			if maxTok > 0 {
+				entry["max_completion_tokens"] = maxTok
+				entry["max_tokens"] = maxTok
+				entry["outputTokenLimit"] = maxTok
+			}
+			parsed.Data = append(parsed.Data, entry)
 		}
 		out, _ := json.Marshal(parsed)
 		if c.Writer.Header().Get("Content-Type") == "" {

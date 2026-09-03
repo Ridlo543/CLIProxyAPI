@@ -32,23 +32,23 @@ const (
 
 // Event is one settled provider request as seen by the usage pipeline.
 type Event struct {
-	ID        int64     `json:"id"`
-	Timestamp time.Time `json:"timestamp"`
-	Provider  string    `json:"provider"`
-	Model     string    `json:"model"`
-	Alias     string    `json:"alias"`
-	AuthIndex string    `json:"auth_index"`
-	AuthType  string    `json:"auth_type"`
-	APIKey    string    `json:"api_key,omitempty"`
-	Account   string    `json:"account,omitempty"`
+	ID          int64     `json:"id"`
+	Timestamp   time.Time `json:"timestamp"`
+	Provider    string    `json:"provider"`
+	Model       string    `json:"model"`
+	Alias       string    `json:"alias"`
+	AuthIndex   string    `json:"auth_index"`
+	AuthType    string    `json:"auth_type"`
+	APIKey      string    `json:"api_key,omitempty"`
+	Account     string    `json:"account,omitempty"`
 	Endpoint    string    `json:"endpoint,omitempty"`
 	LatencyMs   int64     `json:"latency_ms"`
 	TTFTMs      int64     `json:"ttft_ms"`
 	HandshakeMs int64     `json:"handshake_ms,omitempty"`
 	Duration    int64     `json:"duration_ms,omitempty"`
-	Failed    bool      `json:"failed"`
-	StatusCod int       `json:"status_code,omitempty"`
-	FailBody  string    `json:"fail_body,omitempty"`
+	Failed      bool      `json:"failed"`
+	StatusCod   int       `json:"status_code,omitempty"`
+	FailBody    string    `json:"fail_body,omitempty"`
 
 	Input         int64   `json:"input_tokens"`
 	Output        int64   `json:"output_tokens"`

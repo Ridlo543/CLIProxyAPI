@@ -13,6 +13,12 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 )
 
+type rateMinuteState struct {
+	minuteStart time.Time
+	requests    int
+	tokens      int64
+}
+
 type windowState struct {
 	limit       int64
 	window      string
@@ -20,12 +26,12 @@ type windowState struct {
 	firstSeen   time.Time
 	used        int64
 }
-
 // Enforcer holds policies plus in-memory per-key usage counters.
 type Enforcer struct {
 	mu       sync.RWMutex
 	byKey    map[string]config.APIKeyPolicy
 	usage    map[string]*windowState
+	rateMap  map[string]*rateMinuteState
 	nowClock func() time.Time
 }
 
@@ -103,6 +109,33 @@ func (e *Enforcer) CheckProviders(key string, candidates []string, modelKnown bo
 	return false
 }
 
+// CheckRateLimit checks both RPM and TPM thresholds. Returns false if rate limit is exceeded.
+func (e *Enforcer) CheckRateLimit(key string) bool {
+	p, ok := e.policy(key)
+	if !ok || (p.RPM <= 0 && p.TPM <= 0) {
+		return true
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.rateMap == nil {
+		e.rateMap = make(map[string]*rateMinuteState)
+	}
+	now := e.nowClock()
+	st, exists := e.rateMap[key]
+	if !exists || now.Sub(st.minuteStart) >= time.Minute {
+		st = &rateMinuteState{minuteStart: now}
+		e.rateMap[key] = st
+	}
+	if p.RPM > 0 && st.requests >= p.RPM {
+		return false
+	}
+	if p.TPM > 0 && st.tokens >= p.TPM {
+		return false
+	}
+	st.requests++
+	return true
+}
+
 // CheckBudget reports whether the key still has token budget remaining.
 func (e *Enforcer) CheckBudget(key string) bool {
 	e.mu.Lock()
@@ -120,22 +153,23 @@ func (e *Enforcer) Record(key string, totalTokens int64) {
 	if strings.TrimSpace(key) == "" || totalTokens <= 0 {
 		return
 	}
-	p, ok := e.policy(key)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.rateMap != nil {
+		if st, ok := e.rateMap[key]; ok {
+			st.tokens += totalTokens
+		}
+	}
+	p, ok := e.byKey[key]
 	if !ok || p.Limit == nil || p.Limit.Limit <= 0 {
-		// Track even unlimited keys so the usage endpoint can report activity.
-		e.mu.Lock()
 		state := e.usageStateLocked(key, "", 0)
 		state.used += totalTokens
-		e.mu.Unlock()
 		return
 	}
-	e.mu.Lock()
 	state := e.usageStateLocked(key, p.Limit.Window, p.Limit.Limit)
 	e.rollWindowLocked(key, state)
 	state.used += totalTokens
-	e.mu.Unlock()
 }
-
 func (e *Enforcer) usageStateLocked(key, window string, limit int64) *windowState {
 	if e.usage == nil {
 		e.usage = map[string]*windowState{}

@@ -207,6 +207,12 @@ func (h *Handler) GetAuthFileModels(c *gin.Context) {
 		if m.OwnedBy != "" {
 			entry["owned_by"] = m.OwnedBy
 		}
+		if len(m.SupportedInputModalities) > 0 {
+			entry["input_modalities"] = m.SupportedInputModalities
+		}
+		if m.Thinking != nil {
+			entry["supports_thinking"] = true
+		}
 		result = append(result, entry)
 	}
 

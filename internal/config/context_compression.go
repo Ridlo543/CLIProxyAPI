@@ -9,10 +9,13 @@ import (
 )
 
 const (
-	ContextCompressionOff     = "off"
-	ContextCompressionRTK     = "rtk"
-	ContextCompressionTARE    = "tare_structural"
-	ContextCompressionRTKTARE = "rtk_tare"
+	ContextCompressionOff         = "off"
+	ContextCompressionRTK         = "rtk"
+	ContextCompressionTARE        = "tare_structural"
+	ContextCompressionRTKTARE     = "rtk_tare"
+	ContextCompressionKompact     = "kompact"
+	ContextCompressionTokenSavior = "token_savior"
+	ContextCompressionAll         = "all"
 )
 
 var sha256Pattern = regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
@@ -30,9 +33,37 @@ func (c *ContextCompressionConfig) applyDefaults() {
 		c.Engine = ContextCompressionTARE
 	case "rtk+tare":
 		c.Engine = ContextCompressionRTKTARE
+	case "token-savior":
+		c.Engine = ContextCompressionTokenSavior
+	case "pipeline", "auto", "combined":
+		c.Engine = ContextCompressionAll
 	}
 	if c.Engine == "" {
-		c.Engine = ContextCompressionOff
+		if c.Kompact.Enabled {
+			c.Engine = ContextCompressionKompact
+		} else if c.TokenSavior.Enabled {
+			c.Engine = ContextCompressionTokenSavior
+		} else {
+			c.Engine = ContextCompressionOff
+		}
+	}
+	if c.Kompact.Host == "" {
+		c.Kompact.Host = "127.0.0.1"
+	}
+	if c.Kompact.Port == 0 {
+		c.Kompact.Port = 7878
+	}
+	if c.Kompact.TimeoutMS == 0 {
+		c.Kompact.TimeoutMS = 1500
+	}
+	if c.TokenSavior.Host == "" {
+		c.TokenSavior.Host = "127.0.0.1"
+	}
+	if c.TokenSavior.Port == 0 {
+		c.TokenSavior.Port = 8921
+	}
+	if c.TokenSavior.TimeoutMS == 0 {
+		c.TokenSavior.TimeoutMS = 1500
 	}
 	if c.MinBytes == 0 {
 		c.MinBytes = 500
@@ -70,7 +101,7 @@ func (c *ContextCompressionConfig) applyDefaults() {
 // TARE engine has no explicit identity fields. A partial explicit identity is
 // deliberately left untouched so validation rejects it.
 func (c *ContextCompressionConfig) applyBundledTAREFallback() {
-	if c.Engine != ContextCompressionTARE && c.Engine != ContextCompressionRTKTARE {
+	if c.Engine != ContextCompressionTARE && c.Engine != ContextCompressionRTKTARE && c.Engine != ContextCompressionAll {
 		return
 	}
 	t := &c.TARE
@@ -89,8 +120,8 @@ func (c *ContextCompressionConfig) applyBundledTAREFallback() {
 
 // Validate rejects unsafe or unbounded compression configuration at load time.
 func (c ContextCompressionConfig) Validate() error {
-	if c.Engine != ContextCompressionOff && c.Engine != ContextCompressionRTK && c.Engine != ContextCompressionTARE && c.Engine != ContextCompressionRTKTARE {
-		return fmt.Errorf("context-compression.engine must be off, rtk, tare_structural, or rtk_tare")
+	if c.Engine != ContextCompressionOff && c.Engine != ContextCompressionRTK && c.Engine != ContextCompressionTARE && c.Engine != ContextCompressionRTKTARE && c.Engine != ContextCompressionKompact && c.Engine != ContextCompressionTokenSavior && c.Engine != ContextCompressionAll {
+		return fmt.Errorf("context-compression.engine must be off, rtk, tare_structural, rtk_tare, kompact, token_savior, or all")
 	}
 	if c.MinBytes < 1 || c.MinBytes > 1024*1024 || c.RawCapBytes < c.MinBytes || c.RawCapBytes > 10*1024*1024 {
 		return fmt.Errorf("context-compression size bounds are invalid")

@@ -236,9 +236,21 @@ func (e *AntigravityExecutor) fetchAntigravityProjectID(ctx context.Context, aut
 	return strings.TrimSpace(projectID), nil
 }
 
-func (e *AntigravityExecutor) projectIDForRequest(_ context.Context, auth *cliproxyauth.Auth, _ string) (string, error) {
+func (e *AntigravityExecutor) projectIDForRequest(ctx context.Context, auth *cliproxyauth.Auth, _ string) (string, error) {
 	if projectID := antigravityProjectIDFromAuth(auth); projectID != "" {
 		return projectID, nil
+	}
+	if auth != nil {
+		token := metaStringValue(auth.Metadata, "access_token")
+		if token != "" {
+			if pid, errFetch := e.fetchAntigravityProjectID(ctx, auth, token); errFetch == nil && pid != "" {
+				if auth.Metadata == nil {
+					auth.Metadata = make(map[string]any)
+				}
+				auth.Metadata["project_id"] = pid
+				return pid, nil
+			}
+		}
 	}
 	return "", missingAntigravityProjectIDError(nil)
 }

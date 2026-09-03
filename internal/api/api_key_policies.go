@@ -95,6 +95,10 @@ func APIKeyPolicyMiddleware() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "provider_not_allowed"})
 			return
 		}
+		if !enforcer.CheckRateLimit(key) {
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "rate_limit_exceeded"})
+			return
+		}
 		if !enforcer.CheckBudget(key) {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "token_budget_exceeded"})
 			return

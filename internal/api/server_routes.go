@@ -19,6 +19,7 @@ import (
 	codexmodels "github.com/router-for-me/CLIProxyAPI/v7/internal/client/codex/models"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/client/grokbuild"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/clienterror"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/contextcompression"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
@@ -51,6 +52,9 @@ func (s *Server) setupRoutes() {
 	}
 	s.engine.GET("/healthz", healthzHandler)
 	s.engine.HEAD("/healthz", healthzHandler)
+	s.engine.GET("/api/context-compression/stats", func(c *gin.Context) {
+		c.JSON(http.StatusOK, contextcompression.GetGlobalMetrics().Snapshot(c.Request.Context(), s.cfg.ContextCompression))
+	})
 
 	s.engine.GET("/management.html", s.serveManagementControlPanel)
 	// Assets referenced by the embedded single-file panel. Only these explicit

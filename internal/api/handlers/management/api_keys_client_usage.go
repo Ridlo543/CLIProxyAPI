@@ -11,20 +11,20 @@ import (
 )
 
 type clientKeyAgg struct {
-	key         string
-	name        string
-	maskedKey   string
-	calls       int64
-	success     int64
-	failed      int64
-	input       int64
-	output      int64
-	total       int64
-	latencies   []int64
-	ttfts       []int64
-	handshakes  []int64
-	tpsList     []float64
-	lastUsedMs  int64
+	key        string
+	name       string
+	maskedKey  string
+	calls      int64
+	success    int64
+	failed     int64
+	input      int64
+	output     int64
+	total      int64
+	latencies  []int64
+	ttfts      []int64
+	handshakes []int64
+	tpsList    []float64
+	lastUsedMs int64
 }
 
 func maskClientKey(key string) string {

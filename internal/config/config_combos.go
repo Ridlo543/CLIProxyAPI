@@ -33,9 +33,12 @@ type ComboModelRef struct {
 // combos_crud.go management handler — deliberately isolated so pulling new
 // CLIProxyAPI upstream commits stays conflict-free.
 type ComboConfig struct {
-	Name     string          `yaml:"name" json:"name"`
-	Strategy ComboStrategy   `yaml:"strategy" json:"strategy"`
-	Models   []ComboModelRef `yaml:"models" json:"models"`
+	Name                string          `yaml:"name" json:"name"`
+	Strategy            ComboStrategy   `yaml:"strategy" json:"strategy"`
+	Models              []ComboModelRef `yaml:"models" json:"models"`
+	ContextLength       int             `yaml:"context_length,omitempty" json:"context_length,omitempty"`
+	MaxTokens           int             `yaml:"max_tokens,omitempty" json:"max_tokens,omitempty"`
+	MaxCompletionTokens int             `yaml:"max_completion_tokens,omitempty" json:"max_completion_tokens,omitempty"`
 }
 
 // Normalize trims whitespace and lowercases the strategy.

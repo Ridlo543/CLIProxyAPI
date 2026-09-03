@@ -27,6 +27,8 @@ type APIKeyPolicy struct {
 	Models    []string          `yaml:"models,omitempty" json:"models,omitempty"`
 	Providers []string          `yaml:"providers,omitempty" json:"providers,omitempty"`
 	Limit     *APIKeyTokenLimit `yaml:"token-limit,omitempty" json:"token-limit,omitempty"`
+	RPM       int               `yaml:"rpm,omitempty" json:"rpm,omitempty"`
+	TPM       int64             `yaml:"tpm,omitempty" json:"tpm,omitempty"`
 }
 
 // EffectiveKey returns the key string from either Key or APIKey.

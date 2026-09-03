@@ -101,7 +101,7 @@ func (m *MultiProviderSelector) OnResult(res Result) {
 		onRes.OnResult(res)
 	}
 }
-//
+
 // Rotation continues from the identity of the previous pick rather than from a numeric
 // index. Candidate slices shrink whenever a retry excludes already tried credentials or a
 // credential enters cooldown, and indexing a monotonic counter into a shrinking slice

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/contextcompression"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagestore"
 )
 
@@ -112,7 +113,18 @@ func (h *Handler) PostMonitoringAnalytics(c *gin.Context) {
 		resp["hourly_distribution"] = buildHourlyDistribution(events)
 	}
 
+	resp["context_compression"] = contextcompression.GetGlobalMetrics().Snapshot(c.Request.Context(), h.cfg.ContextCompression)
+
 	c.JSON(http.StatusOK, resp)
+}
+
+// GetContextCompressionStats returns live statistics for all compression engines and daemons.
+func (h *Handler) GetContextCompressionStats(c *gin.Context) {
+	if h == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "handler unavailable"})
+		return
+	}
+	c.JSON(http.StatusOK, contextcompression.GetGlobalMetrics().Snapshot(c.Request.Context(), h.cfg.ContextCompression))
 }
 
 type accountIdentity struct {
@@ -315,6 +327,10 @@ func buildSummary(events []usagestore.Event, from, to, now time.Time) gin.H {
 	if days < 1 {
 		days = 1
 	}
+	durationMinutes := to.Sub(from).Minutes()
+	if durationMinutes < 1 {
+		durationMinutes = 1
+	}
 	zeroModels := map[string]bool{}
 	for _, ev := range events {
 		if window30.Before(ev.Timestamp) || window30.Equal(ev.Timestamp) {
@@ -325,8 +341,21 @@ func buildSummary(events []usagestore.Event, from, to, now time.Time) gin.H {
 			zeroModels[ev.Model] = true
 		}
 	}
-	rpm := reqCount30 / 30
-	tpm30 := tokCount30 / 30
+	liveRPM := round1(float64(reqCount30) / 30.0)
+	liveTPM := int64(math.Round(float64(tokCount30) / 30.0))
+
+	timeframeRPM := round1(float64(a.calls) / durationMinutes)
+	timeframeTPM := int64(math.Round(float64(a.total) / durationMinutes))
+
+	effectiveRPM := timeframeRPM
+	effectiveTPM := timeframeTPM
+	if liveRPM > 0 {
+		effectiveRPM = liveRPM
+	}
+	if liveTPM > 0 {
+		effectiveTPM = liveTPM
+	}
+
 	cacheTotal := a.cached + a.cacheRead + a.cacheCreate
 	cacheHit := 0.0
 	if cacheTotal > 0 {
@@ -366,8 +395,12 @@ func buildSummary(events []usagestore.Event, from, to, now time.Time) gin.H {
 		"avg_tps":                  avgTps,
 		"avg_speed_tps":            avgTps,
 		"zero_token_calls":         a.zeroToken,
-		"rpm_30m":                  rpm,
-		"tpm_30m":                  tpm30,
+		"rpm":                      effectiveRPM,
+		"tpm":                      effectiveTPM,
+		"timeframe_rpm":            timeframeRPM,
+		"timeframe_tpm":            timeframeTPM,
+		"rpm_30m":                  liveRPM,
+		"tpm_30m":                  liveTPM,
 		"avg_daily_requests":       float64(a.calls) / days,
 		"avg_daily_tokens":         float64(a.total) / days,
 		"approx_tasks":             0,
@@ -379,13 +412,20 @@ func buildSummary(events []usagestore.Event, from, to, now time.Time) gin.H {
 
 func granularityLabel(requested string, from, to time.Time) string {
 	switch strings.ToLower(strings.TrimSpace(requested)) {
-	case "hour", "day":
+	case "hour", "day", "week", "month":
 		return strings.ToLower(strings.TrimSpace(requested))
 	default:
-		if to.Sub(from) <= 48*time.Hour {
+		diff := to.Sub(from)
+		if diff <= 48*time.Hour {
 			return "hour"
 		}
-		return "day"
+		if diff <= 90*24*time.Hour {
+			return "day"
+		}
+		if diff <= 365*24*time.Hour {
+			return "week"
+		}
+		return "month"
 	}
 }
 
@@ -393,15 +433,33 @@ func buildTimeline(events []usagestore.Event, from, to time.Time, requested stri
 	gran := granularityLabel(requested, from, to)
 	bucket := time.Hour
 	layout := "01-02 15:04"
-	if gran == "day" {
+	switch gran {
+	case "day":
 		bucket = 24 * time.Hour
 		layout = "01-02"
+	case "week":
+		bucket = 7 * 24 * time.Hour
+		layout = "01-02"
+	case "month":
+		bucket = 30 * 24 * time.Hour
+		layout = "2006-01"
 	}
 	truncate := func(t time.Time) time.Time {
-		if gran == "day" {
+		switch gran {
+		case "day":
 			return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+		case "week":
+			weekday := int(t.Weekday())
+			if weekday == 0 {
+				weekday = 7
+			}
+			mon := t.AddDate(0, 0, -(weekday - 1))
+			return time.Date(mon.Year(), mon.Month(), mon.Day(), 0, 0, 0, 0, t.Location())
+		case "month":
+			return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location())
+		default:
+			return t.Truncate(bucket)
 		}
-		return t.Truncate(bucket)
 	}
 	order := make([]time.Time, 0, 8)
 	index := map[time.Time]*agg{}
@@ -416,6 +474,12 @@ func buildTimeline(events []usagestore.Event, from, to time.Time, requested stri
 		a.add(ev)
 	}
 	sort.Slice(order, func(i, j int) bool { return order[i].Before(order[j]) })
+
+	// Cap the timeline points to at most 60 buckets (latest chronological) to prevent UI overflow on 'all'
+	if len(order) > 60 {
+		order = order[len(order)-60:]
+	}
+
 	out := make([]gin.H, 0, len(order))
 	for _, key := range order {
 		a := index[key]

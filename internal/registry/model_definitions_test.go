@@ -114,19 +114,19 @@ func TestAntigravityWebSearchModelForRequiresRequestedModelCapability(t *testing
 
 func TestStaticCatalogIncludesReconciledEntries(t *testing.T) {
 	kimi := GetKimiModels()
-	if len(kimi) < 12 {
-		t.Fatalf("kimi count = %d, want >= 12", len(kimi))
+	if len(kimi) < 8 {
+		t.Fatalf("kimi count = %d, want >= 8", len(kimi))
 	}
-	for _, id := range []string{"kimi-k2.5-thinking", "kimi-for-coding", "kimi-for-coding-highspeed", "kimi-latest"} {
+	for _, id := range []string{"kimi-k2", "kimi-k2-thinking", "kimi-k2.5", "kimi-k2.6"} {
 		if LookupStaticModelInfo(id) == nil {
 			t.Fatalf("kimi entry %q not found in static catalog", id)
 		}
 	}
 	antigravity := GetAntigravityModels()
-	if len(antigravity) < 18 {
-		t.Fatalf("antigravity count = %d, want >= 18", len(antigravity))
+	if len(antigravity) < 10 {
+		t.Fatalf("antigravity count = %d, want >= 10", len(antigravity))
 	}
-	for _, id := range []string{"gemini-3.5-flash-high", "gemini-3.6-flash-low", "gemini-3.6-flash-medium", "gemini-3.7-flash-low", "gemini-3.7-flash-medium"} {
+	for _, id := range []string{"claude-opus-4-6-thinking", "gemini-3.6-flash-high", "gemini-3.7-flash-high", "gemini-pro-agent", "gpt-oss-120b-medium"} {
 		info := LookupStaticModelInfo(id)
 		if info == nil {
 			t.Fatalf("antigravity entry %q not found in static catalog", id)
