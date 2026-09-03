@@ -25,17 +25,19 @@ type configCommit struct {
 }
 
 type routingRuntimeState struct {
-	strategy           string
-	sticky             int
-	sessionAffinity    bool
-	sessionAffinityTTL time.Duration
+	strategy                 string
+	sticky                   int
+	sessionAffinity          bool
+	sessionAffinityTTL       time.Duration
+	sessionAffinitySubagents bool
 }
 
 func normalizedRoutingRuntimeState(cfg *config.Config) routingRuntimeState {
 	state := routingRuntimeState{
-		strategy:           "round-robin",
-		sticky:             1,
-		sessionAffinityTTL: time.Hour,
+		strategy:                 "round-robin",
+		sticky:                   1,
+		sessionAffinityTTL:       time.Hour,
+		sessionAffinitySubagents: true,
 	}
 	if cfg == nil {
 		return state
@@ -59,6 +61,9 @@ func normalizedRoutingRuntimeState(cfg *config.Config) routingRuntimeState {
 			state.sessionAffinityTTL = parsed
 		}
 	}
+	if state.sessionAffinity && cfg.Routing.SessionAffinitySubagents != nil {
+		state.sessionAffinitySubagents = *cfg.Routing.SessionAffinitySubagents
+	}
 	return state
 }
 
@@ -74,10 +79,12 @@ func buildSingleSelector(strategy string, sticky int, sessionAffinity bool, sess
 			StickyRequests: sticky,
 		}
 	}
-	if sessionAffinity {
+	if state.sessionAffinity {
+		subagents := state.sessionAffinitySubagents
 		selector = coreauth.NewSessionAffinitySelectorWithConfig(coreauth.SessionAffinityConfig{
-			Fallback: selector,
-			TTL:      sessionAffinityTTL,
+			Fallback:         selector,
+			TTL:              state.sessionAffinityTTL,
+			SubagentAffinity: &subagents,
 		})
 	}
 	return selector
