@@ -67,7 +67,7 @@ func normalizedRoutingRuntimeState(cfg *config.Config) routingRuntimeState {
 	return state
 }
 
-func buildSingleSelector(strategy string, sticky int, sessionAffinity bool, sessionAffinityTTL time.Duration) coreauth.Selector {
+func buildSingleSelector(strategy string, sticky int, sessionAffinity bool, sessionAffinityTTL time.Duration, sessionAffinitySubagents *bool) coreauth.Selector {
 	var selector coreauth.Selector
 	switch strategy {
 	case "weighted-round-robin":
@@ -79,19 +79,18 @@ func buildSingleSelector(strategy string, sticky int, sessionAffinity bool, sess
 			StickyRequests: sticky,
 		}
 	}
-	if state.sessionAffinity {
-		subagents := state.sessionAffinitySubagents
+	if sessionAffinity {
 		selector = coreauth.NewSessionAffinitySelectorWithConfig(coreauth.SessionAffinityConfig{
 			Fallback:         selector,
-			TTL:              state.sessionAffinityTTL,
-			SubagentAffinity: &subagents,
+			TTL:              sessionAffinityTTL,
+			SubagentAffinity: sessionAffinitySubagents,
 		})
 	}
 	return selector
 }
 
 func newRoutingSelector(state routingRuntimeState, cfg *config.Config) coreauth.Selector {
-	globalSelector := buildSingleSelector(state.strategy, state.sticky, state.sessionAffinity, state.sessionAffinityTTL)
+	globalSelector := buildSingleSelector(state.strategy, state.sticky, state.sessionAffinity, state.sessionAffinityTTL, &state.sessionAffinitySubagents)
 	if cfg == nil || len(cfg.Routing.Providers) == 0 {
 		return globalSelector
 	}
@@ -126,7 +125,7 @@ func newRoutingSelector(state routingRuntimeState, cfg *config.Config) coreauth.
 			}
 		}
 
-		providerSelectors[pName] = buildSingleSelector(effStrat, effSticky, effAffinity, effTTL)
+		providerSelectors[pName] = buildSingleSelector(effStrat, effSticky, effAffinity, effTTL, &state.sessionAffinitySubagents)
 	}
 
 	return coreauth.NewMultiProviderSelector(globalSelector, providerSelectors)
@@ -262,8 +261,10 @@ func (s *Service) applyManagerConfig(ctx context.Context, commit configCommit) b
 		return false
 	}
 	routingState := normalizedRoutingRuntimeState(commit.cfg)
-	s.coreManager.SetSelector(newRoutingSelector(routingState, commit.cfg))
-	s.appliedRoutingState = &routingState
+	if s.appliedRoutingState == nil || *s.appliedRoutingState != routingState {
+		s.coreManager.SetSelector(newRoutingSelector(routingState, commit.cfg))
+		s.appliedRoutingState = &routingState
+	}
 	s.applyRetryConfig(commit.cfg)
 	store := s.resolveCooldownStateStore(commit.cfg)
 	if !s.coreManager.ApplyConfigWithCooldownStateStore(ctx, commit.cfg, store) {
