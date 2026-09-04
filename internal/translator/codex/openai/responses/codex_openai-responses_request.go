@@ -43,14 +43,27 @@ func ConvertOpenAIResponsesRequestToCodex(modelName string, inputRawJSON []byte,
 	// Convert role "system" to "developer" in input array to comply with Codex API requirements.
 	rawJSON = convertSystemRoleToDeveloper(rawJSON)
 	rawJSON = normalizeCodexBuiltinTools(rawJSON)
-
-	// Map virtual Codex review models to upstream models (e.g. gpt-5.6-sol-review -> gpt-5.6-sol)
-	if currModel := gjson.GetBytes(rawJSON, "model"); currModel.Exists() && currModel.String() != "" {
-		if strings.HasSuffix(currModel.String(), "-review") {
-			rawJSON, _ = sjson.SetBytes(rawJSON, "model", strings.TrimSuffix(currModel.String(), "-review"))
+	// Map virtual Codex review and cyber models to upstream models (e.g. gpt-6-astra-review -> gpt-6-astra, gpt-6-cyber -> gpt-6-astra)
+	mapVirtual := func(name string) string {
+		name = strings.TrimSuffix(name, "-review")
+		if strings.HasSuffix(name, "-cyber") {
+			base := strings.TrimSuffix(name, "-cyber")
+			if base == "gpt-6" {
+				return "gpt-6-astra"
+			}
+			if base == "gpt-5.6" {
+				return "gpt-5.6-sol"
+			}
+			return base
 		}
-	} else if strings.HasSuffix(modelName, "-review") {
-		rawJSON, _ = sjson.SetBytes(rawJSON, "model", strings.TrimSuffix(modelName, "-review"))
+		return name
+	}
+	if currModel := gjson.GetBytes(rawJSON, "model"); currModel.Exists() && currModel.String() != "" {
+		if mapped := mapVirtual(currModel.String()); mapped != currModel.String() {
+			rawJSON, _ = sjson.SetBytes(rawJSON, "model", mapped)
+		}
+	} else if mapped := mapVirtual(modelName); mapped != modelName {
+		rawJSON, _ = sjson.SetBytes(rawJSON, "model", mapped)
 	}
 
 	return rawJSON

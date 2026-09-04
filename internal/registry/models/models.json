@@ -2594,6 +2594,191 @@
       "supportedOutputModalities": [
         "text"
       ]
+    },
+    {
+      "id": "gpt-6-astra-review",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6 Astra (Review)",
+      "version": "gpt-6",
+      "description": "Automated code review & security auditing specialization for GPT 6 Astra.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-6-review",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6 (Review)",
+      "version": "gpt-6",
+      "description": "Automated code review specialization for GPT 6.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-6-cyber",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6 Cyber (Daybreak)",
+      "version": "gpt-6",
+      "description": "OpenAI Daybreak cybersecurity & vulnerability analysis profile.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-5.6-sol-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Sol (Review)",
+      "version": "gpt-5.6",
+      "description": "Virtual code review variant for GPT 5.6 Sol.",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-5.6-terra-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Terra (Review)",
+      "version": "gpt-5.6",
+      "description": "Virtual code review variant for GPT 5.6 Terra.",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-5.6-cyber",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Cyber",
+      "version": "gpt-5.6",
+      "description": "OpenAI Daybreak defensive security model profile for GPT 5.6.",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
     }
   ],
   "codex-team": [
@@ -2870,6 +3055,191 @@
           "xhigh",
           "max",
           "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-6-astra-review",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6 Astra (Review)",
+      "version": "gpt-6",
+      "description": "Automated code review & security auditing specialization for GPT 6 Astra.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-6-review",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6 (Review)",
+      "version": "gpt-6",
+      "description": "Automated code review specialization for GPT 6.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-6-cyber",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6 Cyber (Daybreak)",
+      "version": "gpt-6",
+      "description": "OpenAI Daybreak cybersecurity & vulnerability analysis profile.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-5.6-sol-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Sol (Review)",
+      "version": "gpt-5.6",
+      "description": "Virtual code review variant for GPT 5.6 Sol.",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-5.6-terra-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Terra (Review)",
+      "version": "gpt-5.6",
+      "description": "Virtual code review variant for GPT 5.6 Terra.",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-5.6-cyber",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Cyber",
+      "version": "gpt-5.6",
+      "description": "OpenAI Daybreak defensive security model profile for GPT 5.6.",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "high",
+          "xhigh",
+          "max"
         ]
       },
       "supportedInputModalities": [
@@ -3193,6 +3563,191 @@
       "supportedOutputModalities": [
         "text"
       ]
+    },
+    {
+      "id": "gpt-6-astra-review",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6 Astra (Review)",
+      "version": "gpt-6",
+      "description": "Automated code review & security auditing specialization for GPT 6 Astra.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-6-review",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6 (Review)",
+      "version": "gpt-6",
+      "description": "Automated code review specialization for GPT 6.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-6-cyber",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6 Cyber (Daybreak)",
+      "version": "gpt-6",
+      "description": "OpenAI Daybreak cybersecurity & vulnerability analysis profile.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-5.6-sol-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Sol (Review)",
+      "version": "gpt-5.6",
+      "description": "Virtual code review variant for GPT 5.6 Sol.",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-5.6-terra-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Terra (Review)",
+      "version": "gpt-5.6",
+      "description": "Virtual code review variant for GPT 5.6 Terra.",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-5.6-cyber",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Cyber",
+      "version": "gpt-5.6",
+      "description": "OpenAI Daybreak defensive security model profile for GPT 5.6.",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
     }
   ],
   "codex-pro": [
@@ -3498,6 +4053,191 @@
           "xhigh",
           "max",
           "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-6-astra-review",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6 Astra (Review)",
+      "version": "gpt-6",
+      "description": "Automated code review & security auditing specialization for GPT 6 Astra.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-6-review",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6 (Review)",
+      "version": "gpt-6",
+      "description": "Automated code review specialization for GPT 6.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-6-cyber",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6 Cyber (Daybreak)",
+      "version": "gpt-6",
+      "description": "OpenAI Daybreak cybersecurity & vulnerability analysis profile.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-5.6-sol-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Sol (Review)",
+      "version": "gpt-5.6",
+      "description": "Virtual code review variant for GPT 5.6 Sol.",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-5.6-terra-review",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Terra (Review)",
+      "version": "gpt-5.6",
+      "description": "Virtual code review variant for GPT 5.6 Terra.",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-5.6-cyber",
+      "object": "model",
+      "created": 1783616400,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 5.6 Cyber",
+      "version": "gpt-5.6",
+      "description": "OpenAI Daybreak defensive security model profile for GPT 5.6.",
+      "context_length": 921000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "high",
+          "xhigh",
+          "max"
         ]
       },
       "supportedInputModalities": [
