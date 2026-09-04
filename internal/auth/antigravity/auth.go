@@ -295,8 +295,21 @@ func (o *AntigravityAuth) FetchProjectID(ctx context.Context, accessToken string
 	}
 
 	projectID := extractCloudaicompanionProject(loadResp)
-
 	if projectID == "" {
+		if ineligible, ok := loadResp["ineligibleTiers"].([]any); ok && len(ineligible) > 0 {
+			for _, rawTier := range ineligible {
+				if tierMap, okMap := rawTier.(map[string]any); okMap {
+					reasonCode := fmt.Sprintf("%v", tierMap["reasonCode"])
+					reasonMsg := fmt.Sprintf("%v", tierMap["reasonMessage"])
+					valURL := fmt.Sprintf("%v", tierMap["validationUrl"])
+					log.Warnf("⚠️ [Antigravity Eligibility] Account not eligible: [%s] %s", reasonCode, reasonMsg)
+					if valURL != "" && valURL != "<nil>" {
+						log.Warnf("🔗 [Antigravity Verification URL]: %s", valURL)
+					}
+				}
+			}
+		}
+
 		projectID, err = o.OnboardUser(ctx, accessToken, defaultAntigravityTierID(loadResp))
 		if err != nil {
 			return "", err
