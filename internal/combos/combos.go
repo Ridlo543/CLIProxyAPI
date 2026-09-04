@@ -182,7 +182,14 @@ func ShouldFallback(status int, body []byte) bool {
 				strings.Contains(lower, "unknown model") ||
 				strings.Contains(lower, "model_not_found") ||
 				strings.Contains(lower, "quota") ||
-				strings.Contains(lower, "capacity") {
+				strings.Contains(lower, "capacity") ||
+				strings.Contains(lower, "no_biscuit") ||
+				strings.Contains(lower, "biscuit") ||
+				strings.Contains(lower, "token") ||
+				strings.Contains(lower, "session") ||
+				strings.Contains(lower, "credential") ||
+				strings.Contains(lower, "overloaded") ||
+				strings.Contains(lower, "rate") {
 				return true
 			}
 		}
