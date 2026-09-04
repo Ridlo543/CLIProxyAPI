@@ -2530,6 +2530,70 @@
       "supportedOutputModalities": [
         "text"
       ]
+    },
+    {
+      "id": "gpt-6-astra",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6 Astra",
+      "version": "gpt-6",
+      "description": "Next-generation frontier model for complex reasoning, coding, computer use, and agentic workflows.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-6",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6",
+      "version": "gpt-6",
+      "description": "Next-generation frontier model for complex reasoning, coding, computer use, and agentic workflows.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
     }
   ],
   "codex-team": [
@@ -2742,6 +2806,70 @@
           "medium",
           "high",
           "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-6-astra",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6 Astra",
+      "version": "gpt-6",
+      "description": "Next-generation frontier model for complex reasoning, coding, computer use, and agentic workflows.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-6",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6",
+      "version": "gpt-6",
+      "description": "Next-generation frontier model for complex reasoning, coding, computer use, and agentic workflows.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
         ]
       },
       "supportedInputModalities": [
@@ -3001,6 +3129,70 @@
       "supportedOutputModalities": [
         "text"
       ]
+    },
+    {
+      "id": "gpt-6-astra",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6 Astra",
+      "version": "gpt-6",
+      "description": "Next-generation frontier model for complex reasoning, coding, computer use, and agentic workflows.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-6",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6",
+      "version": "gpt-6",
+      "description": "Next-generation frontier model for complex reasoning, coding, computer use, and agentic workflows.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
     }
   ],
   "codex-pro": [
@@ -3242,6 +3434,70 @@
           "medium",
           "high",
           "xhigh"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-6-astra",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6 Astra",
+      "version": "gpt-6",
+      "description": "Next-generation frontier model for complex reasoning, coding, computer use, and agentic workflows.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "gpt-6",
+      "object": "model",
+      "created": 1788480000,
+      "owned_by": "openai",
+      "type": "openai",
+      "display_name": "GPT 6",
+      "version": "gpt-6",
+      "description": "Next-generation frontier model for complex reasoning, coding, computer use, and agentic workflows.",
+      "context_length": 1050000,
+      "max_completion_tokens": 128000,
+      "supported_parameters": [
+        "tools"
+      ],
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
         ]
       },
       "supportedInputModalities": [
@@ -3759,7 +4015,6 @@
         "text"
       ]
     }
-
   ],
   "xai": [
     {
