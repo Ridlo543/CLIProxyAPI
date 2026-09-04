@@ -107,8 +107,6 @@ var modelPricing = map[string]ModelRates{
 	"gpt-6-review":               {Input: 10, Output: 50, Cached: 1.25, Reasoning: 50, CacheCreation: 10},
 	"gpt-6-astra":                {Input: 10, Output: 50, Cached: 1.25, Reasoning: 50, CacheCreation: 10},
 	"gpt-6-astra-review":         {Input: 10, Output: 50, Cached: 1.25, Reasoning: 50, CacheCreation: 10},
-	"gpt-6-cyber":                {Input: 10, Output: 50, Cached: 1.25, Reasoning: 50, CacheCreation: 10},
-	"gpt-5.6-cyber":              {Input: 5, Output: 30, Cached: 0.5, Reasoning: 30, CacheCreation: 5},
 	"gpt-oss-120b-medium":        {Input: 0.5, Output: 2, Cached: 0.25, Reasoning: 3, CacheCreation: 0.5},
 	"grok-code-fast-1":           {Input: 0.5, Output: 2, Cached: 0.25, Reasoning: 3, CacheCreation: 0.5},
 	"k3":                         {Input: 3, Output: 15, Cached: 0.3, Reasoning: 15, CacheCreation: 3},
