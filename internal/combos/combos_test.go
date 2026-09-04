@@ -85,6 +85,28 @@ func TestShouldFallbackStatus(t *testing.T) {
 		}
 	}
 }
+func TestShouldFallbackWithBody(t *testing.T) {
+	// Transient and auth errors fallback regardless of body
+	if !ShouldFallback(500, nil) {
+		t.Fatal("expected 500 to fallback")
+	}
+	if !ShouldFallback(429, nil) {
+		t.Fatal("expected 429 to fallback")
+	}
+	// Standard 400 client syntax error does not fallback
+	if ShouldFallback(400, []byte(`{"error":"invalid json syntax"}`)) {
+		t.Fatal("expected general 400 not to fallback")
+	}
+	// 400 with model unsupported error DOES fallback
+	unsupportedMsg := []byte(`{"detail":"The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account."}`)
+	if !ShouldFallback(400, unsupportedMsg) {
+		t.Fatal("expected model unsupported 400 to fallback")
+	}
+	// 404 with model not found DOES fallback
+	if !ShouldFallback(404, []byte(`{"error":{"message":"model not found"}}`)) {
+		t.Fatal("expected 404 model not found to fallback")
+	}
+}
 
 func TestFindAndSync(t *testing.T) {
 	cfg := &config.Config{Combos: []config.ComboConfig{

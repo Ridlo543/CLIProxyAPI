@@ -108,8 +108,8 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 				w.FlushHeld() // success: deliver whatever was streamed/buffered
 				return
 			}
-			if !combos.ShouldFallbackStatus(status) {
-				logrus.Warnf("[router] ❌ Combo %q client error on %s (HTTP %d)", combo.Name, combos.ModelID(member), status)
+			if !combos.ShouldFallback(status, w.held.Bytes()) {
+				logrus.Warnf("[router] ❌ Combo %q client error on %s (HTTP %d): %s", combo.Name, combos.ModelID(member), status, string(w.held.Bytes()))
 				w.FlushHeld() // definite client error: do not mask it
 				return
 			}
@@ -279,7 +279,9 @@ func newCombosWriter(w gin.ResponseWriter) *combosResponseWriter {
 func (w *combosResponseWriter) decide(code int) {
 	w.code = code
 	w.wroteHeader = true
-	w.passthrough = !(code >= http.StatusBadRequest && combos.ShouldFallbackStatus(code))
+	// Hold all error responses (HTTP >= 400) so fallback inspection can evaluate status and body.
+	// Only successful responses (< 400) passthrough immediately for streaming.
+	w.passthrough = code < http.StatusBadRequest
 	if w.passthrough {
 		w.ResponseWriter.WriteHeader(code)
 	}

@@ -164,5 +164,32 @@ func ShouldFallbackStatus(status int) bool {
 	}
 }
 
+// ShouldFallback reports whether a failure (status code + response body)
+// warrants trying the next candidate in a combo.
+func ShouldFallback(status int, body []byte) bool {
+	if ShouldFallbackStatus(status) {
+		return true
+	}
+	if status == http.StatusBadRequest || status == http.StatusNotFound || status == http.StatusUnprocessableEntity {
+		if len(body) > 0 {
+			lower := strings.ToLower(string(body))
+			if strings.Contains(lower, "not supported") ||
+				strings.Contains(lower, "unsupported") ||
+				strings.Contains(lower, "does not exist") ||
+				strings.Contains(lower, "not found") ||
+				strings.Contains(lower, "not available") ||
+				strings.Contains(lower, "invalid model") ||
+				strings.Contains(lower, "unknown model") ||
+				strings.Contains(lower, "model_not_found") ||
+				strings.Contains(lower, "quota") ||
+				strings.Contains(lower, "capacity") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+
 // ModelID renders a member reference in "provider/model" form for logs.
 func ModelID(m config.ComboModelRef) string { return m.Provider + "/" + m.Model }

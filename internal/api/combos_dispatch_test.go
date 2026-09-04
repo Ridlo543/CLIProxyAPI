@@ -3,12 +3,13 @@ package api
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"strings"
 	"testing"
-
 	"github.com/gin-gonic/gin"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/combos"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 )
 
 func TestRewriteModelFieldSetsMemberModel(t *testing.T) {
@@ -57,5 +58,59 @@ func TestCombosAugmentModelsWritesSingleJSON(t *testing.T) {
 	}
 	if len(parsed.Data) != 2 || parsed.Data[0].ID != "real-1" || parsed.Data[1].ID != "c1" {
 		t.Fatalf("unexpected data: %+v", parsed.Data)
+	}
+}
+
+func TestCombosChatWrapperFallsBackOnModelUnsupported400(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	combos.SyncFromConfig(&config.Config{Combos: []config.ComboConfig{
+		{
+			Name:     "test-fallback-combo",
+			Strategy: config.ComboStrategyFallback,
+			Models: []config.ComboModelRef{
+				{Provider: "codex", Model: "gpt-6-astra"},
+				{Provider: "codex", Model: "gpt-5.6-sol"},
+			},
+		},
+	}})
+	defer combos.SyncFromConfig(&config.Config{})
+
+	registry.GetGlobalRegistry().RegisterClient("mock-codex", "codex", []*registry.ModelInfo{
+		{ID: "gpt-6-astra"},
+		{ID: "gpt-5.6-sol"},
+	})
+	defer registry.GetGlobalRegistry().UnregisterClient("mock-codex")
+	r := gin.New()
+	s := &Server{}
+
+	// Mock handler: gpt-6-astra returns 400 model unsupported, gpt-5.6-sol returns 200 OK
+	r.POST("/v1/chat/completions", s.combosChatWrapper(func(c *gin.Context) {
+		var req struct {
+			Model string `json:"model"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "bad json"})
+			return
+		}
+		if req.Model == "gpt-6-astra" {
+			c.JSON(400, gin.H{"detail": "The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account."})
+			return
+		}
+		if req.Model == "gpt-5.6-sol" {
+			c.JSON(200, gin.H{"choices": []gin.H{{"message": gin.H{"content": "fallback succeeded"}}}})
+			return
+		}
+		c.JSON(500, gin.H{"error": "unexpected model"})
+	}))
+
+	w := httptest.NewRecorder()
+	reqBody := `{"model":"test-fallback-combo","messages":[{"role":"user","content":"hello"}]}`
+	r.ServeHTTP(w, httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(reqBody)))
+
+	if w.Code != 200 {
+		t.Fatalf("expected HTTP 200 after fallback, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "fallback succeeded") {
+		t.Fatalf("expected fallback response, got %s", w.Body.String())
 	}
 }
