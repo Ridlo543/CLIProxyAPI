@@ -448,6 +448,7 @@ func (h *Handler) RequestAntigravityToken(c *gin.Context) {
 		}
 
 		projectID := ""
+		planType := "Free Tier"
 		if accessToken != "" {
 			fetchedProjectID, errProject := authSvc.FetchProjectID(ctx, accessToken)
 			if errProject != nil {
@@ -457,7 +458,6 @@ func (h *Handler) RequestAntigravityToken(c *gin.Context) {
 				log.Infof("antigravity: obtained project ID %s", util.HideAPIKey(projectID))
 			}
 		}
-
 		now := time.Now()
 		metadata := map[string]any{
 			"type":          "antigravity",
@@ -466,6 +466,7 @@ func (h *Handler) RequestAntigravityToken(c *gin.Context) {
 			"expires_in":    tokenResp.ExpiresIn,
 			"timestamp":     now.UnixMilli(),
 			"expired":       now.Add(time.Duration(tokenResp.ExpiresIn) * time.Second).Format(time.RFC3339),
+			"plan_type":     planType,
 		}
 		if email != "" {
 			metadata["email"] = email
