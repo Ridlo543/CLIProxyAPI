@@ -259,8 +259,6 @@ func (h *Handler) listAuthFilesFromDisk(c *gin.Context) {
 				}
 				if planType := strings.TrimSpace(gjson.GetBytes(data, "plan_type").String()); planType != "" {
 					fileData["plan_type"] = planType
-				} else if typeValue == "antigravity" {
-					fileData["plan_type"] = "Free Tier"
 				}
 				if exp := strings.TrimSpace(gjson.GetBytes(data, "expired").String()); exp != "" {
 					fileData["expired"] = exp
@@ -619,9 +617,6 @@ func authPlanType(auth *coreauth.Auth) string {
 		if v := strings.TrimSpace(auth.Attributes["tier"]); v != "" {
 			return v
 		}
-	}
-	if strings.EqualFold(strings.TrimSpace(auth.Provider), "antigravity") {
-		return "Free Tier"
 	}
 	return ""
 }
