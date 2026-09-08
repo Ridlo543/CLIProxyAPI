@@ -257,6 +257,25 @@ func (h *Handler) listAuthFilesFromDisk(c *gin.Context) {
 				if projectID := strings.TrimSpace(gjson.GetBytes(data, "project_id").String()); projectID != "" {
 					fileData["project_id"] = projectID
 				}
+				if planType := strings.TrimSpace(gjson.GetBytes(data, "plan_type").String()); planType != "" {
+					fileData["plan_type"] = planType
+				}
+				if exp := strings.TrimSpace(gjson.GetBytes(data, "expired").String()); exp != "" {
+					fileData["expired"] = exp
+				}
+				if idToken := strings.TrimSpace(gjson.GetBytes(data, "id_token").String()); idToken != "" {
+					if claims, errJwt := codex.ParseJWTToken(idToken); errJwt == nil && claims != nil {
+						if claims.CodexAuthInfo.ChatgptPlanType != "" && fileData["plan_type"] == nil {
+							fileData["plan_type"] = claims.CodexAuthInfo.ChatgptPlanType
+						}
+						if claims.CodexAuthInfo.ChatgptSubscriptionActiveUntil != nil {
+							fileData["subscription_active_until"] = claims.CodexAuthInfo.ChatgptSubscriptionActiveUntil
+						}
+						if claims.CodexAuthInfo.ChatgptSubscriptionActiveStart != nil {
+							fileData["subscription_active_start"] = claims.CodexAuthInfo.ChatgptSubscriptionActiveStart
+						}
+					}
+				}
 				if pv := gjson.GetBytes(data, "priority"); pv.Exists() {
 					switch pv.Type {
 					case gjson.Number:
@@ -368,6 +387,12 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth) gin.H {
 	if projectID := authProjectID(auth); projectID != "" {
 		entry["project_id"] = projectID
 	}
+	if planType := authPlanType(auth); planType != "" {
+		entry["plan_type"] = planType
+	}
+	if exp := authExpired(auth); exp != "" {
+		entry["expired"] = exp
+	}
 	if accountType, account := auth.AccountInfo(); accountType != "" || account != "" {
 		if accountType != "" {
 			entry["account_type"] = accountType
@@ -407,6 +432,12 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth) gin.H {
 	}
 	if claims := extractCodexIDTokenClaims(auth); claims != nil {
 		entry["id_token"] = claims
+		if v, ok := claims["chatgpt_subscription_active_until"]; ok && v != nil {
+			entry["subscription_active_until"] = v
+		}
+		if v, ok := claims["chatgpt_subscription_active_start"]; ok && v != nil {
+			entry["subscription_active_start"] = v
+		}
 	}
 	// Expose priority from Attributes (set by synthesizer from JSON "priority" field).
 	// Fall back to Metadata for auths registered via UploadAuthFile (no synthesizer).
@@ -567,17 +598,51 @@ func authProjectID(auth *coreauth.Auth) string {
 	}
 	return ""
 }
+func authPlanType(auth *coreauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	if auth.Metadata != nil {
+		if v, ok := auth.Metadata["plan_type"].(string); ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	if auth.Attributes != nil {
+		if v := strings.TrimSpace(auth.Attributes["plan_type"]); v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
+func authExpired(auth *coreauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	if auth.Metadata != nil {
+		if v, ok := auth.Metadata["expired"].(string); ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	if auth.Attributes != nil {
+		if v := strings.TrimSpace(auth.Attributes["expired"]); v != "" {
+			return v
+		}
+	}
+	return ""
+}
 func extractCodexIDTokenClaims(auth *coreauth.Auth) gin.H {
-	if auth == nil || auth.Metadata == nil {
+	if auth == nil {
 		return nil
 	}
-	if !strings.EqualFold(strings.TrimSpace(auth.Provider), "codex") {
-		return nil
+	idTokenRaw := ""
+	if auth.Metadata != nil {
+		if v, ok := auth.Metadata["id_token"].(string); ok {
+			idTokenRaw = v
+		}
 	}
-	idTokenRaw, ok := auth.Metadata["id_token"].(string)
-	if !ok {
-		return nil
+	if idTokenRaw == "" && auth.Attributes != nil {
+		idTokenRaw = auth.Attributes["id_token"]
 	}
 	idToken := strings.TrimSpace(idTokenRaw)
 	if idToken == "" {
