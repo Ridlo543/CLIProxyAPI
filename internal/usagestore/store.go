@@ -336,14 +336,15 @@ func RecordFromUsage(record coreusage.Record, statusCode int) Event {
 		TTFTMs:          record.TTFT.Milliseconds(),
 		HandshakeMs:     record.Handshake.Milliseconds(),
 		Duration:        record.Latency.Milliseconds(),
-		Cached:        detail.CachedTokens,
-		CacheRead:     detail.CacheReadTokens,
-		CacheCreation: detail.CacheCreationTokens,
-		Reasoning:     detail.ReasoningTokens,
-		Total:         detail.TotalTokens,
+		Input:           detail.InputTokens,
+		Output:          detail.OutputTokens,
+		Cached:          detail.CachedTokens,
+		CacheRead:       detail.CacheReadTokens,
+		CacheCreation:   detail.CacheCreationTokens,
+		Reasoning:       detail.ReasoningTokens,
+		Total:           detail.TotalTokens,
 	}
 	if record.Failed || statusCode >= 400 {
-		ev.Failed = true
 		ev.StatusCod = statusCode
 		ev.FailBody = record.Fail.Body
 	}
