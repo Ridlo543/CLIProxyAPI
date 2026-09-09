@@ -1225,16 +1225,22 @@ func (s *SessionAffinitySelector) pickLCP(ctx context.Context, provider, model s
 			if match.AccessNumber > 0 && opts.Metadata != nil {
 				opts.Metadata[cliproxyexecutor.LCPAccessGenerationMetadataKey] = match.AccessNumber
 			}
+			effortStr := ""
+			if len(opts.OriginalRequest) > 0 {
+				if effort := thinking.ExtractReasoningEffort(opts.OriginalRequest, provider, model); effort != "" {
+					effortStr = fmt.Sprintf(" effort=%s", effort)
+				}
+			}
 			if match.IsFork {
 				if opts.Metadata != nil {
 					opts.Metadata[cliproxyexecutor.IsForkMetadataKey] = true
 				}
-				entry.Infof("session-affinity: LCP fork hit | session=%s parent=%s prefix=%d auth=%s provider=%s model=%s", truncateSessionID(match.SessionID), truncateSessionID(match.ParentSessionID), match.PrefixLength, auth.ID, provider, model)
+				entry.Infof("session-affinity: LCP fork hit | session=%s parent=%s prefix=%d auth=%s provider=%s model=%s%s", truncateSessionID(match.SessionID), truncateSessionID(match.ParentSessionID), match.PrefixLength, auth.ID, provider, model, effortStr)
 			} else {
 				if opts.Metadata != nil {
 					delete(opts.Metadata, cliproxyexecutor.IsForkMetadataKey)
 				}
-				entry.Infof("session-affinity: LCP cache hit | session=%s prefix=%d auth=%s provider=%s model=%s", truncateSessionID(match.SessionID), match.PrefixLength, auth.ID, provider, model)
+				entry.Infof("session-affinity: LCP cache hit | session=%s prefix=%d auth=%s provider=%s model=%s%s", truncateSessionID(match.SessionID), match.PrefixLength, auth.ID, provider, model, effortStr)
 			}
 			return auth, true, nil
 		}

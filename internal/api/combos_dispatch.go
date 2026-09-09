@@ -7,8 +7,10 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -18,7 +20,6 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 )
-
 // combosChatWrapper intercepts /v1/chat/completions when the requested model
 // names a combo. Each member is attempted by rewriting ONLY the "model" field
 // of the request body and invoking the normal handler; failures fall through
@@ -87,7 +88,15 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 				logrus.WithField("combo", combo.Name).Warnf("[router] ⚠️ Combo %q skipping member %s: no provider serves model %q", combo.Name, combos.ModelID(member), member.Model)
 				continue
 			}
-			logrus.Infof("[router] 🔀 Combo %q (%s) -> routing request to %s (candidates: %v)", combo.Name, combo.Strategy, combos.ModelID(member), providers)
+			reqEffort := strings.TrimSpace(gjson.GetBytes(raw, "reasoning_effort").String())
+			if reqEffort == "" {
+				reqEffort = strings.TrimSpace(gjson.GetBytes(raw, "reasoning.effort").String())
+			}
+			effortInfo := ""
+			if reqEffort != "" {
+				effortInfo = fmt.Sprintf(" [client_reasoning=%s]", reqEffort)
+			}
+			logrus.Infof("[router] 🔀 Combo %q (%s)%s -> routing request to %s (candidates: %v)", combo.Name, combo.Strategy, effortInfo, combos.ModelID(member), providers)
 			body, mErr := rewriteModelField(raw, member.Model)
 			if mErr != nil {
 				continue

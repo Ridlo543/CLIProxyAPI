@@ -45,13 +45,19 @@ func (s *sink) HandleUsage(ctx context.Context, record coreusage.Record) {
 	if account != "" {
 		accountStr = fmt.Sprintf(" | account=%s", account)
 	}
+	reasoningStr := ""
+	if record.ReasoningEffort != "" {
+		reasoningStr = fmt.Sprintf(" | effort=%s", record.ReasoningEffort)
+	}
 
 	detail := record.Detail
 	cachedStr := ""
 	if detail.CachedTokens > 0 || detail.CacheReadTokens > 0 {
 		cachedStr = fmt.Sprintf(" | cached=%d", detail.CachedTokens+detail.CacheReadTokens)
 	}
-
+	if detail.ReasoningTokens > 0 {
+		cachedStr += fmt.Sprintf(" | reasoning_tokens=%d", detail.ReasoningTokens)
+	}
 	if failed {
 		failMsg := record.Fail.Body
 		if failMsg == "" && record.Fail.StatusCode > 0 {
@@ -59,12 +65,12 @@ func (s *sink) HandleUsage(ctx context.Context, record coreusage.Record) {
 		}
 		failMsg = TrimFailBody(failMsg)
 		if strings.Contains(strings.ToLower(failMsg), "verify") || strings.Contains(strings.ToLower(failMsg), "captcha") || strings.Contains(strings.ToLower(failMsg), "unauthorized") {
-			log.Warnf("[AUTH] ⚠️ %s | %s%s | verification required / credential issue: %s", p, model, accountStr, failMsg)
+			log.Warnf("[AUTH] ⚠️ %s | %s%s%s | verification required / credential issue: %s", p, model, accountStr, reasoningStr, failMsg)
 		} else {
-			log.Warnf("[USAGE] ❌ %s | %s%s | in=%d | out=%d | latency=%dms | FAILED (%d): %s", p, model, accountStr, detail.InputTokens, detail.OutputTokens, record.Latency.Milliseconds(), status, failMsg)
+			log.Warnf("[USAGE] ❌ %s | %s%s%s | in=%d | out=%d | latency=%dms | FAILED (%d): %s", p, model, accountStr, reasoningStr, detail.InputTokens, detail.OutputTokens, record.Latency.Milliseconds(), status, failMsg)
 		}
 	} else {
-		log.Infof("[USAGE] 📊 %s | %s%s | in=%d | out=%d%s | latency=%dms (HTTP %d)", p, model, accountStr, detail.InputTokens, detail.OutputTokens, cachedStr, record.Latency.Milliseconds(), status)
+		log.Infof("[USAGE] 📊 %s | %s%s%s | in=%d | out=%d%s | latency=%dms (HTTP %d)", p, model, accountStr, reasoningStr, detail.InputTokens, detail.OutputTokens, cachedStr, record.Latency.Milliseconds(), status)
 	}
 }
 

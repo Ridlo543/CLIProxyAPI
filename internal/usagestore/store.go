@@ -39,16 +39,17 @@ type Event struct {
 	Alias       string    `json:"alias"`
 	AuthIndex   string    `json:"auth_index"`
 	AuthType    string    `json:"auth_type"`
-	APIKey      string    `json:"api_key,omitempty"`
-	Account     string    `json:"account,omitempty"`
-	Endpoint    string    `json:"endpoint,omitempty"`
-	LatencyMs   int64     `json:"latency_ms"`
-	TTFTMs      int64     `json:"ttft_ms"`
-	HandshakeMs int64     `json:"handshake_ms,omitempty"`
-	Duration    int64     `json:"duration_ms,omitempty"`
-	Failed      bool      `json:"failed"`
-	StatusCod   int       `json:"status_code,omitempty"`
-	FailBody    string    `json:"fail_body,omitempty"`
+	APIKey          string    `json:"api_key,omitempty"`
+	Account         string    `json:"account,omitempty"`
+	Endpoint        string    `json:"endpoint,omitempty"`
+	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
+	LatencyMs       int64     `json:"latency_ms"`
+	TTFTMs          int64     `json:"ttft_ms"`
+	HandshakeMs     int64     `json:"handshake_ms,omitempty"`
+	Duration        int64     `json:"duration_ms,omitempty"`
+	Failed          bool      `json:"failed"`
+	StatusCod       int       `json:"status_code,omitempty"`
+	FailBody        string    `json:"fail_body,omitempty"`
 
 	Input         int64   `json:"input_tokens"`
 	Output        int64   `json:"output_tokens"`
@@ -329,13 +330,12 @@ func RecordFromUsage(record coreusage.Record, statusCode int) Event {
 		Alias:         record.Alias,
 		AuthIndex:     record.AuthIndex,
 		AuthType:      record.AuthType,
-		APIKey:        record.APIKey,
-		LatencyMs:     record.Latency.Milliseconds(),
-		TTFTMs:        record.TTFT.Milliseconds(),
-		HandshakeMs:   record.Handshake.Milliseconds(),
-		Duration:      record.Latency.Milliseconds(),
-		Input:         detail.InputTokens,
-		Output:        detail.OutputTokens,
+		APIKey:          record.APIKey,
+		ReasoningEffort: record.ReasoningEffort,
+		LatencyMs:       record.Latency.Milliseconds(),
+		TTFTMs:          record.TTFT.Milliseconds(),
+		HandshakeMs:     record.Handshake.Milliseconds(),
+		Duration:        record.Latency.Milliseconds(),
 		Cached:        detail.CachedTokens,
 		CacheRead:     detail.CacheReadTokens,
 		CacheCreation: detail.CacheCreationTokens,

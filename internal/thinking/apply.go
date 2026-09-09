@@ -268,6 +268,15 @@ func applyThinking(body, sourceBody []byte, model string, fromFormat string, toF
 		if !hasThinkingConfig(config) {
 			config = extractThinkingConfig(body, providerFormat)
 		}
+		if !hasThinkingConfig(config) && summaryConfig.Mode == SummaryUnspecified && modelInfo != nil && modelInfo.Thinking != nil {
+			// Apply default model thinking capability when no explicit request config or summary override exists
+			if len(modelInfo.Thinking.Levels) > 0 {
+				config = ThinkingConfig{
+					Mode:  ModeLevel,
+					Level: ThinkingLevel(modelInfo.Thinking.Levels[len(modelInfo.Thinking.Levels)-1]),
+				}
+			}
+		}
 		if hasThinkingConfig(config) {
 			log.WithFields(log.Fields{
 				"provider": providerFormat,
@@ -278,7 +287,6 @@ func applyThinking(body, sourceBody []byte, model string, fromFormat string, toF
 			}).Debug("thinking: original config from request |")
 		}
 	}
-
 	if !hasThinkingConfig(config) {
 		log.WithFields(log.Fields{
 			"provider": providerFormat,
