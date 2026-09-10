@@ -275,6 +275,9 @@ func applyThinking(body, sourceBody []byte, model string, fromFormat string, toF
 					Mode:  ModeLevel,
 					Level: ThinkingLevel(modelInfo.Thinking.Levels[len(modelInfo.Thinking.Levels)-1]),
 				}
+			} else if modelInfo.Thinking.DynamicAllowed {
+				// Budget-based models with dynamic allowed (e.g. claude-opus-4-6-thinking via antigravity) default to auto thinking
+				config = ThinkingConfig{Mode: ModeAuto, Budget: -1}
 			}
 		}
 		if hasThinkingConfig(config) {
