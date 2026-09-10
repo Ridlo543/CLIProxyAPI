@@ -115,7 +115,11 @@ func (m *Manager) attachResolvedAPIKeyModelInfo(req cliproxyexecutor.Request, au
 func attachResolvedAPIKeyModelInfo(routing *apiKeyModelRoutingSnapshot, req cliproxyexecutor.Request, auth *Auth, routeModel, upstreamModel string) cliproxyexecutor.Request {
 	modelInfo, ok := lookupAPIKeyModelCapability(routing, auth, routeModel, upstreamModel)
 	if !ok {
-		return req
+		// Fallback: resolve thinking config from OAuth model alias (per-auth then global).
+		modelInfo = resolveOAuthAliasModelInfo(routing, auth, routeModel, upstreamModel)
+		if modelInfo == nil {
+			return req
+		}
 	}
 	metadata := make(map[string]any, len(req.Metadata)+1)
 	maps.Copy(metadata, req.Metadata)
@@ -281,4 +285,68 @@ func addConfiguredModelCapability(out map[string][]apiKeyModelCapabilityRoute, n
 			}
 		}
 	}
+}
+
+// resolveOAuthAliasModelInfo builds a ModelInfo from the OAuth model alias Thinking
+// config when no API-key capability is available. It checks per-auth aliases first,
+// then falls back to the global config. Returns nil when no thinking override exists.
+func resolveOAuthAliasModelInfo(routing *apiKeyModelRoutingSnapshot, auth *Auth, routeModel, upstreamModel string) *registry.ModelInfo {
+	if auth == nil {
+		return nil
+	}
+	upstreamModel = strings.TrimSpace(upstreamModel)
+	if upstreamModel == "" {
+		return nil
+	}
+	// 1. Check per-auth aliases stored on auth attributes.
+	if support := lookupOAuthAliasThinking(OAuthModelAliasesFromAttributes(authAttributes(auth)), routeModel, upstreamModel); support != nil {
+		return modelconfig.ResolveModelInfo(upstreamModel, "", support)
+	}
+	// 2. Check global OAuth model alias config.
+	if routing == nil || routing.config == nil {
+		return nil
+	}
+	channel := modelAliasChannel(auth)
+	if channel == "" {
+		return nil
+	}
+	globalAliases := routing.config.OAuthModelAlias[channel]
+	if support := lookupOAuthAliasThinking(globalAliases, routeModel, upstreamModel); support != nil {
+		return modelconfig.ResolveModelInfo(upstreamModel, "", support)
+	}
+	return nil
+}
+
+// lookupOAuthAliasThinking finds the Thinking config for a model within an alias list.
+// It matches by alias (client-visible name) first, then by name (upstream model) for
+// self-alias entries where alias == name.
+func lookupOAuthAliasThinking(aliases []internalconfig.OAuthModelAlias, routeModel, upstreamModel string) *registry.ThinkingSupport {
+	if len(aliases) == 0 {
+		return nil
+	}
+	// 1. Match by alias against routeModel candidates.
+	_, candidates := modelAliasLookupCandidates(routeModel)
+	for _, candidate := range candidates {
+		key := strings.ToLower(strings.TrimSpace(candidate))
+		if key == "" {
+			continue
+		}
+		for _, entry := range aliases {
+			alias := strings.ToLower(strings.TrimSpace(entry.Alias))
+			if alias != "" && alias == key && entry.Thinking != nil {
+				return entry.Thinking
+			}
+		}
+	}
+	// 2. Match by name (upstream model) for self-alias or direct name entries.
+	upstreamLower := strings.ToLower(strings.TrimSpace(upstreamModel))
+	if upstreamLower != "" {
+		for _, entry := range aliases {
+			name := strings.ToLower(strings.TrimSpace(entry.Name))
+			if name != "" && name == upstreamLower && entry.Thinking != nil {
+				return entry.Thinking
+			}
+		}
+	}
+	return nil
 }

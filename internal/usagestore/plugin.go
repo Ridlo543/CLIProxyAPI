@@ -76,7 +76,7 @@ func (s *sink) HandleUsage(ctx context.Context, record coreusage.Record) {
 
 // TrimFailBody keeps stored failure bodies bounded.
 func TrimFailBody(body string) string {
-	const max = 512
+	const max = 2048
 	body = strings.TrimSpace(body)
 	if len(body) > max {
 		return body[:max]
