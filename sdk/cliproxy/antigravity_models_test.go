@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
@@ -31,17 +32,20 @@ func TestAntigravityModelsRequestPayload(t *testing.T) {
 }
 
 func TestAntigravityModelDiscoveryUsesAuthResolvedTransport(t *testing.T) {
-	calls := 0
+	// The probe fans out across the candidate base URLs concurrently, so the counter
+	// is atomic and the assertion only requires that the auth-resolved transport was
+	// the one used, not how many endpoints were raced.
+	var calls atomic.Int64
 	rt := antigravityModelRoundTripper(func(*http.Request) (*http.Response, error) {
-		calls++
+		calls.Add(1)
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"models":{"gemini-pool":{"displayName":"Pool"}}}`))}, nil
 	})
 	manager := coreauth.NewManager(nil, nil, nil)
 	manager.SetRoundTripperProvider(antigravityModelTransportProvider{rt: rt})
 	service := &Service{coreManager: manager}
 	hints := service.fetchAntigravityModelCapabilityHintsForAuth(t.Context(), &coreauth.Auth{ProxyPool: "office", Metadata: map[string]any{"access_token": "token"}})
-	if calls != 1 || len(hints.Models) != 1 || hints.Models[0].ID != "gemini-pool" {
-		t.Fatalf("calls=%d hints=%#v", calls, hints)
+	if calls.Load() == 0 || len(hints.Models) != 1 || hints.Models[0].ID != "gemini-pool" {
+		t.Fatalf("calls=%d hints=%#v", calls.Load(), hints)
 	}
 }
 

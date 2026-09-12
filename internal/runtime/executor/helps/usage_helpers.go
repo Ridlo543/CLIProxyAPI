@@ -25,6 +25,7 @@ import (
 
 type UsageReporter struct {
 	provider            string
+	baseURL             string
 	executorType        string
 	model               string
 	alias               string
@@ -34,6 +35,8 @@ type UsageReporter struct {
 	accessTokenHash     string
 	authType            string
 	apiKey              string
+	sessionID           string
+	parentSessionID     string
 	source              string
 	reasoning           string
 	serviceTier         string
@@ -76,19 +79,43 @@ func NewUsageReporter(ctx context.Context, provider, model string, auth *cliprox
 	if !clientStart.IsZero() && now.After(clientStart) {
 		handshakeDuration = now.Sub(clientStart)
 	}
+	sessionID := ""
+	parentSessionID := ""
+	clientMeta := internallogging.GetClientRequestMetadata(ctx)
+	if clientMeta.SessionID != "" {
+		sessionID = clientMeta.SessionID
+		parentSessionID = clientMeta.ParentSessionID
+		if sessionID == parentSessionID || !isHierarchyParent(sessionID, parentSessionID) {
+			parentSessionID = ""
+		}
+	}
+	baseURL := ""
+	if auth != nil {
+		if auth.Attributes != nil {
+			baseURL = strings.TrimSpace(auth.Attributes["base_url"])
+		}
+		if baseURL == "" && auth.Metadata != nil {
+			if v, ok := auth.Metadata["base_url"].(string); ok {
+				baseURL = strings.TrimSpace(v)
+			}
+		}
+	}
 	reporter := &UsageReporter{
 		provider:          provider,
+		baseURL:           baseURL,
 		model:             model,
 		alias:             strings.TrimSpace(alias),
 		requestedAt:       now,
 		handshakeDuration: handshakeDuration,
 		apiKey:            apiKey,
-		source:      resolveUsageSource(auth, apiKey),
-		authType:    resolveUsageAuthType(auth),
-		reasoning:   usage.ReasoningEffortFromContext(ctx),
-		serviceTier: usage.ServiceTierFromContext(ctx),
-		generate:    usage.GenerateFromContext(ctx),
-		stream:      usage.StreamFromContext(ctx),
+		sessionID:         sessionID,
+		parentSessionID:   parentSessionID,
+		source:            resolveUsageSource(auth, apiKey),
+		authType:          resolveUsageAuthType(auth),
+		reasoning:         usage.ReasoningEffortFromContext(ctx),
+		serviceTier:       usage.ServiceTierFromContext(ctx),
+		generate:          usage.GenerateFromContext(ctx),
+		stream:            usage.StreamFromContext(ctx),
 	}
 	if auth != nil {
 		reporter.authID = auth.ID
@@ -104,6 +131,37 @@ func (r *UsageReporter) SetStream(stream bool) {
 		return
 	}
 	r.stream = stream
+}
+
+// SetSessionHierarchy sets the explicit session and parent session identifiers.
+// Callers should invoke this method before Publish or EnsurePublished on the request thread.
+func (r *UsageReporter) SetSessionHierarchy(sessionID, parentSessionID string) {
+	if r == nil {
+		return
+	}
+	r.sessionID = strings.TrimSpace(sessionID)
+	r.parentSessionID = strings.TrimSpace(parentSessionID)
+	if r.sessionID == "" || r.sessionID == r.parentSessionID || !isHierarchyParent(r.sessionID, r.parentSessionID) {
+		r.parentSessionID = ""
+	}
+}
+
+func isHierarchyParent(primary, parent string) bool {
+	if parent == "" || primary == "" || primary == parent {
+		return false
+	}
+	if strings.Contains(primary, ":agent:") {
+		return true
+	}
+	idx1 := strings.Index(primary, ":")
+	idx2 := strings.Index(parent, ":")
+	if idx1 > 0 && idx2 > 0 && primary[:idx1] == parent[:idx2] {
+		return true
+	}
+	if idx1 == -1 && idx2 == -1 {
+		return true
+	}
+	return false
 }
 
 // UpdateAccessTokenFingerprint records the token version actually used upstream.
@@ -396,11 +454,14 @@ func (r *UsageReporter) buildRecordForModel(model string, detail usage.Detail, f
 	}
 	return usage.Record{
 		Provider:            r.provider,
+		BaseURL:             r.baseURL,
 		ExecutorType:        r.executorType,
 		Model:               model,
 		Alias:               r.alias,
 		Source:              r.source,
 		APIKey:              r.apiKey,
+		SessionID:           r.sessionID,
+		ParentSessionID:     r.parentSessionID,
 		AuthID:              r.authID,
 		AuthIndex:           r.authIndex,
 		AccessTokenSHA256:   r.accessTokenFingerprint(),
@@ -657,6 +718,16 @@ func (b *StreamUsageBuffer) ObserveOpenAIStream(line []byte) {
 	b.Observe(detail, usageOK || detail.ResponseServiceTier != "")
 }
 
+// ObserveClaudeStream records and merges usage from a Claude SSE line.
+func (b *StreamUsageBuffer) ObserveClaudeStream(line []byte) {
+	if b == nil {
+		return
+	}
+	if detail, ok := ParseClaudeStreamUsage(line); ok {
+		ObserveMergedStreamUsage(b, detail)
+	}
+}
+
 // Publish emits the latest observed usage detail, if any.
 func (b *StreamUsageBuffer) Publish(ctx context.Context, reporter *UsageReporter) bool {
 	if b == nil || !b.ok || reporter == nil {
@@ -848,6 +919,9 @@ func ParseClaudeStreamUsage(line []byte) (usage.Detail, bool) {
 		return usage.Detail{}, false
 	}
 	usageNode := gjson.GetBytes(payload, "usage")
+	if !usageNode.Exists() {
+		usageNode = gjson.GetBytes(payload, "message.usage")
+	}
 	if !usageNode.Exists() {
 		return usage.Detail{}, false
 	}

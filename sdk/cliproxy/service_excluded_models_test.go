@@ -259,6 +259,7 @@ func TestRegisterModelsForAuth_AntigravityFetchesWebSearchCapability(t *testing.
 	})
 
 	service.registerModelsForAuth(context.Background(), auth)
+	service.WaitAntigravityProbes()
 	if !sawFetch {
 		t.Fatal("expected fetchAvailableModels request")
 	}
@@ -310,10 +311,10 @@ func TestRegisterModelsForAuth_AntigravityFetchesWebSearchCapability(t *testing.
 	if staticOnlyModel == nil {
 		t.Fatal("expected static-only Antigravity model to remain registered")
 	}
-	if fetchedOnlyModel == nil {
-		t.Fatal("expected fetched-only model from the upstream catalog to be registered")
-	}
-	if !fetchedOnlyModel.SupportsWebSearch {
-		t.Fatal("expected fetched-only model web-search capability to be preserved")
+	// Upstream registers the static catalog and then patches capabilities on the
+	// models already registered; models seen only in the account catalog are not
+	// added. Kept aligned with upstream so the async probe contract holds.
+	if fetchedOnlyModel != nil {
+		t.Fatalf("fetched-only model should not be registered: %#v", fetchedOnlyModel)
 	}
 }
