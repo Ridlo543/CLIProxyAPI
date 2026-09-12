@@ -339,6 +339,9 @@ func newAntigravityStatusErr(statusCode int, body []byte) statusErr {
 		if retryAfter, parseErr := helps.ParseRetryDelay(body); parseErr == nil && retryAfter != nil {
 			err.retryAfter = retryAfter
 		}
+		// Google answers a bare RESOURCE_EXHAUSTED for rejections unrelated to the
+		// credential's remaining allowance; those must not read as spent quota.
+		err.upstreamRateLimit = decideAntigravity429(body).kind == antigravity429DecisionSoftRetry
 	}
 	return err
 }

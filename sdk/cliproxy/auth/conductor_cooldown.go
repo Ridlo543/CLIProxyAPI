@@ -841,6 +841,20 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 								state.NextRetryAfter = next
 							}
 						case 429:
+							if isUpstreamRateLimitResultError(result.Error) {
+								// A 429 with no quota watermark says nothing about how much
+								// allowance the credential has left, so pause this model the
+								// way any recoverable upstream failure is paused instead of
+								// recording exhausted quota and climbing the quota ladder.
+								state.NextRetryAfter = recoverableFailureRetryAfter(now, disableCooling)
+								state.Unavailable = !state.NextRetryAfter.IsZero()
+								state.StatusMessage = "upstream rate limit"
+								if auth.LastError != nil {
+									auth.StatusMessage = "upstream rate limit"
+								}
+								applyCooldownFields(&state.Quota, QuotaState{})
+								break
+							}
 							var next time.Time
 							backoffLevel := state.Quota.BackoffLevel
 							if !disableCooling {
@@ -1424,6 +1438,12 @@ func resultErrorFromError(err error) *Error {
 		if resultErr.Code == "" || resultErr.Code == connectionLifecycleErrorCode {
 			resultErr.Code = connectionLifecycleErrorCode
 		}
+	case isUpstreamRateLimitError(err):
+		// Carry the "no quota watermark" classification through to MarkResult so the
+		// cooldown path does not read this 429 as spent credential quota.
+		if resultErr.Code == "" {
+			resultErr.Code = ErrorCodeUpstreamRateLimit
+		}
 	}
 	return resultErr
 }
@@ -1690,6 +1710,26 @@ func isRequestScopedNotFoundResultError(err *Error) bool {
 		return false
 	}
 	return clienterror.IsItemNotPersisted(err.Message)
+}
+
+// isUpstreamRateLimitError probes an executor error for the "429 without quota
+// watermark" classification the provider executor attached.
+func isUpstreamRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	type upstreamRateLimitProvider interface {
+		UpstreamRateLimit() bool
+	}
+	var provider upstreamRateLimitProvider
+	return errors.As(err, &provider) && provider != nil && provider.UpstreamRateLimit()
+}
+
+// isUpstreamRateLimitResultError reports a 429 the provider sent without any
+// quota watermark attached. Such a rejection is not evidence that the credential
+// is out of allowance, so it must not be recorded as exhausted quota.
+func isUpstreamRateLimitResultError(err *Error) bool {
+	return err != nil && err.Code == ErrorCodeUpstreamRateLimit && err.StatusCode() == http.StatusTooManyRequests
 }
 
 func isRequestScopedResultError(err *Error) bool {

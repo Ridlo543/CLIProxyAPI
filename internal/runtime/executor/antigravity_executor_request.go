@@ -458,8 +458,9 @@ func resolveCustomAntigravityBaseURL(auth *cliproxyauth.Auth) string {
 
 func geminiToAntigravity(modelName string, payload []byte, projectID string, derivedSessionIDs ...string) []byte {
 	template := payload
-	template = helps.SetStringIfDifferent(template, "model", antigravityUpstreamModelName(modelName))
+	template = helps.SetStringIfDifferent(template, "model", modelName)
 	template = helps.SetStringIfDifferent(template, "userAgent", "antigravity")
+
 	isImageModel := strings.Contains(modelName, "image")
 	reqType := strings.TrimSpace(gjson.GetBytes(template, "requestType").String())
 	if reqType == "" {
@@ -497,15 +498,6 @@ func geminiToAntigravity(modelName string, payload []byte, projectID string, der
 		template, _ = sjson.DeleteBytes(template, "toolConfig")
 	}
 	return template
-}
-
-// Google currently advertises Gemini 3.8 Flash through the tiered CloudCode model
-// id. Keep the router's public high-effort alias stable while using the upstream id.
-func antigravityUpstreamModelName(modelName string) string {
-	if modelName == "gemini-3.8-flash-high" {
-		return "gemini-3.8-flash-tiered"
-	}
-	return modelName
 }
 
 func generateRequestID() string {

@@ -21,6 +21,13 @@ const connectionLifecycleErrorCode = ErrorCodeConnectionLifecycle
 // ErrorCodeForceCooldown marks failures that must enforce credential cooldown.
 const ErrorCodeForceCooldown = "force_cooldown"
 
+// ErrorCodeUpstreamRateLimit marks a 429 that carries no quota watermark: no
+// Retry-After, no provider quota reason, nothing that says the credential is out
+// of allowance. Antigravity returns the bare Google "RESOURCE_EXHAUSTED" body for
+// these. They must cool the model briefly without being recorded as exhausted
+// quota, which would mislabel a healthy credential and start the quota ladder.
+const ErrorCodeUpstreamRateLimit = "upstream_rate_limit"
+
 // Error describes an authentication related failure in a provider agnostic format.
 type Error struct {
 	// Code is a short machine readable identifier.

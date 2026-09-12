@@ -1014,6 +1014,9 @@ type statusErr struct {
 	code       int
 	msg        string
 	retryAfter *time.Duration
+	// upstreamRateLimit marks a 429 the provider sent with no quota watermark,
+	// so the conductor cools the model without recording exhausted quota.
+	upstreamRateLimit bool
 }
 
 func (e statusErr) Error() string {
@@ -1024,6 +1027,7 @@ func (e statusErr) Error() string {
 }
 func (e statusErr) StatusCode() int            { return e.code }
 func (e statusErr) RetryAfter() *time.Duration { return e.retryAfter }
+func (e statusErr) UpstreamRateLimit() bool    { return e.upstreamRateLimit }
 
 const openAICompatTPMFallbackRetryAfter = time.Minute
 

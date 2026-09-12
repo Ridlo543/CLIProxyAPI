@@ -734,3 +734,47 @@ func TestParseMetaFloat(t *testing.T) {
 		})
 	}
 }
+
+// The bare RESOURCE_EXHAUSTED body Google returns carries no quota watermark, so
+// the error must tell the conductor not to record exhausted credential quota.
+// Bodies that do name a quota reason keep the existing quota handling.
+func TestNewAntigravityStatusErr_ClassifiesQuotalessRateLimit(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{
+			name: "bare resource exhausted",
+			body: `{"error":{"code":429,"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}}`,
+			want: true,
+		},
+		{
+			name: "explicit quota exhausted reason",
+			body: `{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"QUOTA_EXHAUSTED"}]}}`,
+			want: false,
+		},
+		{
+			name: "rate limit with long retry delay",
+			body: `{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"RATE_LIMIT_EXCEEDED"},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"3600s"}]}}`,
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := newAntigravityStatusErr(http.StatusTooManyRequests, []byte(tt.body))
+			if got := err.UpstreamRateLimit(); got != tt.want {
+				t.Fatalf("UpstreamRateLimit() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// Non-429 responses must never carry the classification.
+func TestNewAntigravityStatusErr_NonRateLimitUnclassified(t *testing.T) {
+	err := newAntigravityStatusErr(http.StatusServiceUnavailable,
+		[]byte(`{"error":{"code":503,"status":"UNAVAILABLE","message":"MODEL_CAPACITY_EXHAUSTED"}}`))
+	if err.UpstreamRateLimit() {
+		t.Fatalf("UpstreamRateLimit() = true for a 503, want false")
+	}
+}

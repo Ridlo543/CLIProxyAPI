@@ -158,14 +158,16 @@ func TestAntigravityBuildRequest_UsesRouteModelWhenPayloadContainsDifferentModel
 	}
 }
 
-func TestAntigravityBuildRequest_MapsGemini38HighToTieredUpstreamID(t *testing.T) {
+// gemini-3.8-flash-high is a real CloudCode model id with its own quota bucket, so
+// the alias is forwarded unchanged rather than rewritten to the tiered id.
+func TestAntigravityBuildRequest_ForwardsGemini38HighUnchanged(t *testing.T) {
 	body := buildRequestBodyFromRawPayload(t, "gemini-3.8-flash-high", []byte(`{
 		"request": {
 			"contents": [{"role": "user", "parts": [{"text": "hello"}]}]
 		}
 	}`))
-	if got, ok := body["model"].(string); !ok || got != "gemini-3.8-flash-tiered" {
-		t.Fatalf("request model = %q, want gemini-3.8-flash-tiered", got)
+	if got, ok := body["model"].(string); !ok || got != "gemini-3.8-flash-high" {
+		t.Fatalf("request model = %q, want gemini-3.8-flash-high", got)
 	}
 }
 
