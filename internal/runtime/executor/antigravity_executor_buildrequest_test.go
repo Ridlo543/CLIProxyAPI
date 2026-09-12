@@ -158,6 +158,17 @@ func TestAntigravityBuildRequest_UsesRouteModelWhenPayloadContainsDifferentModel
 	}
 }
 
+func TestAntigravityBuildRequest_MapsGemini38HighToTieredUpstreamID(t *testing.T) {
+	body := buildRequestBodyFromRawPayload(t, "gemini-3.8-flash-high", []byte(`{
+		"request": {
+			"contents": [{"role": "user", "parts": [{"text": "hello"}]}]
+		}
+	}`))
+	if got, ok := body["model"].(string); !ok || got != "gemini-3.8-flash-tiered" {
+		t.Fatalf("request model = %q, want gemini-3.8-flash-tiered", got)
+	}
+}
+
 func TestAntigravityBuildRequestUsesDerivedSessionIDAndPreservesExplicit(t *testing.T) {
 	t.Parallel()
 
