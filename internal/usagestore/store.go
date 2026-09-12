@@ -32,13 +32,13 @@ const (
 
 // Event is one settled provider request as seen by the usage pipeline.
 type Event struct {
-	ID          int64     `json:"id"`
-	Timestamp   time.Time `json:"timestamp"`
-	Provider    string    `json:"provider"`
-	Model       string    `json:"model"`
-	Alias       string    `json:"alias"`
-	AuthIndex   string    `json:"auth_index"`
-	AuthType    string    `json:"auth_type"`
+	ID              int64     `json:"id"`
+	Timestamp       time.Time `json:"timestamp"`
+	Provider        string    `json:"provider"`
+	Model           string    `json:"model"`
+	Alias           string    `json:"alias"`
+	AuthIndex       string    `json:"auth_index"`
+	AuthType        string    `json:"auth_type"`
 	APIKey          string    `json:"api_key,omitempty"`
 	Account         string    `json:"account,omitempty"`
 	Endpoint        string    `json:"endpoint,omitempty"`
@@ -324,12 +324,12 @@ func readEventsFile(path string) []Event {
 func RecordFromUsage(record coreusage.Record, statusCode int) Event {
 	detail := record.Detail
 	ev := Event{
-		Timestamp:     record.RequestedAt,
-		Provider:      record.Provider,
-		Model:         record.Model,
-		Alias:         record.Alias,
-		AuthIndex:     record.AuthIndex,
-		AuthType:      record.AuthType,
+		Timestamp:       record.RequestedAt,
+		Provider:        record.Provider,
+		Model:           record.Model,
+		Alias:           record.Alias,
+		AuthIndex:       record.AuthIndex,
+		AuthType:        record.AuthType,
 		APIKey:          record.APIKey,
 		ReasoningEffort: record.ReasoningEffort,
 		LatencyMs:       record.Latency.Milliseconds(),
@@ -343,8 +343,9 @@ func RecordFromUsage(record coreusage.Record, statusCode int) Event {
 		CacheCreation:   detail.CacheCreationTokens,
 		Reasoning:       detail.ReasoningTokens,
 		Total:           detail.TotalTokens,
+		Failed:          record.Failed || statusCode >= 400,
 	}
-	if record.Failed || statusCode >= 400 {
+	if ev.Failed {
 		ev.StatusCod = statusCode
 		ev.FailBody = record.Fail.Body
 	}
