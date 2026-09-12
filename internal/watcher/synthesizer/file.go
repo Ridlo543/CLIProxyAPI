@@ -242,11 +242,14 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) ([
 	coreauth.SetOAuthModelAliasesAttribute(a, perAccountModelAliases)
 	ApplyAuthExcludedModelsMeta(a, cfg, perAccountExcluded, "oauth")
 	applyFingerprintProfileAttribute(a, metadata)
-	// For codex auth files, extract plan_type from metadata or JWT id_token.
-	if provider == "codex" {
-		if ptRaw, ok := metadata["plan_type"].(string); ok && strings.TrimSpace(ptRaw) != "" {
-			a.Attributes["plan_type"] = strings.TrimSpace(ptRaw)
-		} else if idTokenRaw, ok := metadata["id_token"].(string); ok && strings.TrimSpace(idTokenRaw) != "" {
+	// A stored plan_type belongs to every provider, not just codex. Gating this
+	// on codex meant an antigravity file could carry plan_type on disk while the
+	// management API reported none, so no panel surface could show a plan.
+	if ptRaw, ok := metadata["plan_type"].(string); ok && strings.TrimSpace(ptRaw) != "" {
+		a.Attributes["plan_type"] = strings.TrimSpace(ptRaw)
+	} else if provider == "codex" {
+		// Codex has no plan_type field of its own; the tier lives in the id_token.
+		if idTokenRaw, okToken := metadata["id_token"].(string); okToken && strings.TrimSpace(idTokenRaw) != "" {
 			if claims, errParse := codex.ParseJWTToken(idTokenRaw); errParse == nil && claims != nil {
 				if pt := strings.TrimSpace(claims.CodexAuthInfo.ChatgptPlanType); pt != "" {
 					a.Attributes["plan_type"] = pt

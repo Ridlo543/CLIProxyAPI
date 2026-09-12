@@ -618,6 +618,17 @@ func authPlanType(auth *coreauth.Auth) string {
 			return v
 		}
 	}
+	// Antigravity reports no tier during OAuth, so nothing is stored on disk for
+	// most credentials. loadCodeAssist does report one, and the executor already
+	// caches it while refreshing AI credits -- use that rather than leaving every
+	// account blank or, worse, labelling them all from a hardcoded string.
+	if strings.EqualFold(strings.TrimSpace(auth.Provider), "antigravity") {
+		if hint, ok := coreauth.GetAntigravityCreditsHint(strings.TrimSpace(auth.ID)); ok {
+			if tier := strings.TrimSpace(hint.PaidTierID); tier != "" {
+				return tier
+			}
+		}
+	}
 	return ""
 }
 

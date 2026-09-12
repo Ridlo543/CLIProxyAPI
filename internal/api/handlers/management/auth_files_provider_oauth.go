@@ -449,7 +449,11 @@ func (h *Handler) RequestAntigravityToken(c *gin.Context) {
 		}
 
 		projectID := ""
-		planType := "Free Tier"
+		// Left empty on purpose. Antigravity does not report a tier during the
+		// OAuth exchange, and stamping a guess here wrote "Free Tier" into every
+		// new credential -- including Pro accounts, whose live paidTier.id says
+		// otherwise. The real tier is resolved from loadCodeAssist instead.
+		planType := ""
 		if accessToken != "" {
 			fetchedProjectID, errProject := authSvc.FetchProjectID(ctx, accessToken)
 			if errProject != nil {
