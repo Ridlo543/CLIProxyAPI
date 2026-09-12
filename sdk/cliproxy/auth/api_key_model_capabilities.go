@@ -128,6 +128,21 @@ func attachResolvedAPIKeyModelInfo(routing *apiKeyModelRoutingSnapshot, req clip
 	return req
 }
 
+// clearResolvedAPIKeyModelInfo drops a previously attached capability record.
+// attachResolvedAPIKeyModelInfo leaves the request untouched when it resolves
+// nothing, so a retry after a credential refresh would otherwise keep the
+// capabilities of the model it is no longer sending to.
+func clearResolvedAPIKeyModelInfo(req cliproxyexecutor.Request) cliproxyexecutor.Request {
+	if _, ok := req.Metadata[resolvedAPIKeyModelInfoMetadataKey]; !ok {
+		return req
+	}
+	metadata := make(map[string]any, len(req.Metadata))
+	maps.Copy(metadata, req.Metadata)
+	delete(metadata, resolvedAPIKeyModelInfoMetadataKey)
+	req.Metadata = metadata
+	return req
+}
+
 func attachResolvedHomeModelInfo(req cliproxyexecutor.Request, modelInfo *registry.ModelInfo) cliproxyexecutor.Request {
 	if modelInfo == nil {
 		return req

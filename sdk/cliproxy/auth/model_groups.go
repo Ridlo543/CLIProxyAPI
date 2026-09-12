@@ -91,17 +91,83 @@ func (m *Manager) ExecuteStreamModelGroup(ctx context.Context, targets []ModelGr
 		memberReq.Payload = setModelInPayload(req.Payload, target.Model)
 		result, err := m.ExecuteStream(ctx, []string{target.Provider}, memberReq, opts)
 		if err == nil {
-			return result, nil
+			// ExecuteStream reports a failure that happened before the first
+			// payload as a *successful* result whose only chunk carries the error,
+			// so HTTP handlers can still surface the upstream headers. To this loop
+			// that looked like success, and the group stopped at its first member:
+			// a 503 capacity rejection on target one never fell through to target
+			// two. Unwrap it back into an error so fallback can decide.
+			bootstrapErr, forwarded := modelGroupStreamBootstrapFailure(ctx, result)
+			if bootstrapErr == nil {
+				return forwarded, nil
+			}
+			err = bootstrapErr
 		}
 		lastErr = err
 		if !isModelGroupFallbackError(err) {
-			return nil, err
+			return modelGroupStreamFailure(err)
 		}
 	}
 	if lastErr != nil {
-		return nil, lastErr
+		return modelGroupStreamFailure(lastErr)
 	}
 	return nil, &Error{Code: "provider_not_found", Message: "model group has no targets"}
+}
+
+// modelGroupStreamBootstrapFailure inspects a result ExecuteStream reported as
+// successful. A bootstrap failure is delivered as a buffered, already-closed
+// channel holding one error chunk, so it is always readable straight away; a
+// live upstream stream normally is not, and is handed back untouched. When a
+// chunk is read from a live stream it is replayed so nothing is swallowed.
+func modelGroupStreamBootstrapFailure(ctx context.Context, result *cliproxyexecutor.StreamResult) (error, *cliproxyexecutor.StreamResult) {
+	if result == nil || result.Chunks == nil {
+		return nil, result
+	}
+	select {
+	case chunk, ok := <-result.Chunks:
+		if !ok {
+			return nil, result
+		}
+		var bootstrapErr *streamBootstrapError
+		if chunk.Err != nil && len(chunk.Payload) == 0 && errors.As(chunk.Err, &bootstrapErr) {
+			return chunk.Err, nil
+		}
+		return nil, replayStreamResult(ctx, result, chunk)
+	default:
+		return nil, result
+	}
+}
+
+// replayStreamResult puts an already-read chunk back at the head of the stream.
+func replayStreamResult(ctx context.Context, result *cliproxyexecutor.StreamResult, first cliproxyexecutor.StreamChunk) *cliproxyexecutor.StreamResult {
+	out := make(chan cliproxyexecutor.StreamChunk)
+	go func() {
+		defer close(out)
+		select {
+		case out <- first:
+		case <-ctx.Done():
+			return
+		}
+		for chunk := range result.Chunks {
+			select {
+			case out <- chunk:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return &cliproxyexecutor.StreamResult{Headers: result.Headers, Chunks: out}
+}
+
+// modelGroupStreamFailure keeps the contract ExecuteStream established: a
+// bootstrap failure travels back as an error chunk so the upstream headers
+// reach the client, anything else as a plain error.
+func modelGroupStreamFailure(err error) (*cliproxyexecutor.StreamResult, error) {
+	var bootstrapErr *streamBootstrapError
+	if errors.As(err, &bootstrapErr) && bootstrapErr != nil {
+		return streamErrorResult(bootstrapErr.Headers(), err), nil
+	}
+	return nil, err
 }
 
 func isModelGroupFallbackError(err error) bool {

@@ -1778,6 +1778,16 @@ func TestHomeEnabledHidesManagementEndpointsAndControlPanel(t *testing.T) {
 	})
 }
 
+// firstBytes keeps a failure message readable when the body is the whole
+// single-file management panel.
+func firstBytes(body string) string {
+	const limit = 200
+	if len(body) <= limit {
+		return body
+	}
+	return body[:limit] + "..."
+}
+
 func TestExampleAPIKeySafeModeShowsWarningAndKeepsManagement(t *testing.T) {
 	t.Setenv("MANAGEMENT_PASSWORD", "test-management-key")
 	staticDir := t.TempDir()
@@ -1840,8 +1850,17 @@ func TestExampleAPIKeySafeModeShowsWarningAndKeepsManagement(t *testing.T) {
 		if rr.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d body=%s", rr.Code, http.StatusOK, rr.Body.String())
 		}
-		if !strings.Contains(rr.Body.String(), "management app") {
-			t.Fatalf("management panel body missing: %s", rr.Body.String())
+		// The fixture written above is only a stand-in: once the panel is
+		// actually embedded (panelasset.Available()), the server installs the
+		// real management.html over the static dir on startup so the panel
+		// always matches the binary. What this case is really about is that the
+		// safe-mode query serves the control panel instead of the warning page.
+		body := rr.Body.String()
+		if strings.Contains(body, "Example API key detected") {
+			t.Fatalf("safe-mode query served the warning page instead of the panel: %s", firstBytes(body))
+		}
+		if !strings.Contains(strings.ToLower(body), "<html") && !strings.Contains(strings.ToLower(body), "<!doctype html") {
+			t.Fatalf("safe-mode query did not serve an HTML panel: %s", firstBytes(body))
 		}
 	})
 

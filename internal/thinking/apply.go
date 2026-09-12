@@ -268,18 +268,12 @@ func applyThinking(body, sourceBody []byte, model string, fromFormat string, toF
 		if !hasThinkingConfig(config) {
 			config = extractThinkingConfig(body, providerFormat)
 		}
-		if !hasThinkingConfig(config) && summaryConfig.Mode == SummaryUnspecified && modelInfo != nil && modelInfo.Thinking != nil {
-			// Apply default model thinking capability when no explicit request config or summary override exists
-			if len(modelInfo.Thinking.Levels) > 0 {
-				config = ThinkingConfig{
-					Mode:  ModeLevel,
-					Level: ThinkingLevel(modelInfo.Thinking.Levels[len(modelInfo.Thinking.Levels)-1]),
-				}
-			} else if modelInfo.Thinking.DynamicAllowed {
-				// Budget-based models with dynamic allowed (e.g. claude-opus-4-6-thinking via antigravity) default to auto thinking
-				config = ThinkingConfig{Mode: ModeAuto, Budget: -1}
-			}
-		}
+		// No implicit default here on purpose. A request that names no thinking
+		// config must reach the provider without one: Gemini, Antigravity and
+		// Anthropic all apply their own dynamic default for a thinking-capable
+		// model, so "say nothing" already means "auto". Substituting the
+		// registry's top level here instead pinned every unspecified request to
+		// maximum effort and rewrote count_tokens bodies that must stay verbatim.
 		if hasThinkingConfig(config) {
 			log.WithFields(log.Fields{
 				"provider": providerFormat,

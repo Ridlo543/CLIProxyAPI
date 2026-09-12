@@ -25,6 +25,7 @@ type analyticsInclude struct {
 	CredentialStats bool             `json:"credential_stats"`
 	FilterSelectors bool             `json:"filter_selectors"`
 	SummaryPct      bool             `json:"summary_percentiles"`
+	SummaryCompare  bool             `json:"summary_comparison"`
 }
 
 type eventsPageQuery struct {
@@ -88,6 +89,9 @@ func (h *Handler) PostMonitoringAnalytics(c *gin.Context) {
 	}
 	if inc.SummaryPct {
 		resp["summary_percentiles"] = true
+	}
+	if inc.SummaryCompare {
+		resp["summary_comparison"] = buildSummaryComparison(from, to, req.Filters)
 	}
 	if inc.Timeline {
 		resp["timeline"] = buildTimeline(events, from, to, inc.Granularity)
@@ -410,6 +414,38 @@ func buildSummary(events []usagestore.Event, from, to, now time.Time) gin.H {
 	}
 }
 
+// buildSummaryComparison totals the window of equal length immediately before
+// the requested one, so the panel can say how this period moved against the
+// last. The panel has been asking for this since it was written; nothing was
+// ever returned, so its comparison line could never render.
+func buildSummaryComparison(from, to time.Time, filters analyticsFilters) gin.H {
+	span := to.Sub(from)
+	if span <= 0 {
+		return nil
+	}
+	prevFrom := from.Add(-span)
+	prevTo := from
+	events := applyFilters(usagestore.Default().Query(prevFrom, prevTo), filters)
+	var a agg
+	for _, ev := range events {
+		a.add(ev)
+	}
+	successRate := 0.0
+	if a.calls > 0 {
+		successRate = float64(a.success) / float64(a.calls)
+	}
+	return gin.H{
+		"from_ms":       prevFrom.UnixMilli(),
+		"to_ms":         prevTo.UnixMilli(),
+		"total_calls":   a.calls,
+		"success_calls": a.success,
+		"failure_calls": a.failure,
+		"success_rate":  successRate,
+		"total_tokens":  a.total,
+		"total_cost":    a.cost,
+	}
+}
+
 func granularityLabel(requested string, from, to time.Time) string {
 	switch strings.ToLower(strings.TrimSpace(requested)) {
 	case "hour", "day", "week", "month":
@@ -475,9 +511,12 @@ func buildTimeline(events []usagestore.Event, from, to time.Time, requested stri
 	}
 	sort.Slice(order, func(i, j int) bool { return order[i].Before(order[j]) })
 
-	// Cap the timeline points to at most 60 buckets (latest chronological) to prevent UI overflow on 'all'
-	if len(order) > 60 {
-		order = order[len(order)-60:]
+	// Cap the timeline to keep the chart renderable. 60 was low enough to hide
+	// two thirds of a 7d hourly range (168 buckets) with no hint in the response;
+	// 180 covers every preset the panel offers (7d hourly, 30d daily, 3y weekly).
+	const maxTimelineBuckets = 180
+	if len(order) > maxTimelineBuckets {
+		order = order[len(order)-maxTimelineBuckets:]
 	}
 
 	out := make([]gin.H, 0, len(order))
@@ -494,6 +533,9 @@ func buildTimeline(events []usagestore.Event, from, to time.Time, requested stri
 			"output_tokens":    a.output,
 			"cached_tokens":    a.cached,
 			"reasoning_tokens": a.reasoning,
+			// The panel plots timeline cost and the cost sparkline from this; without
+			// it they had nothing to read and fell back to invented numbers.
+			"cost": a.cost,
 		})
 	}
 	return out

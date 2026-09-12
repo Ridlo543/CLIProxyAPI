@@ -11,7 +11,13 @@ func (h *OpenAIAPIHandler) codexClientModelsResponse(clientVersion ...string) ma
 		version = clientVersion[0]
 	}
 	optimizeMultiAgentV2 := h != nil && h.Cfg != nil && h.Cfg.CodexOptimizeMultiAgentV2
-	return codexmodels.BuildResponseForClient(h.Models(), registry.GetGlobalRegistry().GetModelProviders, optimizeMultiAgentV2, version)
+	// Deliberately not h.Models(): that appends the configured model groups,
+	// which are routing aliases of this router and not real Codex slugs. The
+	// Codex CLI reads this catalog as its own model list, so a group entry shows
+	// up there as a selectable model with none of the fields the client expects.
+	// /v1/models still lists them for OpenAI-protocol clients.
+	models := registry.GetGlobalRegistry().GetAvailableModels("openai")
+	return codexmodels.BuildResponseForClient(models, registry.GetGlobalRegistry().GetModelProviders, optimizeMultiAgentV2, version)
 }
 
 // CodexClientModelsResponse builds a Codex client model response.

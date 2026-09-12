@@ -328,6 +328,30 @@ func (m *Manager) preparedExecutionModelsWithAlias(auth *Auth, routeModel string
 	return m.filterExecutionModels(auth, routeModel, candidates, pooled), pooled, aliasResult, routing
 }
 
+// rebuildRequestAfterRefresh re-resolves the upstream model for a credential
+// that was just refreshed after a 401. An OAuth refresh can hand back a
+// different model alias map, and the pre-refresh mapping then points at a model
+// this credential no longer serves; the retry has to be rebuilt from the
+// refreshed auth, capabilities included. The current model is kept whenever the
+// refreshed mapping still offers it, so an unrelated refresh changes nothing.
+func (m *Manager) rebuildRequestAfterRefresh(auth *Auth, routeModel, currentModel string, req cliproxyexecutor.Request) (cliproxyexecutor.Request, string, bool) {
+	models, pooled, _, routing := m.preparedExecutionModelsWithAlias(auth, routeModel)
+	if len(models) == 0 {
+		return req, currentModel, false
+	}
+	for _, candidate := range models {
+		if candidate == currentModel {
+			return req, currentModel, false
+		}
+	}
+	next := models[0]
+	req.Model = next
+	req = clearResolvedAPIKeyModelInfo(req)
+	req = attachResolvedAPIKeyModelInfo(routing, req, auth, routeModel, next)
+	_ = pooled
+	return req, next, true
+}
+
 func (m *Manager) executionModelCandidatesWithAlias(auth *Auth, routeModel string) ([]string, bool, OAuthModelAliasResult, *apiKeyModelRoutingSnapshot) {
 	routing := m.loadAPIKeyModelRouting()
 	requestedModel := rewriteModelForAuth(routeModel, auth)

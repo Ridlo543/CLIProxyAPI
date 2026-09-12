@@ -258,6 +258,11 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 					auth = refreshed
 					publishSelectedAuthMetadata(execOpts.Metadata, auth)
 					didRefreshOnUnauthorized = true
+					if executionModel == "" {
+						if rebuilt, _, changed := m.rebuildRequestAfterRefresh(auth, routeModel, execReq.Model, execReq); changed {
+							execReq = rebuilt
+						}
+					}
 					ctx = newUpstreamAttemptContext(ctx)
 					ctx = syncMetadataSessionToContext(ctx, execOpts.Metadata)
 					startRetry := time.Now()
@@ -335,6 +340,11 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 					auth = refreshed
 					publishSelectedAuthMetadata(execOpts.Metadata, auth)
 					didRefreshOnUnauthorized = true
+					if executionModel == "" {
+						if rebuilt, _, changed := m.rebuildRequestAfterRefresh(auth, routeModel, execReq.Model, execReq); changed {
+							execReq = rebuilt
+						}
+					}
 					ctx = newUpstreamAttemptContext(ctx)
 					startRetry := time.Now()
 					retryStream, retryErr := executor.ExecuteStream(ctx, auth, execReq, execOpts)

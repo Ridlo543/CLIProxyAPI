@@ -1,6 +1,8 @@
 package management
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +24,32 @@ const (
 	latestReleaseURL       = "https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest"
 	latestReleaseUserAgent = "CLIProxyAPI"
 )
+
+// configETag derives a strong validator from the exact bytes on disk, so two
+// readers of the same file always compute the same tag.
+func configETag(data []byte) string {
+	sum := sha256.Sum256(data)
+	return `"` + hex.EncodeToString(sum[:]) + `"`
+}
+
+// ifMatchSatisfied reports whether an If-Match header permits the write.
+// An absent header keeps the unconditional behaviour every existing client
+// relies on; "*" matches any existing content; otherwise one of the supplied
+// entity tags has to equal the current one.
+func ifMatchSatisfied(header, current string) bool {
+	header = strings.TrimSpace(header)
+	if header == "" || header == "*" {
+		return true
+	}
+	for _, candidate := range strings.Split(header, ",") {
+		candidate = strings.TrimSpace(candidate)
+		candidate = strings.TrimPrefix(candidate, "W/")
+		if candidate == current {
+			return true
+		}
+	}
+	return false
+}
 
 func (h *Handler) GetConfig(c *gin.Context) {
 	if h == nil || h.cfg == nil {
@@ -155,6 +183,24 @@ func (h *Handler) PutConfigYAML(c *gin.Context) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	// Re-read under the lock: the tag has to describe the bytes this write is
+	// actually replacing, not what the request handler saw earlier.
+	current, errCurrent := os.ReadFile(h.configFilePath)
+	if errCurrent != nil && !os.IsNotExist(errCurrent) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "read_failed", "message": errCurrent.Error()})
+		return
+	}
+	currentETag := configETag(current)
+	if !ifMatchSatisfied(c.GetHeader("If-Match"), currentETag) {
+		// Hand back the live tag so the client can merge and retry without
+		// a separate GET.
+		c.Header("ETag", currentETag)
+		c.JSON(http.StatusPreconditionFailed, gin.H{
+			"error":   "config_changed",
+			"message": "config.yaml changed since it was loaded",
+		})
+		return
+	}
 	if WriteConfig(h.configFilePath, body) != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "write_failed", "message": "failed to write config"})
 		return
@@ -166,6 +212,13 @@ func (h *Handler) PutConfigYAML(c *gin.Context) {
 		return
 	}
 	h.cfg = newCfg
+	// Echo the tag of what was just stored so a client can chain saves.
+	stored, errStored := os.ReadFile(h.configFilePath)
+	if errStored == nil {
+		c.Header("ETag", configETag(stored))
+	} else {
+		c.Header("ETag", configETag(body))
+	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "changed": []string{"config"}})
 }
 
@@ -184,6 +237,9 @@ func (h *Handler) GetConfigYAML(c *gin.Context) {
 	c.Header("Content-Type", "application/yaml; charset=utf-8")
 	c.Header("Cache-Control", "no-store")
 	c.Header("X-Content-Type-Options", "nosniff")
+	// The panel sends this back as If-Match on save; without it every write
+	// is blind last-write-wins across tabs and operators.
+	c.Header("ETag", configETag(data))
 	// Write raw bytes as-is
 	_, _ = c.Writer.Write(data)
 }

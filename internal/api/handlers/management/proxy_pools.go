@@ -14,16 +14,25 @@ type proxyPoolReporter interface {
 	ProxyPoolStatuses() []coreauth.ProxyPoolStatus
 }
 
+// sanitizeProxyURL reduces a pool entry to the endpoint the operator needs to
+// recognise it: scheme and host only. url.Redacted() masks the password but
+// still hands back the username, path and query, and a proxy URL routinely
+// carries the account id or an auth token in exactly those places.
 func sanitizeProxyURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || strings.EqualFold(raw, "direct") {
 		return "direct"
 	}
 	parsed, err := url.Parse(raw)
-	if err != nil {
-		return raw
+	if err != nil || parsed.Host == "" {
+		// Unparseable entries are never echoed back; the name and counts
+		// already tell the operator which pool is misconfigured.
+		return "invalid"
 	}
-	return parsed.Redacted()
+	if parsed.Scheme == "" {
+		return parsed.Host
+	}
+	return parsed.Scheme + "://" + parsed.Host
 }
 
 // GetProxyPools returns the sanitized status of all configured proxy pools.

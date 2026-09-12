@@ -582,6 +582,12 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 				if refreshed, okRefresh := m.tryRefreshAfterUnauthorized(refreshCtx, auth, errExec, didRefreshOnUnauthorized); okRefresh {
 					auth = refreshed
 					didRefreshOnUnauthorized = true
+					if !restoreExecutionModel {
+						if rebuilt, retryModel, changed := m.rebuildRequestAfterRefresh(auth, routeModel, upstreamModel, execReq); changed {
+							execReq = rebuilt
+							resultModel = m.stateModelForExecution(auth, routeModel, retryModel, pooled)
+						}
+					}
 					execCtx = newUpstreamAttemptContext(execCtx)
 					execCtx = syncMetadataSessionToContext(execCtx, execOpts.Metadata)
 					startRetry := time.Now()
@@ -795,6 +801,12 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 				if refreshed, okRefresh := m.tryRefreshAfterUnauthorized(refreshCtx, auth, errExec, didRefreshOnUnauthorized); okRefresh {
 					auth = refreshed
 					didRefreshOnUnauthorized = true
+					if !restoreExecutionModel {
+						if rebuilt, retryModel, changed := m.rebuildRequestAfterRefresh(auth, routeModel, upstreamModel, execReq); changed {
+							execReq = rebuilt
+							resultModel = m.stateModelForExecution(auth, routeModel, retryModel, pooled)
+						}
+					}
 					execCtx = newUpstreamAttemptContext(execCtx)
 					execCtx = syncMetadataSessionToContext(execCtx, execOpts.Metadata)
 					startRetry := time.Now()

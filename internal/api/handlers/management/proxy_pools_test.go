@@ -70,10 +70,15 @@ func TestGetProxyPoolsAuthenticationAndSanitization(t *testing.T) {
 			t.Fatalf("response leaked %q: %s", secret, body)
 		}
 	}
-	var statuses []coreauth.ProxyPoolStatus
-	if err := json.Unmarshal(rec.Body.Bytes(), &statuses); err != nil {
+	// The management API wraps list responses in a config-keyed envelope,
+	// the same shape as auth-files and openai-compatibility.
+	var payload struct {
+		Pools []coreauth.ProxyPoolStatus `json:"proxy-pools"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
+	statuses := payload.Pools
 	if len(statuses) != 2 || statuses[0].Name != "alpha" || statuses[1].URLs[0] != "direct" {
 		t.Fatalf("statuses=%#v", statuses)
 	}
