@@ -156,6 +156,9 @@ type Config struct {
 	Combos          []ComboConfig         `yaml:"combos,omitempty" json:"combos,omitempty"`
 	CapacityAdapter CapacityAdapterConfig `yaml:"capacity-adapter,omitempty" json:"capacity_adapter,omitempty"`
 
+	// ReasoningPolicy forces thinking settings per provider and per model (see reasoning_policy.go).
+	ReasoningPolicy map[string]ReasoningProviderPolicy `yaml:"reasoning-policy,omitempty" json:"reasoning-policy,omitempty"`
+
 	// VertexCompatAPIKey defines Vertex AI-compatible API key configurations for third-party providers.
 	// Used for services that use Vertex AI-style paths but with simple API key authentication.
 	VertexCompatAPIKey []VertexCompatKey `yaml:"vertex-api-key" json:"vertex-api-key"`

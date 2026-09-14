@@ -250,9 +250,19 @@ func applyThinking(body, sourceBody []byte, model string, fromFormat string, toF
 		return body, nil
 	}
 
-	// 4. Get config: suffix priority over body
+	// 4. Get config: an operator reasoning-policy beats the suffix, which beats the body
 	var config ThinkingConfig
-	if suffixResult.HasSuffix {
+	forced, hasForced := forcedReasoningConfig(providerKey, baseModel)
+	if hasForced {
+		config = forced
+		log.WithFields(log.Fields{
+			"provider": providerKey,
+			"model":    baseModel,
+			"mode":     config.Mode,
+			"budget":   config.Budget,
+			"level":    config.Level,
+		}).Debug("thinking: config forced by reasoning-policy |")
+	} else if suffixResult.HasSuffix {
 		config = parseSuffixToConfig(suffixResult.RawSuffix, providerFormat, model)
 		log.WithFields(log.Fields{
 			"provider": providerFormat,
@@ -307,7 +317,8 @@ func applyThinking(body, sourceBody []byte, model string, fromFormat string, toF
 	}
 
 	// 5. Validate and normalize configuration
-	validated, err := ValidateConfig(config, modelInfo, fromFormat, providerFormat, suffixResult.HasSuffix)
+	// A forced policy is clamped to the model like a suffix, not rejected like a body value.
+	validated, err := ValidateConfig(config, modelInfo, fromFormat, providerFormat, suffixResult.HasSuffix || hasForced)
 	if err != nil {
 		log.WithFields(log.Fields{
 			"provider": providerFormat,
@@ -451,9 +462,18 @@ func applyUserDefinedModel(body []byte, modelInfo *registry.ModelInfo, fromForma
 		modelID = suffixResult.ModelName
 	}
 
-	// Get config: suffix priority over body
+	// Get config: an operator reasoning-policy beats the suffix, which beats the body
 	var config ThinkingConfig
-	if suffixResult.HasSuffix {
+	if forced, ok := forcedReasoningConfig(providerKey, suffixResult.ModelName); ok {
+		config = forced
+		log.WithFields(log.Fields{
+			"provider": providerKey,
+			"model":    modelID,
+			"mode":     config.Mode,
+			"budget":   config.Budget,
+			"level":    config.Level,
+		}).Debug("thinking: config forced by reasoning-policy |")
+	} else if suffixResult.HasSuffix {
 		config = parseSuffixToConfig(suffixResult.RawSuffix, toFormat, modelID)
 		log.WithFields(log.Fields{
 			"provider": toFormat,

@@ -276,6 +276,7 @@ func (b *Builder) Build() (*Service, error) {
 		coreManager.SetResultPolicy(b.resultPolicy)
 	}
 
+	applyReasoningPolicy(b.cfg)
 	service := &Service{
 		cfg:                 b.cfg,
 		configPath:          b.configPath,

@@ -112,6 +112,11 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 		return nil, errModelGroups
 	}
 	cfg.ModelGroups = modelGroups
+	reasoningPolicy, errReasoningPolicy := NormalizeReasoningPolicy(cfg.ReasoningPolicy)
+	if errReasoningPolicy != nil {
+		return nil, errReasoningPolicy
+	}
+	cfg.ReasoningPolicy = reasoningPolicy
 
 	// Hash remote management key if plaintext is detected (nested)
 	// We consider a value to be already hashed if it looks like a bcrypt hash ($2a$, $2b$, or $2y$ prefix).
