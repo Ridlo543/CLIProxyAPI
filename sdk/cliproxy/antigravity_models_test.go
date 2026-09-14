@@ -50,7 +50,7 @@ func TestAntigravityModelDiscoveryUsesAuthResolvedTransport(t *testing.T) {
 }
 
 func TestParseAntigravityModelCapabilityHintsIncludesAvailableModels(t *testing.T) {
-	hints := parseAntigravityModelCapabilityHints([]byte(`{
+	hints, ok := parseAntigravityModelCapabilityHints([]byte(`{
 		"models": {
 			"gemini-new": {"displayName":"Gemini New","maxTokens":123,"maxOutputTokens":45},
 			"chat_20706": {"displayName":"Internal"}
@@ -58,6 +58,9 @@ func TestParseAntigravityModelCapabilityHintsIncludesAvailableModels(t *testing.
 		"webSearchModelIds": ["gemini-new"]
 	}`))
 
+	if !ok {
+		t.Fatal("parse failed")
+	}
 	if len(hints.Models) != 1 {
 		t.Fatalf("models count = %d, want 1", len(hints.Models))
 	}
@@ -89,5 +92,39 @@ func TestApplyAntigravityFetchedModelCapabilitiesMergesModels(t *testing.T) {
 	}
 	if !models[1].SupportsWebSearch {
 		t.Fatal("new fetched model should support web search")
+	}
+}
+
+// Upstream added a capability cache whose clone kept only WebSearchModelIDs, so
+// every probe after the first returned no live catalog for the account.
+func TestAntigravityCachedProbeKeepsAvailableModels(t *testing.T) {
+	resetAntigravityCapabilityCache()
+	t.Cleanup(resetAntigravityCapabilityCache)
+	var calls atomic.Int32
+	rt := antigravityModelRoundTripper(func(*http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"models":{"gemini-cached":{"displayName":"Cached"}}}`))}, nil
+	})
+	manager := coreauth.NewManager(nil, nil, nil)
+	manager.SetRoundTripperProvider(antigravityModelTransportProvider{rt: rt})
+	service := &Service{coreManager: manager}
+	auth := &coreauth.Auth{ID: "cached-probe", Metadata: map[string]any{"access_token": "token", "project_id": "proj-cached"}}
+
+	for i := 0; i < 2; i++ {
+		hints := service.fetchAntigravityModelCapabilityHintsForAuth(t.Context(), auth)
+		if len(hints.Models) != 1 || hints.Models[0].ID != "gemini-cached" {
+			t.Fatalf("probe %d: models = %#v, want the live catalog", i+1, hints.Models)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("upstream calls = %d, want 1 (second probe served from cache)", calls.Load())
+	}
+}
+
+func TestAntigravityProbeCacheIsScopedToTheProject(t *testing.T) {
+	a := &coreauth.Auth{Metadata: map[string]any{"project_id": "proj-a"}}
+	b := &coreauth.Auth{Metadata: map[string]any{"project_id": "proj-b"}}
+	if antigravityModelsRequestPayload(a) == antigravityModelsRequestPayload(b) {
+		t.Fatal("different projects produced the same probe payload, so they would share a cache entry")
 	}
 }
