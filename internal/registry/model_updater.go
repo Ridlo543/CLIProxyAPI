@@ -126,6 +126,9 @@ func tryRefreshModels(ctx context.Context, label string) {
 	// (for example fork-specific model ids) so a periodic refresh cannot clobber
 	// them. Remote entries win on id conflicts.
 	parsed = mergeStaticModels(oldData, parsed)
+	if len(parsed.Meta) == 0 && oldData != nil && len(oldData.Meta) > 0 {
+		parsed.Meta = oldData.Meta
+	}
 
 	// Detect changes before updating store.
 	changed := detectChangedProviders(oldData, parsed)
@@ -220,6 +223,7 @@ func mergeStaticModels(local, remote *staticModelsJSON) *staticModelsJSON {
 		{&remote.Kimi, local.Kimi},
 		{&remote.Antigravity, local.Antigravity},
 		{&remote.XAI, local.XAI},
+		{&remote.Meta, local.Meta},
 	}
 	for _, s := range sections {
 		if len(s.local) == 0 {
@@ -274,9 +278,13 @@ func detectChangedProviders(oldData, newData *staticModelsJSON) []string {
 		{"codex", oldData.CodexPlus, newData.CodexPlus},
 		{"codex", oldData.CodexPro, newData.CodexPro},
 		{"kimi", oldData.Kimi, newData.Kimi},
+		{"kimi-ai", oldData.Kimi, newData.Kimi},
+		{"kimi.ai", oldData.Kimi, newData.Kimi},
+		{"kimi.com", oldData.Kimi, newData.Kimi},
 		{"antigravity", oldData.Antigravity, newData.Antigravity},
 		{"xai", oldData.XAI, newData.XAI},
 		{"devin", oldData.Devin, newData.Devin},
+		{"meta", oldData.Meta, newData.Meta},
 	}
 
 	seen := make(map[string]bool, len(sections))
@@ -403,6 +411,7 @@ func validateModelsCatalog(data *staticModelsJSON) error {
 		{name: "kimi", models: data.Kimi},
 		{name: "antigravity", models: data.Antigravity},
 		{name: "xai", models: data.XAI},
+		{name: "meta", models: data.Meta},
 	}
 
 	for _, section := range requiredSections {

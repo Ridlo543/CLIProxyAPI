@@ -14,6 +14,8 @@ type SDKConfig struct {
 
 	// ModelGroups defines client-visible models backed by ordered fallback targets.
 	ModelGroups []ModelGroup `yaml:"model-groups,omitempty" json:"model-groups,omitempty"`
+	// CodexResponseSteering mirrors the provider-wide runtime setting for API handlers.
+	CodexResponseSteering bool `yaml:"-" json:"-"`
 
 	// ProxyURL is the URL of an optional proxy server to use for outbound requests.
 	ProxyURL string `yaml:"proxy-url" json:"proxy-url"`
