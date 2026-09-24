@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/contextcompression"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
@@ -750,6 +751,63 @@ func TestHandlerProvidersForExecutionRejectsImageOnlyModelOnProviderRoute(t *tes
 				t.Fatalf("providersForExecution() error = %+v, want image-only service unavailable", errMsg)
 			}
 		})
+	}
+}
+
+func TestProvidersForExecutionNamespacedPrefix(t *testing.T) {
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient("test-openagentic-client", "openai-compatible-openagentic", []*registry.ModelInfo{
+		{ID: "gpt-6-astra"},
+	})
+	reg.RegisterClient("test-codex-client", "codex", []*registry.ModelInfo{
+		{ID: "gpt-6-astra"},
+	})
+	t.Cleanup(func() {
+		reg.UnregisterClient("test-openagentic-client")
+		reg.UnregisterClient("test-codex-client")
+	})
+
+	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, nil)
+
+	// 1. Calling openagentic/gpt-6-astra directly routes specifically to openagentic
+	providers, normModel, err := handler.providersForExecution("openagentic/gpt-6-astra", "openagentic/gpt-6-astra", false, modelRouteDecision{}, modelExecutionOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(providers) != 1 || providers[0] != "openai-compatible-openagentic" {
+		t.Fatalf("expected [openai-compatible-openagentic], got %v", providers)
+	}
+	if normModel != "gpt-6-astra" {
+		t.Fatalf("expected normalized model gpt-6-astra, got %q", normModel)
+	}
+
+	// 2. Calling codex/gpt-6-astra directly routes specifically to codex
+	providers, normModel, err = handler.providersForExecution("codex/gpt-6-astra", "codex/gpt-6-astra", false, modelRouteDecision{}, modelExecutionOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(providers) != 1 || providers[0] != "codex" {
+		t.Fatalf("expected [codex], got %v", providers)
+	}
+	if normModel != "gpt-6-astra" {
+		t.Fatalf("expected normalized model gpt-6-astra, got %q", normModel)
+	}
+
+	// 3. Forcing provider via ForcedProvider routes specifically to that provider
+	providers, normModel, err = handler.providersForExecution("gpt-6-astra", "gpt-6-astra", false, modelRouteDecision{}, modelExecutionOptions{ForcedProvider: "openagentic"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(providers) != 1 || providers[0] != "openai-compatible-openagentic" {
+		t.Fatalf("expected [openai-compatible-openagentic], got %v", providers)
+	}
+
+	providers, normModel, err = handler.providersForExecution("gpt-6-astra", "gpt-6-astra", false, modelRouteDecision{}, modelExecutionOptions{ForcedProvider: "codex"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(providers) != 1 || providers[0] != "codex" {
+		t.Fatalf("expected [codex], got %v", providers)
 	}
 }
 

@@ -26,6 +26,35 @@ func OpenAICompatibleProviderKey(name string) string {
 	return openAICompatibleProviderPrefix + name
 }
 
+// MatchProvider reports whether a target provider reference (e.g. from "provider/model" or a combo member)
+// matches a candidate provider identifier registered in the router.
+func MatchProvider(target, candidate string) bool {
+	target = strings.ToLower(strings.TrimSpace(target))
+	candidate = strings.ToLower(strings.TrimSpace(candidate))
+	if target == "" || candidate == "" {
+		return false
+	}
+	if target == candidate {
+		return true
+	}
+	if strings.TrimPrefix(candidate, openAICompatibleProviderPrefix) == target {
+		return true
+	}
+	if strings.TrimPrefix(target, openAICompatibleProviderPrefix) == candidate {
+		return true
+	}
+	if strings.HasPrefix(candidate, openAICompatibleProviderPrefix) {
+		stripped := strings.TrimPrefix(candidate, openAICompatibleProviderPrefix)
+		if strings.HasPrefix(stripped, target) || strings.HasPrefix(target, stripped) {
+			return true
+		}
+	}
+	if (target == "codex" && candidate == "openai") || (target == "openai" && candidate == "codex") {
+		return true
+	}
+	return false
+}
+
 // GetProviderName determines all AI service providers capable of serving a registered model.
 // It first queries the global model registry to retrieve the providers backing the supplied model name.
 // When the model has not been registered yet, it falls back to legacy string heuristics to infer

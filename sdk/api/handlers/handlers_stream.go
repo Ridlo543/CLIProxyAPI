@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/contextcompression"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
@@ -14,6 +15,7 @@ import (
 	coreusage "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
+	"github.com/tidwall/sjson"
 	"golang.org/x/net/context"
 )
 
@@ -303,6 +305,13 @@ func (h *BaseAPIHandler) executeStreamWithAuthManager(ctx context.Context, handl
 
 func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context, entryProtocol, exitProtocol, modelName string, rawJSON []byte, alt string, allowImageModel bool, execOptions modelExecutionOptions) (<-chan []byte, http.Header, <-chan *interfaces.ErrorMessage) {
 	originalRequestedModel := modelName
+	if execOptions.ForcedProvider == "" && ctx != nil {
+		if ginCtx, ok := ctx.Value("gin").(*gin.Context); ok && ginCtx != nil && ginCtx.Request != nil {
+			if p := ginCtx.Request.Header.Get("X-Provider"); p != "" {
+				execOptions.ForcedProvider = p
+			}
+		}
+	}
 	routeDecision, preparedRoute := preparedModelRouteFromContext(ctx, execOptions.SkipRouterPluginID)
 	if !preparedRoute {
 		routeDecision = h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, true, execOptions)
@@ -333,6 +342,11 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 	setServiceTierMetadata(reqMeta, rawJSON)
 	setGenerateMetadata(reqMeta, rawJSON)
 	payload := rawJSON
+	if len(payload) > 0 && normalizedModel != originalRequestedModel {
+		if modified, err := sjson.SetBytes(payload, "model", normalizedModel); err == nil {
+			payload = modified
+		}
+	}
 	if len(payload) == 0 {
 		payload = nil
 	}

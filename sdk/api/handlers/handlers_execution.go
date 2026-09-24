@@ -1,5 +1,4 @@
 package handlers
-
 import (
 	"encoding/json"
 	"errors"
@@ -7,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/clienterror"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/contextcompression"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
@@ -15,9 +15,9 @@ import (
 	coreusage "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
+	"github.com/tidwall/sjson"
 	"golang.org/x/net/context"
 )
-
 // PluginExecutorHost executes a routed request with a specific plugin executor.
 type PluginExecutorHost interface {
 	ExecutePluginExecutor(context.Context, string, coreexecutor.Request, coreexecutor.Options) (coreexecutor.Response, error)
@@ -46,6 +46,13 @@ func (h *BaseAPIHandler) executeWithAuthManager(ctx context.Context, handlerType
 
 func (h *BaseAPIHandler) executeWithAuthManagerFormats(ctx context.Context, entryProtocol, exitProtocol, modelName string, rawJSON []byte, alt string, allowImageModel bool, execOptions modelExecutionOptions) ([]byte, http.Header, *interfaces.ErrorMessage) {
 	originalRequestedModel := modelName
+	if execOptions.ForcedProvider == "" && ctx != nil {
+		if ginCtx, ok := ctx.Value("gin").(*gin.Context); ok && ginCtx != nil && ginCtx.Request != nil {
+			if p := ginCtx.Request.Header.Get("X-Provider"); p != "" {
+				execOptions.ForcedProvider = p
+			}
+		}
+	}
 	routeDecision := h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, false, execOptions)
 	responseProtocol := modelExecutionResponseProtocol(entryProtocol, exitProtocol)
 	if errMsg := validateNativeInteractionsExecution(entryProtocol, execOptions, routeDecision); errMsg != nil {
@@ -67,6 +74,11 @@ func (h *BaseAPIHandler) executeWithAuthManagerFormats(ctx context.Context, entr
 	setServiceTierMetadata(reqMeta, rawJSON)
 	setGenerateMetadata(reqMeta, rawJSON)
 	payload := rawJSON
+	if len(payload) > 0 && normalizedModel != originalRequestedModel {
+		if modified, err := sjson.SetBytes(payload, "model", normalizedModel); err == nil {
+			payload = modified
+		}
+	}
 	if len(payload) == 0 {
 		payload = nil
 	}
@@ -136,6 +148,13 @@ func (h *BaseAPIHandler) ExecuteCountWithAuthManager(ctx context.Context, handle
 
 func (h *BaseAPIHandler) executeCountWithAuthManager(ctx context.Context, handlerType, modelName string, rawJSON []byte, alt string, execOptions modelExecutionOptions) ([]byte, http.Header, *interfaces.ErrorMessage) {
 	originalRequestedModel := modelName
+	if execOptions.ForcedProvider == "" && ctx != nil {
+		if ginCtx, ok := ctx.Value("gin").(*gin.Context); ok && ginCtx != nil && ginCtx.Request != nil {
+			if p := ginCtx.Request.Header.Get("X-Provider"); p != "" {
+				execOptions.ForcedProvider = p
+			}
+		}
+	}
 	routeDecision := h.applyModelRouter(ctx, handlerType, modelName, rawJSON, false, execOptions)
 	if routeDecision.ExecutorPluginID != "" {
 		return h.countWithPluginExecutor(ctx, handlerType, modelName, originalRequestedModel, rawJSON, alt, routeDecision.ExecutorPluginID, execOptions)
@@ -152,6 +171,11 @@ func (h *BaseAPIHandler) executeCountWithAuthManager(ctx context.Context, handle
 	setServiceTierMetadata(reqMeta, rawJSON)
 	setGenerateMetadata(reqMeta, rawJSON)
 	payload := rawJSON
+	if len(payload) > 0 && normalizedModel != originalRequestedModel {
+		if modified, err := sjson.SetBytes(payload, "model", normalizedModel); err == nil {
+			payload = modified
+		}
+	}
 	if len(payload) == 0 {
 		payload = nil
 	}

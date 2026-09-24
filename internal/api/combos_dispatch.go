@@ -85,6 +85,9 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 			// skipped so an unknown model cannot cut the chain short.
 			providers := registry.GetGlobalRegistry().GetModelProviders(member.Model)
 			if len(providers) == 0 {
+				providers = registry.GetGlobalRegistry().GetModelProviders(combos.ModelID(member))
+			}
+			if len(providers) == 0 {
 				logrus.WithField("combo", combo.Name).Warnf("[router] ⚠️ Combo %q skipping member %s: no provider serves model %q", combo.Name, combos.ModelID(member), member.Model)
 				continue
 			}
@@ -96,12 +99,16 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 			if reqEffort != "" {
 				effortInfo = fmt.Sprintf(" [client_reasoning=%s]", reqEffort)
 			}
+			targetModel := member.Model
 			logrus.Infof("[router] 🔀 Combo %q (%s)%s -> routing request to %s (candidates: %v)", combo.Name, combo.Strategy, effortInfo, combos.ModelID(member), providers)
-			body, mErr := rewriteModelField(raw, member.Model)
+			body, mErr := rewriteModelField(raw, targetModel)
 			if mErr != nil {
 				continue
 			}
 			req2 := c.Request.Clone(c.Request.Context())
+			if member.Provider != "" {
+				req2.Header.Set("X-Provider", member.Provider)
+			}
 			req2.Body = io.NopCloser(bytes.NewReader(body))
 			req2.ContentLength = int64(len(body))
 			c.Request = req2
@@ -218,6 +225,32 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 				entry["outputTokenLimit"] = maxTok
 			}
 			parsed.Data = append(parsed.Data, entry)
+		}
+		// Also expose provider-namespaced IDs (e.g. openagentic/gpt-6-astra, codex/gpt-6-astra, antigravity/gemini-3.8-flash-high)
+		// so IDEs and tooling can explicitly choose a provider's model directly.
+		existingIDs := make(map[string]struct{}, len(parsed.Data))
+		for _, d := range parsed.Data {
+			if id, ok := d["id"].(string); ok {
+				existingIDs[id] = struct{}{}
+			}
+		}
+		for _, d := range parsed.Data {
+			id, okId := d["id"].(string)
+			ownedBy, okOwn := d["owned_by"].(string)
+			if !okId || !okOwn || id == "" || ownedBy == "" || ownedBy == "combos" {
+				continue
+			}
+			prov := strings.TrimPrefix(ownedBy, "openai-compatible-")
+			namespacedID := prov + "/" + id
+			if _, exists := existingIDs[namespacedID]; !exists {
+				entry := make(map[string]any, len(d))
+				for k, v := range d {
+					entry[k] = v
+				}
+				entry["id"] = namespacedID
+				existingIDs[namespacedID] = struct{}{}
+				parsed.Data = append(parsed.Data, entry)
+			}
 		}
 		out, _ := json.Marshal(parsed)
 		if c.Writer.Header().Get("Content-Type") == "" {

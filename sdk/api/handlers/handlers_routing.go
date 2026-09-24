@@ -145,7 +145,14 @@ func (h *BaseAPIHandler) providersForExecution(modelName, originalRequestedModel
 		if errMsg := h.validateImageOnlyModel(normalizedModel, allowImageModel); errMsg != nil {
 			return nil, "", errMsg
 		}
-		return []string{forcedProvider}, normalizedModel, nil
+		resolvedProvider := forcedProvider
+		for _, cand := range util.GetProviderName(normalizedModel) {
+			if util.MatchProvider(forcedProvider, cand) {
+				resolvedProvider = cand
+				break
+			}
+		}
+		return []string{resolvedProvider}, normalizedModel, nil
 	}
 	if routeDecision.Provider != "" {
 		normalizedModel := originalRequestedModel
@@ -214,16 +221,36 @@ func (h *BaseAPIHandler) getRequestDetailsWithOptions(modelName string, allowIma
 		return []string{"home"}, resolvedModelName, nil
 	}
 
-	providers = util.GetProviderName(baseModel)
-	// Fallback: if baseModel has no provider but differs from resolvedModelName,
-	// try using the full model name. This handles edge cases where custom models
-	// may be registered with their full suffixed name (e.g., "my-model(8192)").
-	// Evaluated in Story 11.8: This fallback is intentionally preserved to support
-	// custom model registrations that include thinking suffixes.
-	if len(providers) == 0 && baseModel != resolvedModelName {
-		providers = util.GetProviderName(resolvedModelName)
+	// If the model specifies an explicit provider prefix (e.g. "openagentic/gpt-6-astra", "codex/gpt-6-astra", "antigravity/gemini-3.8-flash-high"):
+	if reqProv, reqModel, hasSlash := strings.Cut(baseModel, "/"); hasSlash && reqProv != "" && reqModel != "" {
+		subProviders := util.GetProviderName(reqModel)
+		var matched []string
+		for _, p := range subProviders {
+			if util.MatchProvider(reqProv, p) {
+				matched = append(matched, p)
+			}
+		}
+		if len(matched) > 0 {
+			providers = matched
+			if parsed.HasSuffix {
+				resolvedModelName = fmt.Sprintf("%s(%s)", reqModel, parsed.RawSuffix)
+			} else {
+				resolvedModelName = reqModel
+			}
+		} else {
+			providers = util.GetProviderName(baseModel)
+		}
+	} else {
+		providers = util.GetProviderName(baseModel)
+		// Fallback: if baseModel has no provider but differs from resolvedModelName,
+		// try using the full model name. This handles edge cases where custom models
+		// may be registered with their full suffixed name (e.g., "my-model(8192)").
+		// Evaluated in Story 11.8: This fallback is intentionally preserved to support
+		// custom model registrations that include thinking suffixes.
+		if len(providers) == 0 && baseModel != resolvedModelName {
+			providers = util.GetProviderName(resolvedModelName)
+		}
 	}
-
 	if len(providers) == 0 {
 		// The client asked for a model this proxy cannot route. Report it as a request
 		// error so streaming clients receive an actionable message instead of a
