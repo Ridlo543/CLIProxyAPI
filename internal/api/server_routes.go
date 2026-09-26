@@ -664,31 +664,7 @@ func (s *Server) getModelHandler() gin.HandlerFunc {
 				c.JSON(http.StatusForbidden, gin.H{"error": "model_not_allowed"})
 				return
 			}
-			ctxLen := cmb.ContextLength
-			maxTok := cmb.MaxTokens
-			if maxTok <= 0 {
-				maxTok = cmb.MaxCompletionTokens
-			}
-			if ctxLen <= 0 {
-				ctxLen = 1000000
-				for _, member := range cmb.Models {
-					if info := registry.LookupStaticModelInfo(member.Model); info != nil && info.ContextLength > ctxLen {
-						ctxLen = info.ContextLength
-					}
-				}
-			}
-			if maxTok <= 0 {
-				maxTok = 128000
-				for _, member := range cmb.Models {
-					if info := registry.LookupStaticModelInfo(member.Model); info != nil {
-						if info.MaxCompletionTokens > maxTok {
-							maxTok = info.MaxCompletionTokens
-						} else if info.OutputTokenLimit > maxTok {
-							maxTok = info.OutputTokenLimit
-						}
-					}
-				}
-			}
+			ctxLen, maxTok := ResolveComboDefaults(cmb)
 
 			if isAnthropicModelsRequest(c) {
 				c.JSON(http.StatusOK, gin.H{

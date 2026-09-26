@@ -92,6 +92,15 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 				logrus.WithField("combo", combo.Name).Warnf("[router] ⚠️ Combo %q skipping member %s: no provider serves model %q", combo.Name, combos.ModelID(member), member.Model)
 				continue
 			}
+
+			// Context-Aware Guard: skip members whose context window cannot fit the payload
+			if info := registry.LookupStaticModelInfo(member.Model); info != nil && info.ContextLength > 0 {
+				estimatedTokens := len(raw) / 3
+				if estimatedTokens > info.ContextLength {
+					logrus.WithField("combo", combo.Name).Warnf("[router] ⏩ Combo %q skipping member %s: estimated prompt tokens (%d) exceeds member context length (%d)", combo.Name, combos.ModelID(member), estimatedTokens, info.ContextLength)
+					continue
+				}
+			}
 			reqEffort := strings.TrimSpace(gjson.GetBytes(raw, "reasoning_effort").String())
 			if reqEffort == "" {
 				reqEffort = strings.TrimSpace(gjson.GetBytes(raw, "reasoning.effort").String())
@@ -191,35 +200,7 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 		}
 
 		for _, cmb := range combos.Snapshot() {
-			ctxLen := cmb.ContextLength
-			maxTok := cmb.MaxTokens
-			if maxTok <= 0 {
-				maxTok = cmb.MaxCompletionTokens
-			}
-
-			// Combos default to at least 1,000,000 (1M) context limit for high-context agent workflows
-			// (e.g. OpenCode, Claude Code, Cline), or higher if any member model supports more (e.g. Gemini 2M).
-			// Combos MUST NEVER downgrade to 200k or 272k.
-			if ctxLen <= 0 {
-				ctxLen = 1000000
-				for _, member := range cmb.Models {
-					if info := registry.LookupStaticModelInfo(member.Model); info != nil && info.ContextLength > ctxLen {
-						ctxLen = info.ContextLength
-					}
-				}
-			}
-			if maxTok <= 0 {
-				maxTok = 128000
-				for _, member := range cmb.Models {
-					if info := registry.LookupStaticModelInfo(member.Model); info != nil {
-						if info.MaxCompletionTokens > maxTok {
-							maxTok = info.MaxCompletionTokens
-						} else if info.OutputTokenLimit > maxTok {
-							maxTok = info.OutputTokenLimit
-						}
-					}
-				}
-			}
+			ctxLen, maxTok := ResolveComboDefaults(cmb)
 
 			var entry map[string]any
 			if isAnthropic {
@@ -424,3 +405,56 @@ func (w *combosResponseWriter) FlushHeld() {
 var (
 	_ gin.ResponseWriter = (*combosResponseWriter)(nil)
 )
+
+// ResolveComboDefaults resolves the context length and max output tokens for a combo.
+// It inherits from the primary member (first model in the chain) when not explicitly set,
+// adapting dynamically whether the primary model is Gemini (1M), Claude (1M/200k), or Codex (272k).
+func ResolveComboDefaults(cmb config.ComboConfig) (int, int) {
+	ctxLen := cmb.ContextLength
+	maxTok := cmb.MaxTokens
+	if maxTok <= 0 {
+		maxTok = cmb.MaxCompletionTokens
+	}
+
+	// 1. Resolve Context Length
+	if ctxLen <= 0 {
+		if len(cmb.Models) > 0 {
+			primary := cmb.Models[0]
+			if info := registry.LookupStaticModelInfo(primary.Model); info != nil && info.ContextLength > 0 {
+				ctxLen = info.ContextLength
+			} else {
+				m := strings.ToLower(primary.Model)
+				if strings.Contains(m, "gemini") {
+					ctxLen = 1048576
+				} else if strings.Contains(m, "claude-opus") {
+					ctxLen = 1000000
+				} else if strings.Contains(m, "claude") {
+					ctxLen = 200000
+				} else if strings.Contains(m, "gpt-6") || strings.Contains(m, "gpt-5") || strings.Contains(m, "astra") || strings.Contains(m, "sol") || strings.Contains(m, "luna") {
+					ctxLen = 272000
+				}
+			}
+		}
+		if ctxLen <= 0 {
+			ctxLen = 1000000
+		}
+	}
+
+	// 2. Resolve Max Completion Tokens
+	if maxTok <= 0 {
+		if len(cmb.Models) > 0 {
+			primary := cmb.Models[0]
+			if info := registry.LookupStaticModelInfo(primary.Model); info != nil {
+				if info.MaxCompletionTokens > 0 {
+					maxTok = info.MaxCompletionTokens
+				} else if info.OutputTokenLimit > 0 {
+					maxTok = info.OutputTokenLimit
+				}
+			}
+		}
+		if maxTok <= 0 {
+			maxTok = 128000
+		}
+	}
+	return ctxLen, maxTok
+}

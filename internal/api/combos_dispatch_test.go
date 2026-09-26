@@ -211,9 +211,21 @@ func TestCombosContextWindowDefault1M_OpenAI_and_Anthropic(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	combos.SyncFromConfig(&config.Config{Combos: []config.ComboConfig{
 		{
-			Name: "leader",
+			Name: "gemini-combo",
 			Models: []config.ComboModelRef{
-				{Provider: "codex", Model: "gpt-6-astra"}, // normally 272k in models.json, combo must be >= 1M!
+				{Provider: "antigravity", Model: "gemini-3.8-flash-high"},
+			},
+		},
+		{
+			Name: "claude-combo",
+			Models: []config.ComboModelRef{
+				{Provider: "antigravity", Model: "claude-opus-4-6-thinking"},
+			},
+		},
+		{
+			Name: "codex-combo",
+			Models: []config.ComboModelRef{
+				{Provider: "codex", Model: "gpt-6-astra"},
 			},
 		},
 		{
@@ -266,15 +278,24 @@ func TestCombosContextWindowDefault1M_OpenAI_and_Anthropic(t *testing.T) {
 			} `json:"data"`
 		}
 		_ = json.Unmarshal(w.Body.Bytes(), &resp)
-		var leaderFound, customFound bool
+		var geminiFound, claudeFound, codexFound, customFound bool
 		for _, m := range resp.Data {
-			if m.ID == "leader" {
-				leaderFound = true
-				if m.ContextLength < 1000000 {
-					t.Fatalf("expected leader context_length >= 1000000, got %d", m.ContextLength)
+			if m.ID == "gemini-combo" {
+				geminiFound = true
+				if m.ContextLength != 1048576 {
+					t.Fatalf("expected gemini-combo context_length == 1048576, got %d", m.ContextLength)
 				}
-				if m.MaxTokens < 128000 {
-					t.Fatalf("expected leader max_tokens >= 128000, got %d", m.MaxTokens)
+			}
+			if m.ID == "claude-combo" {
+				claudeFound = true
+				if m.ContextLength != 1000000 {
+					t.Fatalf("expected claude-combo context_length == 1000000, got %d", m.ContextLength)
+				}
+			}
+			if m.ID == "codex-combo" {
+				codexFound = true
+				if m.ContextLength != 272000 {
+					t.Fatalf("expected codex-combo context_length == 272000, got %d", m.ContextLength)
 				}
 			}
 			if m.ID == "custom-2m" {
@@ -284,8 +305,8 @@ func TestCombosContextWindowDefault1M_OpenAI_and_Anthropic(t *testing.T) {
 				}
 			}
 		}
-		if !leaderFound || !customFound {
-			t.Fatalf("expected both combos in OpenAI /v1/models")
+		if !geminiFound || !claudeFound || !codexFound || !customFound {
+			t.Fatalf("expected all combos in OpenAI /v1/models")
 		}
 	}
 
@@ -307,33 +328,33 @@ func TestCombosContextWindowDefault1M_OpenAI_and_Anthropic(t *testing.T) {
 			} `json:"data"`
 		}
 		_ = json.Unmarshal(w.Body.Bytes(), &resp)
-		var leaderFound bool
+		var claudeComboFound bool
 		for _, m := range resp.Data {
-			if m.ID == "leader" {
-				leaderFound = true
-				if m.ContextLength < 1000000 || m.MaxInputTokens < 1000000 {
-					t.Fatalf("expected leader in Anthropic format to have >= 1M context, got ctx=%d, max_input=%d", m.ContextLength, m.MaxInputTokens)
+			if m.ID == "claude-combo" {
+				claudeComboFound = true
+				if m.ContextLength != 1000000 || m.MaxInputTokens != 1000000 {
+					t.Fatalf("expected claude-combo in Anthropic format to have 1M context, got ctx=%d, max_input=%d", m.ContextLength, m.MaxInputTokens)
 				}
 			}
 		}
-		if !leaderFound {
-			t.Fatalf("expected leader combo in Anthropic /v1/models response")
+		if !claudeComboFound {
+			t.Fatalf("expected claude-combo in Anthropic /v1/models response")
 		}
 	}
 
 	// Verify GET /v1/models/:model endpoint for direct model query
 	{
 		w := httptest.NewRecorder()
-		r.ServeHTTP(w, httptest.NewRequest("GET", "/v1/models/leader", nil))
+		r.ServeHTTP(w, httptest.NewRequest("GET", "/v1/models/gemini-combo", nil))
 		if w.Code != 200 {
-			t.Fatalf("expected 200 for /v1/models/leader, got %d: %s", w.Code, w.Body.String())
+			t.Fatalf("expected 200 for /v1/models/gemini-combo, got %d: %s", w.Code, w.Body.String())
 		}
 		var resp struct {
 			ID            string `json:"id"`
 			ContextLength int    `json:"context_length"`
 		}
 		_ = json.Unmarshal(w.Body.Bytes(), &resp)
-		if resp.ID != "leader" || resp.ContextLength < 1000000 {
+		if resp.ID != "gemini-combo" || resp.ContextLength != 1048576 {
 			t.Fatalf("unexpected single model response: %+v", resp)
 		}
 	}
