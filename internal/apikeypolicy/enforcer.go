@@ -243,8 +243,22 @@ func (e *Enforcer) CheckProviders(key string, candidates []string, modelKnown bo
 		allowed[strings.ToLower(strings.TrimSpace(provider))] = struct{}{}
 	}
 	for _, candidate := range candidates {
-		if _, ok := allowed[strings.ToLower(strings.TrimSpace(candidate))]; ok {
+		cand := strings.ToLower(strings.TrimSpace(candidate))
+		candClean := strings.TrimPrefix(cand, "openai-compatible-")
+		if _, ok := allowed[cand]; ok {
 			return true
+		}
+		if _, ok := allowed[candClean]; ok {
+			return true
+		}
+		for allow := range allowed {
+			allowClean := strings.TrimPrefix(allow, "openai-compatible-")
+			if allowClean == candClean {
+				return true
+			}
+			if strings.HasPrefix(allowClean, candClean+"-") || strings.HasPrefix(candClean, allowClean+"-") {
+				return true
+			}
 		}
 	}
 	return false

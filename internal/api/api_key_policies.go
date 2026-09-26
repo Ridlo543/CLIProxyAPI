@@ -33,14 +33,22 @@ func modelKnownToRegistry(model string) ([]string, bool) {
 		prefixProvider = strings.ToLower(strings.TrimSpace(prov))
 		lookupModel = strings.TrimSpace(m)
 	}
-	candidates := make([]string, 0, 3)
+	candidates := make([]string, 0, 4)
 	if prefixProvider != "" {
 		candidates = append(candidates, prefixProvider)
 	}
-	info := registry.GetGlobalRegistry().GetModelInfo(lookupModel, "")
-	if info != nil {
-		for _, candidate := range []string{info.OwnedBy, info.Type} {
-			if trimmed := strings.ToLower(strings.TrimSpace(candidate)); trimmed != "" {
+	reg := registry.GetGlobalRegistry()
+	for _, mKey := range []string{model, lookupModel} {
+		info := reg.GetModelInfo(mKey, "")
+		if info != nil {
+			for _, candidate := range []string{info.OwnedBy, info.Type} {
+				if trimmed := strings.ToLower(strings.TrimSpace(candidate)); trimmed != "" {
+					candidates = append(candidates, trimmed)
+				}
+			}
+		}
+		for _, p := range reg.GetModelProviders(mKey) {
+			if trimmed := strings.ToLower(strings.TrimSpace(p)); trimmed != "" {
 				candidates = append(candidates, trimmed)
 			}
 		}
@@ -112,6 +120,10 @@ func APIKeyPolicyMiddleware() gin.HandlerFunc {
 			}
 		}
 		candidates, known := modelKnownToRegistry(model)
+		if pinned := enforcer.PinnedProviderForModel(key, model); pinned != "" {
+			candidates = append(candidates, pinned)
+			known = true
+		}
 		if !enforcer.CheckProviders(key, candidates, known) {
 			// Unknown models cannot be attributed to a provider; they pass the
 			// provider check only when no provider restriction is configured
