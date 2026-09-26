@@ -5,26 +5,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
-
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	log "github.com/sirupsen/logrus"
 )
 
-// Runtime owns TARE identity, cache, queue, and child process lifecycle for one API service.
-type Runtime struct {
-	tare *tareEngine
-}
+// Runtime owns context compression state and lifecycle for one API service.
+type Runtime struct{}
 
-func NewRuntime() *Runtime { return &Runtime{tare: newTAREEngine()} }
+func NewRuntime() *Runtime { return &Runtime{} }
 
-// Shutdown rejects subsequent submissions and drains this runtime only.
-func (r *Runtime) Shutdown(ctx context.Context) error {
-	if r == nil || r.tare == nil {
-		return nil
-	}
-	return r.tare.shutdown(ctx)
-}
+// Shutdown is a no-op when external TARE binary execution is removed.
+func (r *Runtime) Shutdown(ctx context.Context) error { return nil }
 
 const OptOutHeader = "x-9router-token-saver"
 
@@ -107,8 +100,8 @@ func SanitizeStats(stats Stats) Stats {
 	if stats.ElapsedMS < 0 || stats.ElapsedMS > 9007199254740991 {
 		stats.ElapsedMS = 0
 	}
-	stats.Version = safeTelemetryVersion(stats.Version)
-	stats.ManifestID = safeTelemetryManifest(stats.ManifestID)
+	stats.Version = strings.TrimSpace(stats.Version)
+	stats.ManifestID = strings.TrimSpace(stats.ManifestID)
 	return stats
 }
 
@@ -208,45 +201,24 @@ func (r *Runtime) Apply(ctx context.Context, raw []byte, cfg config.ContextCompr
 		return finish(raw)
 	}
 	slotCap := cfg.RawCapBytes
-	combined := cfg.Engine == config.ContextCompressionRTKTARE
-	if cfg.Engine == config.ContextCompressionTARE || cfg.Engine == "tare-structural" {
-		cfg.Engine = config.ContextCompressionTARE
-	}
-	if cfg.Engine == config.ContextCompressionTARE || combined {
-		slotCap = maxTARESlotBytes
-		stats.Engine = cfg.Engine
+	if slotCap <= 0 {
+		slotCap = 10 * 1024 * 1024
 	}
 	slots := collectSlots(body, slotCap)
-	if cfg.Engine == config.ContextCompressionRTK {
-		eligible := slots[:0]
-		for _, candidate := range slots {
-			if len([]byte(candidate.text)) >= cfg.MinBytes {
-				eligible = append(eligible, candidate)
-			}
+	eligible := slots[:0]
+	for _, candidate := range slots {
+		if len([]byte(candidate.text)) >= cfg.MinBytes {
+			eligible = append(eligible, candidate)
 		}
-		slots = eligible
 	}
+	slots = eligible
 	stats.Selected = len(slots)
 	if len(slots) == 0 {
 		stats.Reason = "no_eligible"
 		return finish(raw)
 	}
-	var ok bool
-	switch {
-	case combined:
-		ok = r.applyRTKTare(ctx, slots, cfg, &stats)
-	case cfg.Engine == config.ContextCompressionRTK:
-		ok = applyRTK(slots, cfg.MinBytes, &stats)
-	case cfg.Engine == config.ContextCompressionTARE:
-		if r == nil || r.tare == nil {
-			stats.Reason = "shutdown"
-			return finish(raw)
-		}
-		ok = r.tare.compress(ctx, slots, cfg.TARE, &stats)
-	default:
-		stats.Reason = "disabled"
-		return finish(raw)
-	}
+
+	ok := applyRTK(slots, cfg.MinBytes, &stats)
 	if !ok {
 		return finish(raw)
 	}
@@ -261,73 +233,6 @@ func (r *Runtime) Apply(ctx context.Context, raw []byte, cfg config.ContextCompr
 	savedBytes := len(raw) - len(out)
 	pct := float64(savedBytes) / float64(len(raw)) * 100.0
 
-	switch stats.Engine {
-	case config.ContextCompressionTARE, "tare-structural":
-		log.Infof("[TARE] 📦 -%.1f%% (%d slots, %dB → %dB in %dms)", pct, stats.Compressed, len(raw), len(out), stats.ElapsedMS)
-	case config.ContextCompressionRTK:
-		log.Infof("[RTK] ✂️ -%.1f%% (%d slots, saved %dB in %dms)", pct, stats.Compressed, savedBytes, stats.ElapsedMS)
-	case config.ContextCompressionRTKTARE:
-		log.Infof("[TOKEN-SAVER] ⚡ -%.1f%% (TARE+RTK: %d slots, %dB → %dB, saved %dB in %dms)", pct, stats.Compressed, len(raw), len(out), savedBytes, stats.ElapsedMS)
-	default:
-		log.Infof("[TOKEN-SAVER] ⚡ -%.1f%% (saved %dB, %dB → %dB in %dms)", pct, savedBytes, len(raw), len(out), stats.ElapsedMS)
-	}
-
+	log.Infof("[RTK] ✂️ -%.1f%% (%d slots, saved %dB in %dms)", pct, stats.Compressed, savedBytes, stats.ElapsedMS)
 	return finish(out)
-}
-
-// applyRTKTare runs TARE structurally first, then applies RTK to the slots the
-// TARE pass left unchanged. The underlying TARE engine is all-or-nothing per
-// call, so slots are submitted individually to get true partial success.
-// A single-slot call that reports success had its write closure applied to the
-// decoded body, which is the ground truth for per-slot change detection; the
-// slot's text field is a value copy and never reflects TARE output. Stats are
-// merged only from successful calls so failed attempts cannot double count. A
-// missing TARE runtime degrades gracefully to RTK-only.
-func (r *Runtime) applyRTKTare(ctx context.Context, slots []slot, cfg config.ContextCompressionConfig, stats *Stats) bool {
-	tareCompressed := make([]bool, len(slots))
-	if r != nil && r.tare != nil {
-		for i := range slots {
-			scratch := Stats{}
-			if !r.tare.compress(ctx, slots[i:i+1], cfg.TARE, &scratch) {
-				continue
-			}
-			tareCompressed[i] = true
-			stats.CacheHits += scratch.CacheHits
-			stats.BytesBefore += scratch.BytesBefore
-			stats.BytesAfter += scratch.BytesAfter
-			if stats.Version == "" {
-				stats.Version = scratch.Version
-			}
-			if stats.ManifestID == "" {
-				stats.ManifestID = scratch.ManifestID
-			}
-		}
-	}
-	compressedByTare := 0
-	remaining := make([]slot, 0, len(slots))
-	for i := range slots {
-		if tareCompressed[i] {
-			compressedByTare++
-			continue
-		}
-		if len([]byte(slots[i].text)) >= cfg.MinBytes {
-			remaining = append(remaining, slots[i])
-		}
-	}
-	rtkCompressed := 0
-	if len(remaining) > 0 {
-		scratch := Stats{}
-		if applyRTK(remaining, cfg.MinBytes, &scratch) {
-			rtkCompressed = scratch.Compressed
-		}
-		stats.BytesBefore += scratch.BytesBefore
-		stats.BytesAfter += scratch.BytesAfter
-	}
-	stats.Compressed = compressedByTare + rtkCompressed
-	if stats.Compressed == 0 {
-		stats.Reason = "no_eligible"
-		return false
-	}
-	stats.Reason = "applied"
-	return true
 }
