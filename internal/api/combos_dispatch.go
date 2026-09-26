@@ -16,6 +16,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/apikeypolicy"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/combos"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
@@ -151,11 +152,7 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 // listing so IDEs can select them like any other model.
 func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if combos.SnapshotCount() == 0 {
-			next(c)
-			return
-		}
-		// Buffer the small JSON response so we can append entries.
+		// Buffer the small JSON response so we can append entries and filter by API key policy.
 		buf := &bytes.Buffer{}
 		originalWriter := c.Writer
 		grw := &passthroughRecorder{ResponseWriter: originalWriter, Body: buf}
@@ -163,11 +160,8 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 		next(c)
 		c.Writer = originalWriter
 
-		var parsed struct {
-			Object string           `json:"object"`
-			Data   []map[string]any `json:"data"`
-		}
-		if err := json.Unmarshal(grw.Body.Bytes(), &parsed); err != nil || (parsed.Object != "list" && parsed.Data == nil) {
+		var topMap map[string]any
+		if err := json.Unmarshal(grw.Body.Bytes(), &topMap); err != nil {
 			code := grw.heldCode
 			if code <= 0 {
 				code = http.StatusOK
@@ -176,6 +170,25 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 			_, _ = c.Writer.Write(grw.Body.Bytes())
 			return
 		}
+		obj, _ := topMap["object"].(string)
+		rawList, hasData := topMap["data"].([]any)
+		if obj != "list" || !hasData {
+			code := grw.heldCode
+			if code <= 0 {
+				code = http.StatusOK
+			}
+			c.Writer.WriteHeader(code)
+			_, _ = c.Writer.Write(grw.Body.Bytes())
+			return
+		}
+
+		data := make([]map[string]any, 0, len(rawList))
+		for _, item := range rawList {
+			if m, ok := item.(map[string]any); ok {
+				data = append(data, m)
+			}
+		}
+
 		for _, cmb := range combos.Snapshot() {
 			entry := map[string]any{
 				"id":       cmb.Name,
@@ -224,17 +237,18 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 				entry["max_tokens"] = maxTok
 				entry["outputTokenLimit"] = maxTok
 			}
-			parsed.Data = append(parsed.Data, entry)
+			data = append(data, entry)
 		}
+
 		// Also expose provider-namespaced IDs (e.g. openagentic/gpt-6-astra, codex/gpt-6-astra, antigravity/gemini-3.8-flash-high)
 		// so IDEs and tooling can explicitly choose a provider's model directly.
-		existingIDs := make(map[string]struct{}, len(parsed.Data))
-		for _, d := range parsed.Data {
+		existingIDs := make(map[string]struct{}, len(data))
+		for _, d := range data {
 			if id, ok := d["id"].(string); ok {
 				existingIDs[id] = struct{}{}
 			}
 		}
-		for _, d := range parsed.Data {
+		for _, d := range data {
 			id, okId := d["id"].(string)
 			ownedBy, okOwn := d["owned_by"].(string)
 			if !okId || !okOwn || id == "" || ownedBy == "" || ownedBy == "combos" {
@@ -249,10 +263,32 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 				}
 				entry["id"] = namespacedID
 				existingIDs[namespacedID] = struct{}{}
-				parsed.Data = append(parsed.Data, entry)
+				data = append(data, entry)
 			}
 		}
-		out, _ := json.Marshal(parsed)
+
+		// Filter models based on the caller API key policy (if restricted)
+		userKey := c.GetString("userApiKey")
+		if userKey != "" {
+			enforcer := apikeypolicy.Default()
+			if policy, hasPolicy := enforcer.Policy(userKey); hasPolicy && (len(policy.Models) > 0 || len(policy.Providers) > 0) {
+				filtered := make([]map[string]any, 0, len(data))
+				for _, d := range data {
+					id, _ := d["id"].(string)
+					ownedBy, _ := d["owned_by"].(string)
+					if id == "" {
+						continue
+					}
+					if enforcer.IsModelAllowed(userKey, id, ownedBy) {
+						filtered = append(filtered, d)
+					}
+				}
+				data = filtered
+			}
+		}
+
+		topMap["data"] = data
+		out, _ := json.Marshal(topMap)
 		if c.Writer.Header().Get("Content-Type") == "" {
 			c.Writer.Header().Set("Content-Type", "application/json")
 		}

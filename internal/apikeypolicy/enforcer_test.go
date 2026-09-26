@@ -45,6 +45,74 @@ func TestCheckModelAndProviders(t *testing.T) {
 	}
 }
 
+func TestCheckModel_NamespacedAndCrossProvider(t *testing.T) {
+	e := newTestEnforcer([]config.APIKeyPolicy{
+		{
+			Key:    "key-namespaced",
+			Models: []string{"openagentic/gemini-2.5-flash", "gpt-5.6-sol"},
+		},
+	}, nil)
+
+	// 1. Exact match on qualified ID
+	if !e.CheckModel("key-namespaced", "openagentic/gemini-2.5-flash") {
+		t.Fatal("expected openagentic/gemini-2.5-flash to pass")
+	}
+	// 2. Reject different provider with same model name
+	if e.CheckModel("key-namespaced", "antigravity/gemini-2.5-flash") {
+		t.Fatal("expected antigravity/gemini-2.5-flash to be rejected")
+	}
+	// 3. Bare model matches if allowed has provider qualification
+	if !e.CheckModel("key-namespaced", "gemini-2.5-flash") {
+		t.Fatal("expected bare gemini-2.5-flash to pass")
+	}
+	// 4. Pinned provider helper
+	if prov := e.PinnedProviderForModel("key-namespaced", "gemini-2.5-flash"); prov != "openagentic" {
+		t.Fatalf("expected pinned provider openagentic, got %q", prov)
+	}
+	// 5. Bare allowed model matches both bare and qualified request
+	if !e.CheckModel("key-namespaced", "gpt-5.6-sol") {
+		t.Fatal("expected gpt-5.6-sol to pass")
+	}
+	if !e.CheckModel("key-namespaced", "codex/gpt-5.6-sol") {
+		t.Fatal("expected codex/gpt-5.6-sol to pass")
+	}
+}
+
+func TestIsModelAllowed(t *testing.T) {
+	e := newTestEnforcer([]config.APIKeyPolicy{
+		{
+			Key:       "key-filter",
+			Models:    []string{"openagentic/gemini-2.5-flash", "gpt-5.6-sol"},
+			Providers: []string{"openagentic", "codex"},
+		},
+	}, nil)
+
+	// Allowed: openagentic/gemini-2.5-flash
+	if !e.IsModelAllowed("key-filter", "openagentic/gemini-2.5-flash", "openagentic") {
+		t.Fatal("expected openagentic/gemini-2.5-flash to be allowed")
+	}
+	// Allowed: bare gemini-2.5-flash if owned by openagentic
+	if !e.IsModelAllowed("key-filter", "gemini-2.5-flash", "openagentic") {
+		t.Fatal("expected gemini-2.5-flash (owned by openagentic) to be allowed")
+	}
+	// Disallowed: antigravity/gemini-2.5-flash
+	if e.IsModelAllowed("key-filter", "antigravity/gemini-2.5-flash", "antigravity") {
+		t.Fatal("expected antigravity/gemini-2.5-flash to be disallowed")
+	}
+	// Disallowed: gemini-2.5-flash if owned by antigravity
+	if e.IsModelAllowed("key-filter", "gemini-2.5-flash", "antigravity") {
+		t.Fatal("expected gemini-2.5-flash (owned by antigravity) to be disallowed")
+	}
+	// Allowed: gpt-5.6-sol owned by codex
+	if !e.IsModelAllowed("key-filter", "gpt-5.6-sol", "codex") {
+		t.Fatal("expected gpt-5.6-sol to be allowed")
+	}
+	// Disallowed: claude-sonnet-4-6 owned by anthropic/antigravity
+	if e.IsModelAllowed("key-filter", "claude-sonnet-4-6", "antigravity") {
+		t.Fatal("expected claude-sonnet-4-6 to be disallowed")
+	}
+}
+
 func TestBudgetAndWindowResetWithInjectedClock(t *testing.T) {
 	current := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
 	now := func() time.Time { return current }

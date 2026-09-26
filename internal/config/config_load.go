@@ -129,6 +129,17 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 		return nil, errReasoningPolicy
 	}
 	cfg.ReasoningPolicy = reasoningPolicy
+	policies := cfg.APIKeyPolicies
+	if len(policies) == 0 && len(cfg.KeyPolicies) > 0 {
+		policies = cfg.KeyPolicies
+	}
+	if len(policies) > 0 {
+		normalizedPolicies, errNormPolicies := NormalizeAPIKeyPolicies(policies)
+		if errNormPolicies != nil {
+			return nil, errNormPolicies
+		}
+		cfg.APIKeyPolicies = normalizedPolicies
+	}
 
 	// Hash remote management key if plaintext is detected (nested)
 	// We consider a value to be already hashed if it looks like a bcrypt hash ($2a$, $2b$, or $2y$ prefix).

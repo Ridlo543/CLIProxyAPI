@@ -7,6 +7,7 @@ import (
 	"testing"
 	"github.com/gin-gonic/gin"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/apikeypolicy"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/combos"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
@@ -61,6 +62,97 @@ func TestCombosAugmentModelsWritesSingleJSON(t *testing.T) {
 	}
 }
 
+func TestCombosAugmentModelsFiltersByAPIKeyPolicy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	combos.SyncFromConfig(&config.Config{Combos: []config.ComboConfig{
+		{Name: "leader", Models: []config.ComboModelRef{{Provider: "codex", Model: "gpt-5.6-sol"}}},
+	}})
+	defer combos.SyncFromConfig(&config.Config{})
+
+	enforcer := apikeypolicy.Default()
+	enforcer.Replace([]config.APIKeyPolicy{
+		{
+			Key:    "test-restricted-key",
+			Models: []string{"openagentic/gemini-2.5-flash", "gpt-5.6-sol"},
+		},
+	})
+	defer enforcer.Replace(nil)
+
+	s := &Server{}
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		if k := c.GetHeader("X-Test-Key"); k != "" {
+			c.Set("userApiKey", k)
+		}
+		c.Next()
+	})
+	r.GET("/v1/models", s.combosAugmentModels(func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"object": "list",
+			"data": []gin.H{
+				{"id": "gemini-2.5-flash", "owned_by": "openagentic"},
+				{"id": "gemini-2.5-flash", "owned_by": "antigravity"},
+				{"id": "gpt-5.6-sol", "owned_by": "codex"},
+				{"id": "claude-sonnet-4-6", "owned_by": "antigravity"},
+			},
+		})
+	}))
+
+	// 1. Calling with unrestricted key -> sees all models plus namespaced variants and combos
+	wUnrestricted := httptest.NewRecorder()
+	reqUnrestricted := httptest.NewRequest("GET", "/v1/models", nil)
+	r.ServeHTTP(wUnrestricted, reqUnrestricted)
+
+	var parsedUnrestricted struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(wUnrestricted.Body.Bytes(), &parsedUnrestricted)
+	if len(parsedUnrestricted.Data) < 4 {
+		t.Fatalf("expected all models, got %d", len(parsedUnrestricted.Data))
+	}
+
+	// 2. Calling with restricted key -> sees ONLY openagentic gemini and gpt-5.6-sol
+	wRestricted := httptest.NewRecorder()
+	reqRestricted := httptest.NewRequest("GET", "/v1/models", nil)
+	reqRestricted.Header.Set("X-Test-Key", "test-restricted-key")
+	r.ServeHTTP(wRestricted, reqRestricted)
+
+	var parsedRestricted struct {
+		Data []struct {
+			ID      string `json:"id"`
+			OwnedBy string `json:"owned_by"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(wRestricted.Body.Bytes(), &parsedRestricted)
+
+	ids := make([]string, 0, len(parsedRestricted.Data))
+	for _, d := range parsedRestricted.Data {
+		ids = append(ids, d.ID)
+		if strings.Contains(d.ID, "antigravity") || strings.Contains(d.ID, "claude") {
+			t.Fatalf("restricted key saw disallowed model: %s (%s)", d.ID, d.OwnedBy)
+		}
+	}
+
+	// Verify openagentic/gemini-2.5-flash and gpt-5.6-sol are present
+	hasOpenagenticGemini := false
+	hasGPT56Sol := false
+	for _, id := range ids {
+		if id == "openagentic/gemini-2.5-flash" || id == "gemini-2.5-flash" {
+			hasOpenagenticGemini = true
+		}
+		if id == "gpt-5.6-sol" || id == "codex/gpt-5.6-sol" {
+			hasGPT56Sol = true
+		}
+	}
+	if !hasOpenagenticGemini {
+		t.Fatalf("expected openagentic gemini in restricted models, got: %v", ids)
+	}
+	if !hasGPT56Sol {
+		t.Fatalf("expected gpt-5.6-sol in restricted models, got: %v", ids)
+	}
+}
 func TestCombosChatWrapperFallsBackOnModelUnsupported400(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	combos.SyncFromConfig(&config.Config{Combos: []config.ComboConfig{

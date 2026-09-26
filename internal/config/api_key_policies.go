@@ -26,9 +26,10 @@ type APIKeyPolicy struct {
 	Name      string            `yaml:"name,omitempty" json:"name,omitempty"`
 	Models    []string          `yaml:"models,omitempty" json:"models,omitempty"`
 	Providers []string          `yaml:"providers,omitempty" json:"providers,omitempty"`
-	Limit     *APIKeyTokenLimit `yaml:"token-limit,omitempty" json:"token-limit,omitempty"`
-	RPM       int               `yaml:"rpm,omitempty" json:"rpm,omitempty"`
-	TPM       int64             `yaml:"tpm,omitempty" json:"tpm,omitempty"`
+	Limit       *APIKeyTokenLimit `yaml:"token-limit,omitempty" json:"token-limit,omitempty"`
+	TokenWindow string            `yaml:"token-window,omitempty" json:"token-window,omitempty"`
+	RPM         int               `yaml:"rpm,omitempty" json:"rpm,omitempty"`
+	TPM         int64             `yaml:"tpm,omitempty" json:"tpm,omitempty"`
 }
 
 // EffectiveKey returns the key string from either Key or APIKey.
@@ -57,6 +58,12 @@ func NormalizeAPIKeyPolicies(policies []APIKeyPolicy) ([]APIKeyPolicy, error) {
 		seen[p.Key] = struct{}{}
 		p.Models = normalizeStringList(p.Models)
 		p.Providers = normalizeStringList(p.Providers)
+		if p.Limit == nil && strings.TrimSpace(p.TokenWindow) != "" {
+			p.Limit = &APIKeyTokenLimit{
+				Window: strings.TrimSpace(p.TokenWindow),
+				Limit:  0,
+			}
+		}
 		if p.Limit != nil {
 			window := strings.ToLower(strings.TrimSpace(p.Limit.Window))
 			switch window {

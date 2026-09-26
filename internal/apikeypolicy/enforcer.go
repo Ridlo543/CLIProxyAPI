@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/combos"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 )
 
@@ -71,19 +72,159 @@ func (e *Enforcer) policy(key string) (config.APIKeyPolicy, bool) {
 // Policy returns the configured policy for a key, if any.
 func (e *Enforcer) Policy(key string) (config.APIKeyPolicy, bool) { return e.policy(key) }
 
-// CheckModel enforces exact-match model allowlists.
+// CheckModel enforces model allowlists with support for provider-namespaced IDs.
 func (e *Enforcer) CheckModel(key, model string) bool {
 	p, ok := e.policy(key)
 	if !ok || len(p.Models) == 0 {
 		return true
 	}
 	model = strings.TrimSpace(model)
+	if model == "" {
+		return true
+	}
+	reqProv, reqBare, reqHasSlash := strings.Cut(model, "/")
+
 	for _, allowed := range p.Models {
-		if allowed == model {
+		allowed = strings.TrimSpace(allowed)
+		if allowed == "" {
+			continue
+		}
+		// 1. Exact match (case-insensitive)
+		if strings.EqualFold(allowed, model) {
 			return true
+		}
+		allowProv, allowBare, allowHasSlash := strings.Cut(allowed, "/")
+		if allowHasSlash && reqHasSlash {
+			// Both are qualified: "openagentic/gemini" vs "openagentic/gemini"
+			if strings.EqualFold(allowProv, reqProv) && strings.EqualFold(allowBare, reqBare) {
+				return true
+			}
+		} else if !allowHasSlash && reqHasSlash {
+			// Allowed is bare "gemini", request is "openagentic/gemini"
+			if strings.EqualFold(allowed, reqBare) {
+				return true
+			}
+		} else if allowHasSlash && !reqHasSlash {
+			// Allowed is "openagentic/gemini", request is bare "gemini"
+			if strings.EqualFold(allowBare, model) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// PinnedProviderForModel returns the provider prefix if the key's policy specifically
+// allowed this model under a specific provider namespace (e.g. "openagentic/gemini-2.5-flash")
+// while the client requested bare "gemini-2.5-flash".
+func (e *Enforcer) PinnedProviderForModel(key, model string) string {
+	p, ok := e.policy(key)
+	if !ok || len(p.Models) == 0 {
+		return ""
+	}
+	model = strings.TrimSpace(model)
+	if strings.Contains(model, "/") {
+		return ""
+	}
+	for _, allowed := range p.Models {
+		allowProv, allowBare, allowHasSlash := strings.Cut(strings.TrimSpace(allowed), "/")
+		if allowHasSlash && strings.EqualFold(allowBare, model) {
+			return allowProv
+		}
+	}
+	return ""
+}
+
+// IsModelAllowed reports whether a model (and its owner provider) is visible and callable
+// by the given API key. Used for /v1/models listing filtering.
+func (e *Enforcer) IsModelAllowed(key, modelID, ownedBy string) bool {
+	p, ok := e.policy(key)
+	if !ok || (len(p.Models) == 0 && len(p.Providers) == 0) {
+		return true
+	}
+	modelID = strings.TrimSpace(modelID)
+	ownedBy = strings.TrimSpace(ownedBy)
+	ownedBy = strings.TrimPrefix(ownedBy, "openai-compatible-")
+
+	reqProv, reqBare, reqHasSlash := strings.Cut(modelID, "/")
+	if !reqHasSlash {
+		reqBare = modelID
+		reqProv = ownedBy
+	}
+
+	// 1. Provider restriction check
+	if len(p.Providers) > 0 {
+		allowedProvMap := make(map[string]struct{}, len(p.Providers))
+		for _, prov := range p.Providers {
+			allowedProvMap[strings.ToLower(strings.TrimSpace(prov))] = struct{}{}
+		}
+
+		providerMatches := false
+		if ownedBy == "combos" || reqProv == "combos" {
+			if cmb, ok := combos.Find(reqBare); ok {
+				for _, member := range cmb.Models {
+					if _, okP := allowedProvMap[strings.ToLower(strings.TrimSpace(member.Provider))]; okP {
+						providerMatches = true
+						break
+					}
+				}
+			}
+		} else {
+			for _, check := range []string{reqProv, ownedBy} {
+				check = strings.ToLower(strings.TrimSpace(check))
+				if check == "" {
+					continue
+				}
+				if _, okP := allowedProvMap[check]; okP {
+					providerMatches = true
+					break
+				}
+			}
+		}
+		if !providerMatches {
+			return false
+		}
+	}
+
+	// 2. Model restriction check
+	if len(p.Models) > 0 {
+		modelMatches := false
+		for _, allowed := range p.Models {
+			allowed = strings.TrimSpace(allowed)
+			if allowed == "" {
+				continue
+			}
+			if strings.EqualFold(allowed, modelID) {
+				modelMatches = true
+				break
+			}
+			allowProv, allowBare, allowHasSlash := strings.Cut(allowed, "/")
+			if allowHasSlash && reqHasSlash {
+				if strings.EqualFold(allowProv, reqProv) && strings.EqualFold(allowBare, reqBare) {
+					modelMatches = true
+					break
+				}
+			} else if allowHasSlash && !reqHasSlash {
+				// Policy has "openagentic/gemini", model is bare "gemini".
+				// Matches only if this bare model belongs to openagentic.
+				if strings.EqualFold(allowBare, modelID) && (strings.EqualFold(allowProv, ownedBy) || strings.EqualFold(allowProv, reqProv)) {
+					modelMatches = true
+					break
+				}
+			} else if !allowHasSlash && reqHasSlash {
+				// Policy has bare "gemini", model in list is "openagentic/gemini".
+				if strings.EqualFold(allowed, reqBare) {
+					modelMatches = true
+					break
+				}
+			}
+		}
+		if !modelMatches {
+			return false
+		}
+	}
+
+	return true
 }
 
 // CheckProviders denies requests whose model cannot be served by any allowed
