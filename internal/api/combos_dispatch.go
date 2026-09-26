@@ -172,7 +172,8 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 		}
 		obj, _ := topMap["object"].(string)
 		rawList, hasData := topMap["data"].([]any)
-		if obj != "list" || !hasData {
+		isAnthropic := isAnthropicModelsRequest(c) || (obj == "" && hasData)
+		if !hasData || (obj != "list" && !isAnthropic) {
 			code := grw.heldCode
 			if code <= 0 {
 				code = http.StatusOK
@@ -190,52 +191,62 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 		}
 
 		for _, cmb := range combos.Snapshot() {
-			entry := map[string]any{
-				"id":       cmb.Name,
-				"object":   "model",
-				"owned_by": "combos",
-				"type":     "combos",
-			}
 			ctxLen := cmb.ContextLength
 			maxTok := cmb.MaxTokens
 			if maxTok <= 0 {
 				maxTok = cmb.MaxCompletionTokens
 			}
 
-			// If not explicitly configured, inherit from primary/fallback model
-			if len(cmb.Models) > 0 {
-				primary := cmb.Models[0]
-				info := registry.LookupStaticModelInfo(primary.Model)
-				if info != nil {
-					if ctxLen <= 0 && info.ContextLength > 0 {
+			// Combos default to at least 1,000,000 (1M) context limit for high-context agent workflows
+			// (e.g. OpenCode, Claude Code, Cline), or higher if any member model supports more (e.g. Gemini 2M).
+			// Combos MUST NEVER downgrade to 200k or 272k.
+			if ctxLen <= 0 {
+				ctxLen = 1000000
+				for _, member := range cmb.Models {
+					if info := registry.LookupStaticModelInfo(member.Model); info != nil && info.ContextLength > ctxLen {
 						ctxLen = info.ContextLength
-					}
-					if maxTok <= 0 {
-						if info.MaxCompletionTokens > 0 {
-							maxTok = info.MaxCompletionTokens
-						} else if info.OutputTokenLimit > 0 {
-							maxTok = info.OutputTokenLimit
-						}
-					}
-				} else {
-					// Fallback default: 1,000,000 (1M) context length and 128,000 (128k) max completion tokens
-					if ctxLen <= 0 {
-						ctxLen = 1000000
-					}
-					if maxTok <= 0 {
-						maxTok = 128000
 					}
 				}
 			}
-			if ctxLen > 0 {
-				entry["context_length"] = ctxLen
-				entry["max_context_length"] = ctxLen
-				entry["inputTokenLimit"] = ctxLen
+			if maxTok <= 0 {
+				maxTok = 128000
+				for _, member := range cmb.Models {
+					if info := registry.LookupStaticModelInfo(member.Model); info != nil {
+						if info.MaxCompletionTokens > maxTok {
+							maxTok = info.MaxCompletionTokens
+						} else if info.OutputTokenLimit > maxTok {
+							maxTok = info.OutputTokenLimit
+						}
+					}
+				}
 			}
-			if maxTok > 0 {
-				entry["max_completion_tokens"] = maxTok
-				entry["max_tokens"] = maxTok
-				entry["outputTokenLimit"] = maxTok
+
+			var entry map[string]any
+			if isAnthropic {
+				entry = map[string]any{
+					"id":                    cmb.Name,
+					"type":                  "model",
+					"display_name":          cmb.Name,
+					"created_at":            "2024-01-01T00:00:00Z",
+					"context_length":        ctxLen,
+					"max_context_length":    ctxLen,
+					"max_input_tokens":      ctxLen,
+					"max_tokens":            maxTok,
+					"max_completion_tokens": maxTok,
+				}
+			} else {
+				entry = map[string]any{
+					"id":                    cmb.Name,
+					"object":                "model",
+					"owned_by":              "combos",
+					"type":                  "combos",
+					"context_length":        ctxLen,
+					"max_context_length":    ctxLen,
+					"inputTokenLimit":       ctxLen,
+					"max_completion_tokens": maxTok,
+					"max_tokens":            maxTok,
+					"outputTokenLimit":      maxTok,
+				}
 			}
 			data = append(data, entry)
 		}

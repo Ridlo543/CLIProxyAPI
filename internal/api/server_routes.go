@@ -14,7 +14,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	managementHandlers "github.com/router-for-me/CLIProxyAPI/v7/internal/api/handlers/management"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/apikeypolicy"
 	claudemodels "github.com/router-for-me/CLIProxyAPI/v7/internal/client/claude/models"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/combos"
 	codexlive "github.com/router-for-me/CLIProxyAPI/v7/internal/client/codex/live"
 	codexmodels "github.com/router-for-me/CLIProxyAPI/v7/internal/client/codex/models"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/client/grokbuild"
@@ -72,6 +74,7 @@ func (s *Server) setupRoutes() {
 	v1.Use(AuthMiddleware(s.accessManager), APIKeyPolicyMiddleware())
 	{
 		v1.GET("/models", s.combosAugmentModels(s.unifiedModelsHandler(openaiHandlers, claudeCodeHandlers)))
+		v1.GET("/models/:model", s.getModelHandler())
 		v1.POST("/chat/completions", s.combosChatWrapper(openaiHandlers.ChatCompletions))
 		v1.POST("/completions", s.combosChatWrapper(openaiHandlers.Completions))
 		v1.POST("/images/generations", openaiHandlers.ImagesGenerations)
@@ -641,6 +644,143 @@ func (s *Server) unifiedModelsHandler(openaiHandler *openai.OpenAIAPIHandler, cl
 		} else {
 			openaiHandler.OpenAIModels(c)
 		}
+	}
+}
+
+func (s *Server) getModelHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		modelID := strings.TrimSpace(c.Param("model"))
+		if modelID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "model id required"})
+			return
+		}
+
+		userKey := c.GetString("userApiKey")
+		enforcer := apikeypolicy.Default()
+
+		// 1. Check if modelID is a combo
+		if cmb, ok := combos.Find(modelID); ok {
+			if userKey != "" && !enforcer.IsModelAllowed(userKey, cmb.Name, "combos") {
+				c.JSON(http.StatusForbidden, gin.H{"error": "model_not_allowed"})
+				return
+			}
+			ctxLen := cmb.ContextLength
+			maxTok := cmb.MaxTokens
+			if maxTok <= 0 {
+				maxTok = cmb.MaxCompletionTokens
+			}
+			if ctxLen <= 0 {
+				ctxLen = 1000000
+				for _, member := range cmb.Models {
+					if info := registry.LookupStaticModelInfo(member.Model); info != nil && info.ContextLength > ctxLen {
+						ctxLen = info.ContextLength
+					}
+				}
+			}
+			if maxTok <= 0 {
+				maxTok = 128000
+				for _, member := range cmb.Models {
+					if info := registry.LookupStaticModelInfo(member.Model); info != nil {
+						if info.MaxCompletionTokens > maxTok {
+							maxTok = info.MaxCompletionTokens
+						} else if info.OutputTokenLimit > maxTok {
+							maxTok = info.OutputTokenLimit
+						}
+					}
+				}
+			}
+
+			if isAnthropicModelsRequest(c) {
+				c.JSON(http.StatusOK, gin.H{
+					"type":                  "model",
+					"id":                    cmb.Name,
+					"display_name":          cmb.Name,
+					"created_at":            "2024-01-01T00:00:00Z",
+					"context_length":        ctxLen,
+					"max_context_length":    ctxLen,
+					"max_input_tokens":      ctxLen,
+					"max_tokens":            maxTok,
+					"max_completion_tokens": maxTok,
+				})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"id":                    cmb.Name,
+				"object":                "model",
+				"created":               1700000000,
+				"owned_by":              "combos",
+				"type":                  "combos",
+				"context_length":        ctxLen,
+				"max_context_length":    ctxLen,
+				"inputTokenLimit":       ctxLen,
+				"max_completion_tokens": maxTok,
+				"max_tokens":            maxTok,
+				"outputTokenLimit":      maxTok,
+			})
+			return
+		}
+
+		// 2. Regular model lookup in registry
+		reg := registry.GetGlobalRegistry()
+		info := reg.GetModelInfo(modelID, "")
+		if info == nil {
+			info = registry.LookupStaticModelInfo(modelID)
+		}
+		if info == nil {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": gin.H{
+					"message": fmt.Sprintf("The model '%s' does not exist", modelID),
+					"type":    "invalid_request_error",
+					"param":   "model",
+					"code":    "model_not_found",
+				},
+			})
+			return
+		}
+
+		if userKey != "" && !enforcer.IsModelAllowed(userKey, info.ID, info.OwnedBy) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "model_not_allowed"})
+			return
+		}
+
+		ctxLen := info.ContextLength
+		if ctxLen <= 0 {
+			ctxLen = 200000
+		}
+		maxTok := info.MaxCompletionTokens
+		if maxTok <= 0 {
+			maxTok = 64000
+		}
+
+		if isAnthropicModelsRequest(c) {
+			c.JSON(http.StatusOK, gin.H{
+				"type":                  "model",
+				"id":                    info.ID,
+				"display_name":          info.DisplayName,
+				"created_at":            "2024-01-01T00:00:00Z",
+				"context_length":        ctxLen,
+				"max_context_length":    ctxLen,
+				"max_input_tokens":      ctxLen,
+				"max_tokens":            maxTok,
+				"max_completion_tokens": maxTok,
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"id":                    info.ID,
+			"object":                "model",
+			"created":               info.Created,
+			"owned_by":              info.OwnedBy,
+			"type":                  info.Type,
+			"context_length":        ctxLen,
+			"max_context_length":    ctxLen,
+			"inputTokenLimit":       ctxLen,
+			"max_completion_tokens": maxTok,
+			"max_tokens":            maxTok,
+			"outputTokenLimit":      maxTok,
+		})
 	}
 }
 

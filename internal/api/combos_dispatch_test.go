@@ -206,3 +206,135 @@ func TestCombosChatWrapperFallsBackOnModelUnsupported400(t *testing.T) {
 		t.Fatalf("expected fallback response, got %s", w.Body.String())
 	}
 }
+
+func TestCombosContextWindowDefault1M_OpenAI_and_Anthropic(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	combos.SyncFromConfig(&config.Config{Combos: []config.ComboConfig{
+		{
+			Name: "leader",
+			Models: []config.ComboModelRef{
+				{Provider: "codex", Model: "gpt-6-astra"}, // normally 272k in models.json, combo must be >= 1M!
+			},
+		},
+		{
+			Name: "custom-2m",
+			ContextLength: 2000000,
+			MaxTokens: 256000,
+			Models: []config.ComboModelRef{
+				{Provider: "codex", Model: "gpt-6-astra"},
+			},
+		},
+	}})
+	defer combos.SyncFromConfig(&config.Config{})
+
+	s := &Server{}
+	r := gin.New()
+
+	// 1. Test OpenAI format: /v1/models
+	r.GET("/v1/models", s.combosAugmentModels(func(c *gin.Context) {
+		if isAnthropicModelsRequest(c) {
+			c.JSON(200, gin.H{
+				"data": []gin.H{
+					{"id": "claude-sonnet-4-6", "type": "model", "display_name": "Claude 4.6 Sonnet"},
+				},
+				"first_id": "claude-sonnet-4-6",
+				"has_more": false,
+			})
+			return
+		}
+		c.JSON(200, gin.H{
+			"object": "list",
+			"data": []gin.H{
+				{"id": "gpt-6-astra", "owned_by": "codex"},
+			},
+		})
+	}))
+	r.GET("/v1/models/:model", s.getModelHandler())
+
+	// Verify OpenAI /v1/models response
+	{
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("GET", "/v1/models", nil))
+		if w.Code != 200 {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+		var resp struct {
+			Data []struct {
+				ID            string `json:"id"`
+				ContextLength int    `json:"context_length"`
+				MaxTokens     int    `json:"max_tokens"`
+			} `json:"data"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		var leaderFound, customFound bool
+		for _, m := range resp.Data {
+			if m.ID == "leader" {
+				leaderFound = true
+				if m.ContextLength < 1000000 {
+					t.Fatalf("expected leader context_length >= 1000000, got %d", m.ContextLength)
+				}
+				if m.MaxTokens < 128000 {
+					t.Fatalf("expected leader max_tokens >= 128000, got %d", m.MaxTokens)
+				}
+			}
+			if m.ID == "custom-2m" {
+				customFound = true
+				if m.ContextLength != 2000000 {
+					t.Fatalf("expected custom-2m context_length == 2000000, got %d", m.ContextLength)
+				}
+			}
+		}
+		if !leaderFound || !customFound {
+			t.Fatalf("expected both combos in OpenAI /v1/models")
+		}
+	}
+
+	// Verify Anthropic format /v1/models response (with Anthropic-Version header)
+	{
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/v1/models", nil)
+		req.Header.Set("Anthropic-Version", "2023-06-01")
+		r.ServeHTTP(w, req)
+		if w.Code != 200 {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+		var resp struct {
+			Data []struct {
+				ID             string `json:"id"`
+				Type           string `json:"type"`
+				MaxInputTokens int    `json:"max_input_tokens"`
+				ContextLength  int    `json:"context_length"`
+			} `json:"data"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		var leaderFound bool
+		for _, m := range resp.Data {
+			if m.ID == "leader" {
+				leaderFound = true
+				if m.ContextLength < 1000000 || m.MaxInputTokens < 1000000 {
+					t.Fatalf("expected leader in Anthropic format to have >= 1M context, got ctx=%d, max_input=%d", m.ContextLength, m.MaxInputTokens)
+				}
+			}
+		}
+		if !leaderFound {
+			t.Fatalf("expected leader combo in Anthropic /v1/models response")
+		}
+	}
+
+	// Verify GET /v1/models/:model endpoint for direct model query
+	{
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("GET", "/v1/models/leader", nil))
+		if w.Code != 200 {
+			t.Fatalf("expected 200 for /v1/models/leader, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			ID            string `json:"id"`
+			ContextLength int    `json:"context_length"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		if resp.ID != "leader" || resp.ContextLength < 1000000 {
+			t.Fatalf("unexpected single model response: %+v", resp)
+		}
+	}
+}
