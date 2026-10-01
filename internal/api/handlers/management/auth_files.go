@@ -698,6 +698,12 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quotaSupported .
 			entry["needs_verification"] = true
 		}
 	}
+	if auth.Metadata != nil && entry["validation_url"] == nil {
+		if valURL, ok := auth.Metadata["validation_url"].(string); ok && strings.TrimSpace(valURL) != "" {
+			entry["validation_url"] = strings.TrimSpace(valURL)
+			entry["needs_verification"] = true
+		}
+	}
 	if statusMessage == "verification_required" {
 		entry["needs_verification"] = true
 	}

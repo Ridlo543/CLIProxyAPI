@@ -273,6 +273,9 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) ([
 			}
 		}
 	}
+	if valURL, ok := metadata["validation_url"].(string); ok && strings.TrimSpace(valURL) != "" {
+		a.Attributes["validation_url"] = strings.TrimSpace(valURL)
+	}
 	return []*coreauth.Auth{a}, nil
 }
 
