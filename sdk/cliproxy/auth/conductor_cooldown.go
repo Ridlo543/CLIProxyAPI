@@ -410,6 +410,10 @@ func clearCooldownStateForAuth(auth *Auth, now time.Time) bool {
 	if auth.Unavailable || !auth.NextRetryAfter.IsZero() || auth.Quota.Exceeded || !auth.Quota.NextRecoverAt.IsZero() {
 		auth.Unavailable = false
 		auth.NextRetryAfter = time.Time{}
+		auth.StatusMessage = ""
+		if auth.Attributes != nil {
+			delete(auth.Attributes, "validation_url")
+		}
 		applyCooldownFields(&auth.Quota, QuotaState{})
 		auth.UpdatedAt = now
 		changed = true
@@ -851,6 +855,14 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 						} else {
 							state.NextRetryAfter = now.Add(30 * time.Minute)
 						}
+					} else if isVerificationRequiredResultError(result.Error) {
+						if disableCooling {
+							state.NextRetryAfter = time.Time{}
+						} else {
+							state.NextRetryAfter = now.Add(24 * time.Hour)
+						}
+						state.StatusMessage = "verification_required"
+						state.Unavailable = true
 					} else {
 						switch statusCode {
 						case 401, 402, 403:
@@ -1520,6 +1532,10 @@ func resultErrorFromError(err error) *Error {
 		if resultErr.Code == "" {
 			resultErr.Code = ErrorCodeUpstreamRateLimit
 		}
+	case isVerificationRequiredError(err):
+		if resultErr.Code == "" {
+			resultErr.Code = ErrorCodeVerificationRequired
+		}
 	}
 	return resultErr
 }
@@ -1854,6 +1870,46 @@ func isInvalidGrantResultError(err *Error) bool {
 		return true
 	}
 	return false
+}
+
+func isVerificationRequiredError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "VALIDATION_REQUIRED") || strings.Contains(msg, "verification_required")
+}
+
+func isVerificationRequiredResultError(err *Error) bool {
+	if err == nil {
+		return false
+	}
+	if err.Code == ErrorCodeVerificationRequired {
+		return true
+	}
+	return strings.Contains(err.Message, "VALIDATION_REQUIRED") || strings.Contains(err.Message, "verification_required")
+}
+
+func extractValidationURLFromMessage(msg string) string {
+	if !strings.Contains(msg, "validation_url") {
+		return ""
+	}
+	idx := strings.Index(msg, "validation_url")
+	if idx < 0 {
+		return ""
+	}
+	sub := msg[idx:]
+	// Look for url pattern https://accounts.google.com...
+	httpIdx := strings.Index(sub, "https://")
+	if httpIdx < 0 {
+		return ""
+	}
+	urlPart := sub[httpIdx:]
+	endIdx := strings.IndexAny(urlPart, `"' \t\r\n`)
+	if endIdx > 0 {
+		return urlPart[:endIdx]
+	}
+	return urlPart
 }
 
 func isModelSupportResultError(err *Error) bool {
@@ -2280,6 +2336,20 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 			auth.NextRetryAfter = time.Time{}
 		} else {
 			auth.NextRetryAfter = now.Add(30 * time.Minute)
+		}
+	} else if isVerificationRequiredResultError(resultErr) {
+		auth.StatusMessage = "verification_required"
+		auth.Unavailable = true
+		if disableCooling {
+			auth.NextRetryAfter = time.Time{}
+		} else {
+			auth.NextRetryAfter = now.Add(24 * time.Hour)
+		}
+		if valURL := extractValidationURLFromMessage(resultErr.Message); valURL != "" {
+			if auth.Attributes == nil {
+				auth.Attributes = make(map[string]string)
+			}
+			auth.Attributes["validation_url"] = valURL
 		}
 	} else {
 		switch statusCode {

@@ -37,6 +37,9 @@ const ErrorCodeForceCooldown = "force_cooldown"
 // quota, which would mislabel a healthy credential and start the quota ladder.
 const ErrorCodeUpstreamRateLimit = "upstream_rate_limit"
 
+// ErrorCodeVerificationRequired marks a failure where the provider requires user
+// interactive verification (such as Google Antigravity 403 VALIDATION_REQUIRED).
+const ErrorCodeVerificationRequired = "verification_required"
 // Error describes an authentication related failure in a provider agnostic format.
 type Error struct {
 	// Code is a short machine readable identifier.

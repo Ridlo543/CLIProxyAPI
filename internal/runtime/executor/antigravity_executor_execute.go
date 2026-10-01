@@ -179,6 +179,15 @@ func (e *AntigravityExecutor) Execute(ctx context.Context, auth *cliproxyauth.Au
 			// Report the upstream failure rather than the cleanup failure.
 			logAntigravityReasoningReplayDegraded(replayScope, "invalidate", errClear)
 		}
+		if httpResp.StatusCode == http.StatusForbidden && auth != nil {
+			if valURL := extractAntigravityValidationURL(bodyBytes); valURL != "" {
+				if auth.Attributes == nil {
+					auth.Attributes = make(map[string]string)
+				}
+				auth.Attributes["validation_url"] = valURL
+				log.Warnf("antigravity executor: account %s requires verification: %s", auth.ID, valURL)
+			}
+		}
 		err = newAntigravityStatusErr(httpResp.StatusCode, bodyBytes)
 		return resp, err
 	}

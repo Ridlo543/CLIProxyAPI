@@ -692,6 +692,18 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quotaSupported .
 		"source":         "memory",
 		"size":           int64(0),
 	}
+	if auth.Attributes != nil {
+		if valURL := strings.TrimSpace(auth.Attributes["validation_url"]); valURL != "" {
+			entry["validation_url"] = valURL
+			entry["needs_verification"] = true
+		}
+	}
+	if statusMessage == "verification_required" {
+		entry["needs_verification"] = true
+	}
+	if !nextRetryAfter.IsZero() {
+		entry["next_retry_after"] = nextRetryAfter
+	}
 	if !auth.Quota.NextRecoverAt.IsZero() {
 		// Expose the credential's cooldown expiry so management clients can
 		// render a countdown instead of guessing from status alone.

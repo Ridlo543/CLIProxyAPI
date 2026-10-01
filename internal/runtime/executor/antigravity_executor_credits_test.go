@@ -777,3 +777,16 @@ func TestNewAntigravityStatusErr_NonRateLimitUnclassified(t *testing.T) {
 		t.Fatalf("UpstreamRateLimit() = true for a 503, want false")
 	}
 }
+
+func TestNewAntigravityStatusErr_ValidationRequired(t *testing.T) {
+	body := `{"error":{"code":403,"message":"Verify your account to continue.","status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"VALIDATION_REQUIRED","domain":"cloudcode-pa.googleapis.com","metadata":{"validation_error_message":"Verify your account to continue.","validation_url":"https://accounts.google.com/signin/continue?sarp=1&scc=1&plt=xyz"}}]}}`
+	err := newAntigravityStatusErr(http.StatusForbidden, []byte(body))
+	if !err.IsCredentialScoped() {
+		t.Fatalf("expected IsCredentialScoped() = true for VALIDATION_REQUIRED 403")
+	}
+	valURL := extractAntigravityValidationURL([]byte(body))
+	wantURL := "https://accounts.google.com/signin/continue?sarp=1&scc=1&plt=xyz"
+	if valURL != wantURL {
+		t.Fatalf("extractAntigravityValidationURL() = %q, want %q", valURL, wantURL)
+	}
+}

@@ -343,6 +343,24 @@ func antigravityHasExplicitCreditsBalanceExhaustedReason(body []byte) bool {
 	return false
 }
 
+func extractAntigravityValidationURL(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	parsed := gjson.ParseBytes(body)
+	details := parsed.Get("error.details")
+	if details.IsArray() {
+		for _, d := range details.Array() {
+			if d.Get("reason").String() == "VALIDATION_REQUIRED" {
+				if u := d.Get("metadata.validation_url").String(); u != "" {
+					return u
+				}
+			}
+		}
+	}
+	return ""
+}
+
 func newAntigravityStatusErr(statusCode int, body []byte) statusErr {
 	err := statusErr{code: statusCode, msg: string(body)}
 	if statusCode == http.StatusTooManyRequests {
@@ -352,6 +370,10 @@ func newAntigravityStatusErr(statusCode int, body []byte) statusErr {
 		// Google answers a bare RESOURCE_EXHAUSTED for rejections unrelated to the
 		// credential's remaining allowance; those must not read as spent quota.
 		err.upstreamRateLimit = decideAntigravity429(body).kind == antigravity429DecisionSoftRetry
+	} else if statusCode == http.StatusForbidden {
+		if strings.Contains(string(body), "VALIDATION_REQUIRED") {
+			err.credentialScoped = true
+		}
 	}
 	return err
 }

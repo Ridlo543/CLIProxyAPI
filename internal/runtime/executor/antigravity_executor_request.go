@@ -426,6 +426,14 @@ func antigravityConfiguredUserAgent(auth *cliproxyauth.Auth) string {
 			if ua := strings.TrimSpace(auth.Attributes["user_agent"]); ua != "" {
 				raw = ua
 			}
+			if raw == "" {
+				for k, v := range auth.Attributes {
+					if strings.EqualFold(k, "header:user-agent") && strings.TrimSpace(v) != "" {
+						raw = strings.TrimSpace(v)
+						break
+					}
+				}
+			}
 		}
 		if raw == "" && auth.Metadata != nil {
 			if ua, ok := auth.Metadata["user_agent"].(string); ok && strings.TrimSpace(ua) != "" {
