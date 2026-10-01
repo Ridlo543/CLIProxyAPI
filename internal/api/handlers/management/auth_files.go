@@ -728,6 +728,7 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quotaSupported .
 		"source":         "memory",
 		"size":           int64(0),
 		"proxy_pool":     auth.ProxyPool,
+		"proxy_url":      auth.ProxyURL,
 	}
 	if auth.Attributes != nil {
 		if valURL := strings.TrimSpace(auth.Attributes["validation_url"]); valURL != "" {

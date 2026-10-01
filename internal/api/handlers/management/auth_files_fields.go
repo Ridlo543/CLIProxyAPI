@@ -612,6 +612,15 @@ func syncAuthFileMetadataFields(auth *coreauth.Auth, touchedRoots map[string]str
 	if _, ok := touchedRoots["proxy_url"]; ok {
 		if proxyURL, okString := auth.Metadata["proxy_url"].(string); okString {
 			auth.ProxyURL = strings.TrimSpace(proxyURL)
+		} else if auth.Metadata["proxy_url"] == nil {
+			auth.ProxyURL = ""
+		}
+	}
+	if _, ok := touchedRoots["proxy_pool"]; ok {
+		if proxyPool, okString := auth.Metadata["proxy_pool"].(string); okString {
+			auth.ProxyPool = strings.TrimSpace(proxyPool)
+		} else if auth.Metadata["proxy_pool"] == nil {
+			auth.ProxyPool = ""
 		}
 	}
 	if _, ok := touchedRoots["headers"]; ok {
