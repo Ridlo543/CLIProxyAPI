@@ -3,6 +3,7 @@ package management
 import (
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -86,16 +87,92 @@ func (h *Handler) GetClientAPIKeyUsage(c *gin.Context) {
 		}
 	}
 	h.mu.Unlock()
-
 	now := time.Now()
-	from := now.Add(-30 * 24 * time.Hour)
+	from := now.Add(-24 * time.Hour)
 	to := now
+
+	fromStr := strings.TrimSpace(c.Query("from_ms"))
+	toStr := strings.TrimSpace(c.Query("to_ms"))
+	rangeStr := strings.ToLower(strings.TrimSpace(c.Query("range")))
+
+	if fromStr != "" {
+		if ms, err := strconv.ParseInt(fromStr, 10, 64); err == nil && ms > 0 {
+			from = time.UnixMilli(ms)
+		}
+	}
+	if toStr != "" {
+		if ms, err := strconv.ParseInt(toStr, 10, 64); err == nil && ms > 0 {
+			to = time.UnixMilli(ms)
+		}
+	}
+
+	if fromStr == "" && rangeStr != "" {
+		switch rangeStr {
+		case "today":
+			y, m, d := now.Date()
+			from = time.Date(y, m, d, 0, 0, 0, 0, now.Location())
+			to = now
+		case "24h":
+			from = now.Add(-24 * time.Hour)
+			to = now
+		case "7d":
+			from = now.Add(-7 * 24 * time.Hour)
+			to = now
+		case "30d":
+			from = now.Add(-30 * 24 * time.Hour)
+			to = now
+		case "all":
+			from = time.UnixMilli(1)
+			to = now
+		}
+	}
+
+	if c.Request != nil && c.Request.Method == http.MethodPost && c.Request.Body != nil {
+		var bodyReq struct {
+			FromMs int64  `json:"from_ms"`
+			ToMs   int64  `json:"to_ms"`
+			Range  string `json:"range"`
+		}
+		if err := c.ShouldBindJSON(&bodyReq); err == nil {
+			if bodyReq.FromMs > 0 {
+				from = time.UnixMilli(bodyReq.FromMs)
+			}
+			if bodyReq.ToMs > 0 {
+				to = time.UnixMilli(bodyReq.ToMs)
+			}
+			if bodyReq.Range != "" && bodyReq.FromMs == 0 {
+				rangeStr = strings.ToLower(strings.TrimSpace(bodyReq.Range))
+				switch rangeStr {
+				case "today":
+					y, m, d := now.Date()
+					from = time.Date(y, m, d, 0, 0, 0, 0, now.Location())
+					to = now
+				case "24h":
+					from = now.Add(-24 * time.Hour)
+					to = now
+				case "7d":
+					from = now.Add(-7 * 24 * time.Hour)
+					to = now
+				case "30d":
+					from = now.Add(-30 * 24 * time.Hour)
+					to = now
+				case "all":
+					from = time.UnixMilli(1)
+					to = now
+				}
+			}
+		}
+	}
+
+	if !to.After(from) {
+		to = from.Add(time.Second)
+	}
 
 	events := usagestore.Default().Query(from, to)
 
 	index := make(map[string]*clientKeyAgg)
 
-	// ONLY initialize and include currently configured keys (no obsolete/deleted keys)
+	// 1. Initialize configured keys so they are present in the list
 	for _, k := range configuredKeys {
 		name := keyNames[k]
 		if name == "" {
@@ -108,16 +185,24 @@ func (h *Handler) GetClientAPIKeyUsage(c *gin.Context) {
 		}
 	}
 
-	// Aggregate events ONLY for valid configured keys
+	// 2. Aggregate events for the given timeframe (including active unlisted/direct keys)
 	for _, ev := range events {
 		k := strings.TrimSpace(ev.APIKey)
 		if k == "" {
-			continue
+			k = "direct"
 		}
 		a, ok := index[k]
 		if !ok {
-			// Skip deleted / obsolete keys that are no longer in config
-			continue
+			name := "unlisted-key"
+			if k == "direct" {
+				name = "Direct / Keyless"
+			}
+			a = &clientKeyAgg{
+				key:       k,
+				name:      name,
+				maskedKey: maskClientKey(k),
+			}
+			index[k] = a
 		}
 		a.calls++
 		if ev.Failed || ev.StatusCod >= 400 {
@@ -221,5 +306,10 @@ func (h *Handler) GetClientAPIKeyUsage(c *gin.Context) {
 		return result[i].Calls > result[j].Calls
 	})
 
-	c.JSON(http.StatusOK, gin.H{"client_keys": result})
+	c.JSON(http.StatusOK, gin.H{
+		"from_ms":     from.UnixMilli(),
+		"to_ms":       to.UnixMilli(),
+		"range":       rangeStr,
+		"client_keys": result,
+	})
 }

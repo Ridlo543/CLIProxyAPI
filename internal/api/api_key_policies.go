@@ -110,26 +110,28 @@ func APIKeyPolicyMiddleware() gin.HandlerFunc {
 			return
 		}
 		model := extractRequestedModel(c)
-		if !enforcer.CheckModel(key, model) {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "model_not_allowed"})
-			return
-		}
-		if pinned := enforcer.PinnedProviderForModel(key, model); pinned != "" {
-			if c.Request != nil && c.Request.Header.Get("X-Provider") == "" {
-				c.Request.Header.Set("X-Provider", pinned)
+		if model != "" {
+			if !enforcer.CheckModel(key, model) {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "model_not_allowed"})
+				return
 			}
-		}
-		candidates, known := modelKnownToRegistry(model)
-		if pinned := enforcer.PinnedProviderForModel(key, model); pinned != "" {
-			candidates = append(candidates, pinned)
-			known = true
-		}
-		if !enforcer.CheckProviders(key, candidates, known) {
-			// Unknown models cannot be attributed to a provider; they pass the
-			// provider check only when no provider restriction is configured
-			// (CheckProviders already handles that case).
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "provider_not_allowed"})
-			return
+			if pinned := enforcer.PinnedProviderForModel(key, model); pinned != "" {
+				if c.Request != nil && c.Request.Header.Get("X-Provider") == "" {
+					c.Request.Header.Set("X-Provider", pinned)
+				}
+			}
+			candidates, known := modelKnownToRegistry(model)
+			if pinned := enforcer.PinnedProviderForModel(key, model); pinned != "" {
+				candidates = append(candidates, pinned)
+				known = true
+			}
+			if !enforcer.CheckProviders(key, candidates, known) {
+				// Unknown models cannot be attributed to a provider; they pass the
+				// provider check only when no provider restriction is configured
+				// (CheckProviders already handles that case).
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "provider_not_allowed"})
+				return
+			}
 		}
 		if !enforcer.CheckRateLimit(key) {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "rate_limit_exceeded"})

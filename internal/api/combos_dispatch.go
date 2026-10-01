@@ -198,7 +198,6 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 				data = append(data, m)
 			}
 		}
-
 		for _, cmb := range combos.Snapshot() {
 			ctxLen, maxTok := ResolveComboDefaults(cmb)
 
@@ -232,7 +231,7 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 			data = append(data, entry)
 		}
 
-		// Also expose provider-namespaced IDs (e.g. openagentic/gpt-6-astra, codex/gpt-6-astra, antigravity/gemini-3.8-flash-high)
+		// Also expose provider-namespaced IDs (e.g. agentrouter/gpt-6-astra, openagentic/gpt-6-astra, codex/gpt-6-astra, antigravity/gemini-3.8-flash-high)
 		// so IDEs and tooling can explicitly choose a provider's model directly.
 		existingIDs := make(map[string]struct{}, len(data))
 		for _, d := range data {
@@ -240,22 +239,121 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 				existingIDs[id] = struct{}{}
 			}
 		}
+
+		// 1. Expose provider-namespaced IDs for all serving providers from the registry
 		for _, d := range data {
 			id, okId := d["id"].(string)
 			ownedBy, okOwn := d["owned_by"].(string)
-			if !okId || !okOwn || id == "" || ownedBy == "" || ownedBy == "combos" {
+			if !okId || id == "" || ownedBy == "combos" || strings.Contains(id, "/") {
 				continue
 			}
-			prov := strings.TrimPrefix(ownedBy, "openai-compatible-")
-			namespacedID := prov + "/" + id
-			if _, exists := existingIDs[namespacedID]; !exists {
-				entry := make(map[string]any, len(d))
-				for k, v := range d {
-					entry[k] = v
+			for _, p := range registry.GetGlobalRegistry().GetModelProviders(id) {
+				prov := strings.ToLower(strings.TrimPrefix(p, "openai-compatible-"))
+				if prov == "" {
+					continue
 				}
-				entry["id"] = namespacedID
-				existingIDs[namespacedID] = struct{}{}
-				data = append(data, entry)
+				namespacedID := prov + "/" + id
+				if _, exists := existingIDs[namespacedID]; !exists {
+					entry := make(map[string]any, len(d))
+					for k, v := range d {
+						entry[k] = v
+					}
+					entry["id"] = namespacedID
+					entry["owned_by"] = prov
+					existingIDs[namespacedID] = struct{}{}
+					data = append(data, entry)
+				}
+			}
+			if okOwn && ownedBy != "" {
+				prov := strings.ToLower(strings.TrimPrefix(ownedBy, "openai-compatible-"))
+				namespacedID := prov + "/" + id
+				if _, exists := existingIDs[namespacedID]; !exists {
+					entry := make(map[string]any, len(d))
+					for k, v := range d {
+						entry[k] = v
+					}
+					entry["id"] = namespacedID
+					existingIDs[namespacedID] = struct{}{}
+					data = append(data, entry)
+				}
+			}
+		}
+
+		// 2. Explicitly expose all models from configured OpenAICompatibility providers (agentrouter, dahono, etc.)
+		if s != nil && s.cfg != nil {
+			for _, compat := range s.cfg.OpenAICompatibility {
+				if compat.Disabled {
+					continue
+				}
+				provName := strings.ToLower(strings.TrimSpace(compat.Name))
+				if provName == "" {
+					continue
+				}
+				for _, m := range compat.Models {
+					mName := strings.TrimSpace(m.Name)
+					if mName == "" {
+						continue
+					}
+					bareName := strings.TrimPrefix(mName, provName+"/")
+					namespacedID := provName + "/" + bareName
+
+					ctxLen := 1000000
+					maxTok := 128000
+					if info := registry.LookupStaticModelInfo(bareName); info != nil {
+						if info.ContextLength > 0 {
+							ctxLen = info.ContextLength
+						}
+						if info.MaxCompletionTokens > 0 {
+							maxTok = info.MaxCompletionTokens
+						} else if info.OutputTokenLimit > 0 {
+							maxTok = info.OutputTokenLimit
+						}
+					}
+
+					if _, exists := existingIDs[namespacedID]; !exists {
+						entry := map[string]any{
+							"id":                    namespacedID,
+							"object":                "model",
+							"owned_by":              provName,
+							"type":                  "openai-compatibility",
+							"context_length":        ctxLen,
+							"max_context_length":    ctxLen,
+							"inputTokenLimit":       ctxLen,
+							"max_completion_tokens": maxTok,
+							"max_tokens":            maxTok,
+							"outputTokenLimit":      maxTok,
+						}
+						if isAnthropic {
+							entry["type"] = "model"
+							entry["display_name"] = namespacedID
+							entry["max_input_tokens"] = ctxLen
+						}
+						existingIDs[namespacedID] = struct{}{}
+						data = append(data, entry)
+					}
+
+					if _, exists := existingIDs[bareName]; !exists {
+						entry := map[string]any{
+							"id":                    bareName,
+							"object":                "model",
+							"owned_by":              provName,
+							"type":                  "openai-compatibility",
+							"context_length":        ctxLen,
+							"max_context_length":    ctxLen,
+							"inputTokenLimit":       ctxLen,
+							"max_completion_tokens": maxTok,
+							"max_tokens":            maxTok,
+							"outputTokenLimit":      maxTok,
+						}
+						if isAnthropic {
+							entry["type"] = "model"
+							entry["display_name"] = bareName
+							entry["max_input_tokens"] = ctxLen
+						}
+						existingIDs[bareName] = struct{}{}
+						data = append(data, entry)
+					}
+				}
 			}
 		}
 

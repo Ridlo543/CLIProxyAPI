@@ -74,7 +74,7 @@ func (s *Server) setupRoutes() {
 	v1.Use(AuthMiddleware(s.accessManager), APIKeyPolicyMiddleware())
 	{
 		v1.GET("/models", s.combosAugmentModels(s.unifiedModelsHandler(openaiHandlers, claudeCodeHandlers)))
-		v1.GET("/models/:model", s.getModelHandler())
+		v1.GET("/models/*model", s.getModelHandler())
 		v1.POST("/chat/completions", s.combosChatWrapper(openaiHandlers.ChatCompletions))
 		v1.POST("/completions", s.combosChatWrapper(openaiHandlers.Completions))
 		v1.POST("/images/generations", openaiHandlers.ImagesGenerations)
@@ -649,7 +649,7 @@ func (s *Server) unifiedModelsHandler(openaiHandler *openai.OpenAIAPIHandler, cl
 
 func (s *Server) getModelHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		modelID := strings.TrimSpace(c.Param("model"))
+		modelID := strings.TrimPrefix(strings.TrimSpace(c.Param("model")), "/")
 		if modelID == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "model id required"})
 			return
@@ -703,6 +703,46 @@ func (s *Server) getModelHandler() gin.HandlerFunc {
 		if info == nil {
 			info = registry.LookupStaticModelInfo(modelID)
 		}
+
+		// 3. Namespaced model lookup (e.g. "agentrouter/gpt-6-astra" or "dahono/deepseek-v4-flash")
+		reqProv, bareModel, hasSlash := strings.Cut(modelID, "/")
+		if info == nil && hasSlash && bareModel != "" {
+			info = reg.GetModelInfo(bareModel, "")
+			if info == nil {
+				info = registry.LookupStaticModelInfo(bareModel)
+			}
+			if info != nil {
+				cloned := *info
+				cloned.ID = modelID
+				cloned.OwnedBy = reqProv
+				info = &cloned
+			} else if s != nil && s.cfg != nil {
+				// Check configured OpenAICompatibility models
+				for _, compat := range s.cfg.OpenAICompatibility {
+					if !compat.Disabled && strings.EqualFold(compat.Name, reqProv) {
+						for _, m := range compat.Models {
+							cleanName := strings.TrimPrefix(strings.TrimSpace(m.Name), reqProv+"/")
+							if strings.EqualFold(cleanName, bareModel) || strings.EqualFold(m.Name, modelID) {
+								info = &registry.ModelInfo{
+									ID:                  modelID,
+									Object:              "model",
+									DisplayName:         modelID,
+									OwnedBy:             reqProv,
+									Type:                "openai-compatibility",
+									ContextLength:       1000000,
+									MaxCompletionTokens: 128000,
+								}
+								break
+							}
+						}
+					}
+					if info != nil {
+						break
+					}
+				}
+			}
+		}
+
 		if info == nil {
 			c.JSON(http.StatusNotFound, gin.H{
 				"error": gin.H{

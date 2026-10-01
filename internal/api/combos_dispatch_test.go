@@ -261,7 +261,7 @@ func TestCombosContextWindowDefault1M_OpenAI_and_Anthropic(t *testing.T) {
 			},
 		})
 	}))
-	r.GET("/v1/models/:model", s.getModelHandler())
+	r.GET("/v1/models/*model", s.getModelHandler())
 
 	// Verify OpenAI /v1/models response
 	{
@@ -356,6 +356,94 @@ func TestCombosContextWindowDefault1M_OpenAI_and_Anthropic(t *testing.T) {
 		_ = json.Unmarshal(w.Body.Bytes(), &resp)
 		if resp.ID != "gemini-combo" || resp.ContextLength != 1048576 {
 			t.Fatalf("unexpected single model response: %+v", resp)
+		}
+	}
+}
+
+func TestCustomCompatProvidersExposedInModelsList(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{
+		OpenAICompatibility: []config.OpenAICompatibility{
+			{
+				Name: "agentrouter",
+				Models: []config.OpenAICompatibilityModel{
+					{Name: "gpt-6-astra"},
+					{Name: "claude-opus-4-8"},
+					{Name: "deepseek-v4-flash"},
+				},
+			},
+			{
+				Name: "dahono",
+				Models: []config.OpenAICompatibilityModel{
+					{Name: "dahono/deepseek-v4-flash"},
+					{Name: "ai-chat"},
+				},
+			},
+		},
+	}
+
+	s := &Server{cfg: cfg}
+	r := gin.New()
+	r.GET("/v1/models", s.combosAugmentModels(func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"object": "list",
+			"data": []gin.H{
+				{"id": "gpt-6-astra", "owned_by": "openai"},
+				{"id": "gemini-3.8-flash-high", "owned_by": "antigravity"},
+			},
+		})
+	}))
+	r.GET("/v1/models/*model", s.getModelHandler())
+
+	// 1. Verify GET /v1/models contains agentrouter/gpt-6-astra, dahono/ai-chat, etc.
+	{
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("GET", "/v1/models", nil))
+		if w.Code != 200 {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+		var resp struct {
+			Data []struct {
+				ID      string `json:"id"`
+				OwnedBy string `json:"owned_by"`
+			} `json:"data"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+
+		ids := make(map[string]string)
+		for _, m := range resp.Data {
+			ids[m.ID] = m.OwnedBy
+		}
+
+		expectedIDs := []string{
+			"agentrouter/gpt-6-astra",
+			"agentrouter/claude-opus-4-8",
+			"agentrouter/deepseek-v4-flash",
+			"dahono/deepseek-v4-flash",
+			"dahono/ai-chat",
+			"ai-chat",
+		}
+		for _, expected := range expectedIDs {
+			if _, ok := ids[expected]; !ok {
+				t.Fatalf("expected model %q in /v1/models, but was missing. Available: %v", expected, ids)
+			}
+		}
+	}
+
+	// 2. Verify GET /v1/models/agentrouter/gpt-6-astra works directly
+	{
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("GET", "/v1/models/agentrouter/gpt-6-astra", nil))
+		if w.Code != 200 {
+			t.Fatalf("expected 200 for agentrouter/gpt-6-astra, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			ID      string `json:"id"`
+			OwnedBy string `json:"owned_by"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		if resp.ID != "agentrouter/gpt-6-astra" || resp.OwnedBy != "agentrouter" {
+			t.Fatalf("unexpected response: %+v", resp)
 		}
 	}
 }
