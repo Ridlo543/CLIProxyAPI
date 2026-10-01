@@ -452,3 +452,12 @@ func TestManager_MarkResult_CredentialScopeDoesNotInheritModelBackoffLevel(t *te
 		})
 	}
 }
+
+func TestExtractValidationURLFromMessage(t *testing.T) {
+	raw := `{"error":{"code":403,"message":"Verify your account to continue.","status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"VALIDATION_REQUIRED","domain":"cloudcode-pa.googleapis.com","metadata":{"validation_error_message":"Verify your account to continue.","validation_url":"https://accounts.google.com/signin/continue?sarp=1&scc=1&continue=https://developers.google.com/gemini-code-assist/auth/auth_success_gemini&plt=AKgnsbuM4VG7MuDLNcMMN6k58nk3JRtUDfVicoUUsvszggM2IejYl8gOCozX3PmTaDBFEHX3EtKhcX-42le2niuNUHfBM-kwdLmgayeRWO61es4bX8K5JJT16Y7t_wezWPXdWyzSG0xx&flowName=GlifWebSignIn&authuser"}}]}}`
+	url := extractValidationURLFromMessage(raw)
+	want := "https://accounts.google.com/signin/continue?sarp=1&scc=1&continue=https://developers.google.com/gemini-code-assist/auth/auth_success_gemini&plt=AKgnsbuM4VG7MuDLNcMMN6k58nk3JRtUDfVicoUUsvszggM2IejYl8gOCozX3PmTaDBFEHX3EtKhcX-42le2niuNUHfBM-kwdLmgayeRWO61es4bX8K5JJT16Y7t_wezWPXdWyzSG0xx&flowName=GlifWebSignIn&authuser"
+	if url != want {
+		t.Fatalf("extractValidationURLFromMessage() = %q, want %q", url, want)
+	}
+}

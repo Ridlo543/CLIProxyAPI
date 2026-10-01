@@ -503,6 +503,37 @@ func (h *Handler) listAuthFilesFromDisk(c *gin.Context, pagination authFilesPagi
 	c.JSON(200, authFilesListResponse(observedAt, files, pagination, total, end))
 }
 
+func extractValidationURLFromText(msg string) string {
+	if len(msg) == 0 {
+		return ""
+	}
+	if gjson.Valid(msg) {
+		parsed := gjson.Parse(msg)
+		details := parsed.Get("error.details")
+		if details.IsArray() {
+			for _, d := range details.Array() {
+				if d.Get("reason").String() == "VALIDATION_REQUIRED" {
+					if u := d.Get("metadata.validation_url").String(); u != "" {
+						return u
+					}
+				}
+			}
+		}
+	}
+	start := strings.Index(msg, "https://accounts.google.com")
+	if start < 0 {
+		return ""
+	}
+	sub := msg[start:]
+	end := strings.IndexFunc(sub, func(r rune) bool {
+		return r == '"' || r == '\'' || r == ' ' || r == '\t' || r == '\r' || r == '\n' || r == '\\'
+	})
+	if end > 0 {
+		return sub[:end]
+	}
+	return sub
+}
+
 func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth, quotaSupported ...map[string]struct{}) gin.H {
 	authFileEntryMu.Lock()
 	defer authFileEntryMu.Unlock()
@@ -523,6 +554,11 @@ func isPersistentAuthFailure(auth *coreauth.Auth, now time.Time) bool {
 	}
 	// An explicit token expiration status.
 	if strings.EqualFold(strings.TrimSpace(auth.StatusMessage), "token expired") {
+		return true
+	}
+	if (auth.Attributes != nil && auth.Attributes["validation_url"] != "") ||
+		strings.Contains(auth.StatusMessage, "verification_required") ||
+		strings.Contains(auth.StatusMessage, "VALIDATION_REQUIRED") {
 		return true
 	}
 	return false
@@ -691,6 +727,7 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quotaSupported .
 		"runtime_only":   runtimeOnly,
 		"source":         "memory",
 		"size":           int64(0),
+		"proxy_pool":     auth.ProxyPool,
 	}
 	if auth.Attributes != nil {
 		if valURL := strings.TrimSpace(auth.Attributes["validation_url"]); valURL != "" {
@@ -704,8 +741,22 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quotaSupported .
 			entry["needs_verification"] = true
 		}
 	}
+	rawMsg := auth.StatusMessage
+	if auth.LastError != nil && strings.Contains(auth.LastError.Message, "validation_url") {
+		rawMsg = auth.LastError.Message
+	}
+	if strings.Contains(rawMsg, "VALIDATION_REQUIRED") || strings.Contains(rawMsg, "verification_required") {
+		entry["needs_verification"] = true
+		entry["status_message"] = "verification_required"
+		if entry["validation_url"] == nil {
+			if valURL := extractValidationURLFromText(rawMsg); valURL != "" {
+				entry["validation_url"] = valURL
+			}
+		}
+	}
 	if statusMessage == "verification_required" {
 		entry["needs_verification"] = true
+		entry["status_message"] = "verification_required"
 	}
 	if !nextRetryAfter.IsZero() {
 		entry["next_retry_after"] = nextRetryAfter

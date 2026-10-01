@@ -863,6 +863,27 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 						}
 						state.StatusMessage = "verification_required"
 						state.Unavailable = true
+						auth.StatusMessage = "verification_required"
+						auth.Status = StatusError
+						auth.Unavailable = true
+						if !disableCooling {
+							auth.NextRetryAfter = now.Add(24 * time.Hour)
+						}
+						if valURL := extractValidationURLFromMessage(result.Error.Message); valURL != "" {
+							if auth.Attributes == nil {
+								auth.Attributes = make(map[string]string)
+							}
+							auth.Attributes["validation_url"] = valURL
+						}
+						for _, otherState := range auth.ModelStates {
+							if otherState != nil {
+								otherState.StatusMessage = "verification_required"
+								otherState.Unavailable = true
+								if !disableCooling {
+									otherState.NextRetryAfter = now.Add(24 * time.Hour)
+								}
+							}
+						}
 					} else {
 						switch statusCode {
 						case 401, 402, 403:
@@ -1891,25 +1912,18 @@ func isVerificationRequiredResultError(err *Error) bool {
 }
 
 func extractValidationURLFromMessage(msg string) string {
-	if !strings.Contains(msg, "validation_url") {
+	start := strings.Index(msg, "https://accounts.google.com")
+	if start < 0 {
 		return ""
 	}
-	idx := strings.Index(msg, "validation_url")
-	if idx < 0 {
-		return ""
+	sub := msg[start:]
+	end := strings.IndexFunc(sub, func(r rune) bool {
+		return r == '"' || r == '\'' || r == ' ' || r == '\t' || r == '\r' || r == '\n' || r == '\\'
+	})
+	if end > 0 {
+		return sub[:end]
 	}
-	sub := msg[idx:]
-	// Look for url pattern https://accounts.google.com...
-	httpIdx := strings.Index(sub, "https://")
-	if httpIdx < 0 {
-		return ""
-	}
-	urlPart := sub[httpIdx:]
-	endIdx := strings.IndexAny(urlPart, `"' \t\r\n`)
-	if endIdx > 0 {
-		return urlPart[:endIdx]
-	}
-	return urlPart
+	return sub
 }
 
 func isModelSupportResultError(err *Error) bool {
