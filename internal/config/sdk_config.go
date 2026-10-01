@@ -14,6 +14,10 @@ type SDKConfig struct {
 
 	// ModelGroups defines client-visible models backed by ordered fallback targets.
 	ModelGroups []ModelGroup `yaml:"model-groups,omitempty" json:"model-groups,omitempty"`
+	// OAuthOnlyFields records v8 provider settings that must wait for credential
+	// selection and must not affect API-key credentials. Config YAML snapshots
+	// preserve the corresponding v8 paths instead of serializing this metadata.
+	OAuthOnlyFields map[string]bool `yaml:"-" json:"-"`
 	// CodexResponseSteering mirrors the provider-wide runtime setting for API handlers.
 	CodexResponseSteering bool `yaml:"-" json:"-"`
 

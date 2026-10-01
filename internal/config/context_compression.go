@@ -58,10 +58,6 @@ func (c *ContextCompressionConfig) applyDefaults() {
 		c.RawCapBytes = 10 * 1024 * 1024
 	}
 }
-
-// applyBundledTAREFallback is a no-op kept for signature compatibility.
-func (c *ContextCompressionConfig) applyBundledTAREFallback() {}
-
 // Validate ensures engine and size bounds are safe and valid.
 func (c ContextCompressionConfig) Validate() error {
 	switch c.Engine {

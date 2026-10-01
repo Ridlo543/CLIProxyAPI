@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 )
 
 // softRateLimitResult models a 429 that carries no quota watermark at all: the

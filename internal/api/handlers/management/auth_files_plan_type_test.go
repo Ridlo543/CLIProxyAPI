@@ -3,7 +3,7 @@ package management
 import (
 	"testing"
 
-	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
 // Antigravity states its tier only through loadCodeAssist, so nothing is stored

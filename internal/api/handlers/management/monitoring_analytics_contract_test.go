@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagestore"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/usagestore"
 )
 
 // The control panel reads three things from this handler that it could not get

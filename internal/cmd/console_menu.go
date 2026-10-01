@@ -10,9 +10,9 @@ import (
 	"time"
 
 	xterm "github.com/charmbracelet/x/term"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/api"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/pluginhost"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/api"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginhost"
 )
 
 // ConsoleMenuOptions carries everything the interactive console menu needs to

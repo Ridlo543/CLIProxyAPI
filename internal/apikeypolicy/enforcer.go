@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/combos"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/combos"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 )
 
 type rateMinuteState struct {

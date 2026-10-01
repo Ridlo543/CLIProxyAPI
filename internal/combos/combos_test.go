@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 )
 
 func combo(name string, strategy config.ComboStrategy, members ...[2]string) config.ComboConfig {

@@ -5,9 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"time"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -100,9 +101,26 @@ func SanitizeStats(stats Stats) Stats {
 	if stats.ElapsedMS < 0 || stats.ElapsedMS > 9007199254740991 {
 		stats.ElapsedMS = 0
 	}
-	stats.Version = strings.TrimSpace(stats.Version)
-	stats.ManifestID = strings.TrimSpace(stats.ManifestID)
+	stats.Version = safeTelemetryVersion(strings.TrimSpace(stats.Version))
+	stats.ManifestID = safeTelemetryManifest(strings.TrimSpace(stats.ManifestID))
 	return stats
+}
+
+var telemetryVersionRE = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+var telemetryManifestRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
+func safeTelemetryVersion(v string) string {
+	if len(v) <= 16 && telemetryVersionRE.MatchString(v) {
+		return v
+	}
+	return ""
+}
+
+func safeTelemetryManifest(v string) string {
+	if telemetryManifestRE.MatchString(v) {
+		return v
+	}
+	return ""
 }
 
 // Apply returns a provider-facing copy. Parse/process failures never alter the original payload.

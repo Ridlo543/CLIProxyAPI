@@ -16,17 +16,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/contextcompression"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/interfaces"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/thinking"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
-	coreexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
-	coresession "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/session"
-	coreusage "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
+	internalconfig "github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/contextcompression"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/interfaces"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	coreexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	coresession "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/session"
+	coreusage "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/usage"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 	"github.com/tidwall/gjson"
 	"golang.org/x/net/context"
 )
@@ -135,6 +135,9 @@ func BuildErrorResponseBodyWithError(status int, errText string, err error) []by
 	case http.StatusNotFound:
 		errType = "invalid_request_error"
 		code = "model_not_found"
+	case http.StatusRequestTimeout:
+		errType = "server_error"
+		code = "request_timeout"
 	default:
 		if status >= http.StatusInternalServerError {
 			errType = "server_error"

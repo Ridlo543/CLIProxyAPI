@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 )
 
 func TestSanitizeOAuthModelAlias_PreservesOptionalFields(t *testing.T) {

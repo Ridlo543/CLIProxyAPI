@@ -16,10 +16,10 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/apikeypolicy"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/combos"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/apikeypolicy"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/combos"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 )
 // combosChatWrapper intercepts /v1/chat/completions when the requested model
 // names a combo. Each member is attempted by rewriting ONLY the "model" field
