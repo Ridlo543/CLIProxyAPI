@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/apikeypolicy"
@@ -444,6 +446,100 @@ func TestCustomCompatProvidersExposedInModelsList(t *testing.T) {
 		_ = json.Unmarshal(w.Body.Bytes(), &resp)
 		if resp.ID != "agentrouter/gpt-6-astra" || resp.OwnedBy != "agentrouter" {
 			t.Fatalf("unexpected response: %+v", resp)
+		}
+	}
+}
+
+func TestCombosContextAwareGuard_BestEffortAndSkip(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	combos.SyncFromConfig(&config.Config{Combos: []config.ComboConfig{
+		{
+			Name: "tiered-combo",
+			Strategy: "fallback",
+			Models: []config.ComboModelRef{
+				{Provider: "codex", Model: "gpt-6-astra"},
+				{Provider: "antigravity", Model: "gemini-3.8-flash-high"},
+			},
+		},
+		{
+			Name: "assistant-specialist-test",
+			Strategy: "fallback",
+			Models: []config.ComboModelRef{
+				{Provider: "antigravity", Model: "gemini-3.8-flash-high"},
+				{Provider: "antigravity", Model: "claude-opus-4-6-thinking"},
+			},
+		},
+	}})
+
+	registry.GetGlobalRegistry().RegisterClient("mock-client", "mixed", []*registry.ModelInfo{
+		{ID: "gpt-6-astra"},
+		{ID: "gemini-3.8-flash-high"},
+		{ID: "claude-opus-4-6-thinking"},
+	})
+	defer registry.GetGlobalRegistry().UnregisterClient("mock-client")
+
+	s := &Server{}
+	var attemptedModels []string
+	r := gin.New()
+	r.POST("/v1/chat/completions", s.combosChatWrapper(func(c *gin.Context) {
+		var req struct {
+			Model string `json:"model"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "bad json"})
+			return
+		}
+		attemptedModels = append(attemptedModels, req.Model)
+		c.JSON(200, gin.H{"choices": []gin.H{{"message": gin.H{"content": "ok"}}}})
+	}))
+
+	// 1. Payload of 2MB (~500k tokens at /4). Should skip gpt-6-astra (272k) and execute gemini-3.8-flash-high directly.
+	{
+		attemptedModels = nil
+		padding := strings.Repeat("x", 2*1024*1024)
+		body := fmt.Sprintf(`{"model":"tiered-combo","messages":[{"role":"user","content":"%s"}]}`, padding)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body)))
+
+		if w.Code != 200 {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		if len(attemptedModels) != 1 || attemptedModels[0] != "gemini-3.8-flash-high" {
+			t.Fatalf("expected only gemini-3.8-flash-high attempted (skipping 272k model), got: %v", attemptedModels)
+		}
+	}
+
+	// 2. 3.15 MB payload for assistant-specialist-test (~789k tokens at /4).
+	// With the new 4-byte heuristic, this fits within gemini-3.8-flash-high (1048576) and claude-opus-4-6-thinking (1000000).
+	{
+		attemptedModels = nil
+		padding := strings.Repeat("a", 315*1024*1024/100)
+		body := fmt.Sprintf(`{"model":"assistant-specialist-test","messages":[{"role":"user","content":"%s"}]}`, padding)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body)))
+
+		if w.Code != 200 {
+			t.Fatalf("expected 200 for 3.15MB payload, got %d: %s", w.Code, w.Body.String())
+		}
+		if len(attemptedModels) != 1 || attemptedModels[0] != "gemini-3.8-flash-high" {
+			t.Fatalf("expected gemini-3.8-flash-high to be attempted without false-skip, got: %v", attemptedModels)
+		}
+	}
+
+	// 3. Huge payload of 5MB (~1.25M tokens). Exceeds all models' context length.
+	// Should NOT return 502 "no attemptable members"; instead attempts the largest model as best-effort.
+	{
+		attemptedModels = nil
+		padding := strings.Repeat("z", 5*1024*1024)
+		body := fmt.Sprintf(`{"model":"assistant-specialist-test","messages":[{"role":"user","content":"%s"}]}`, padding)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body)))
+
+		if w.Code != 200 {
+			t.Fatalf("expected 200 via best-effort, got %d: %s", w.Code, w.Body.String())
+		}
+		if len(attemptedModels) == 0 {
+			t.Fatalf("expected at least one member attempted as best-effort, got none")
 		}
 	}
 }

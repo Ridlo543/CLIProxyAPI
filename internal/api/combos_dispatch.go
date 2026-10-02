@@ -80,6 +80,14 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 		originalWriter := c.Writer
 		var lastWriter *combosResponseWriter
 
+		// Precompute maximum context length among candidate members
+		maxContextInChain := 0
+		for _, m := range chain {
+			if info := registry.LookupStaticModelInfo(m.Model); info != nil && info.ContextLength > maxContextInChain {
+				maxContextInChain = info.ContextLength
+			}
+		}
+
 		for _, member := range chain {
 			// OpenAI-compatible entries register bare model ids; routing picks
 			// the serving provider itself. Members nothing can serve are
@@ -93,12 +101,17 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 				continue
 			}
 
-			// Context-Aware Guard: skip members whose context window cannot fit the payload
+			// Context-Aware Guard: skip members whose context window cannot fit the payload,
+			// provided there is a larger member in the chain that can fit it (or if all exceed,
+			// preserve the largest tier models as best-effort so the request is not hard-dropped).
 			if info := registry.LookupStaticModelInfo(member.Model); info != nil && info.ContextLength > 0 {
-				estimatedTokens := len(raw) / 3
+				estimatedTokens := len(raw) / 4
 				if estimatedTokens > info.ContextLength {
-					logrus.WithField("combo", combo.Name).Warnf("[router] ⏩ Combo %q skipping member %s: estimated prompt tokens (%d) exceeds member context length (%d)", combo.Name, combos.ModelID(member), estimatedTokens, info.ContextLength)
-					continue
+					if maxContextInChain >= estimatedTokens || info.ContextLength < (maxContextInChain*9)/10 {
+						logrus.WithField("combo", combo.Name).Warnf("[router] ⏩ Combo %q skipping member %s: estimated prompt tokens (%d) exceeds member context length (%d)", combo.Name, combos.ModelID(member), estimatedTokens, info.ContextLength)
+						continue
+					}
+					logrus.WithField("combo", combo.Name).Infof("[router] ⚠️ Combo %q attempting member %s as best-effort: estimated prompt tokens (%d) exceeds member context length (%d)", combo.Name, combos.ModelID(member), estimatedTokens, info.ContextLength)
 				}
 			}
 			reqEffort := strings.TrimSpace(gjson.GetBytes(raw, "reasoning_effort").String())
