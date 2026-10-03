@@ -393,6 +393,39 @@ func getModels() *staticModelsJSON {
 	return modelsCatalogStore.data
 }
 
+// AppendAntigravityModels dynamically appends or updates Antigravity models in the static catalog store.
+func AppendAntigravityModels(newModels []*ModelInfo) []string {
+	if len(newModels) == 0 {
+		return nil
+	}
+	modelsCatalogStore.mu.Lock()
+	defer modelsCatalogStore.mu.Unlock()
+	if modelsCatalogStore.data == nil {
+		return nil
+	}
+	existingMap := make(map[string]int, len(modelsCatalogStore.data.Antigravity))
+	for i, m := range modelsCatalogStore.data.Antigravity {
+		if m != nil {
+			existingMap[strings.ToLower(strings.TrimSpace(m.ID))] = i
+		}
+	}
+	var added []string
+	for _, m := range newModels {
+		if m == nil || m.ID == "" {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(m.ID))
+		if idx, found := existingMap[key]; found {
+			modelsCatalogStore.data.Antigravity[idx] = m
+		} else {
+			modelsCatalogStore.data.Antigravity = append(modelsCatalogStore.data.Antigravity, m)
+			existingMap[key] = len(modelsCatalogStore.data.Antigravity) - 1
+			added = append(added, m.ID)
+		}
+	}
+	return added
+}
+
 func validateModelsCatalog(data *staticModelsJSON) error {
 	if data == nil {
 		return fmt.Errorf("catalog is nil")

@@ -173,6 +173,7 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.POST("/openai-compatibility/:name/import-models", s.mgmt.ImportOpenAICompatModels)
 		mgmt.GET("/openai-compatibility/:name/upstream-get", s.mgmt.GetOpenAICompatUpstreamGet)
 		mgmt.POST("/provider-probe", s.mgmt.ProbeProvider)
+		mgmt.POST("/antigravity/import-models", s.mgmt.ImportAntigravityModels)
 		// Combos (isolated feature — see internal/config/config_combos.go).
 		mgmt.GET("/combos", s.mgmt.ListCombos)
 		mgmt.GET("/combos/:name", s.mgmt.GetCombo)
