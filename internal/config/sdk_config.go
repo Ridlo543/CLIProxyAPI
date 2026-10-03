@@ -14,6 +14,9 @@ type SDKConfig struct {
 
 	// ModelGroups defines client-visible models backed by ordered fallback targets.
 	ModelGroups []ModelGroup `yaml:"model-groups,omitempty" json:"model-groups,omitempty"`
+
+	// Client configures client-facing compatibility behavior.
+	Client ClientConfig `yaml:"client" json:"client"`
 	// OAuthOnlyFields records v8 provider settings that must wait for credential
 	// selection and must not affect API-key credentials. Config YAML snapshots
 	// preserve the corresponding v8 paths instead of serializing this metadata.
@@ -56,9 +59,6 @@ type SDKConfig struct {
 
 	// RequestLog enables or disables detailed request logging functionality.
 	RequestLog bool `yaml:"request-log" json:"request-log"`
-
-	// CodexOptimizeMultiAgentV2 mirrors the provider-wide runtime setting for API handlers.
-	CodexOptimizeMultiAgentV2 bool `yaml:"-" json:"-"`
 
 	// CodexOrphanDelegationCompatibility mirrors the provider-wide runtime setting for API handlers.
 	CodexOrphanDelegationCompatibility bool `yaml:"-" json:"-"`
@@ -139,6 +139,22 @@ type TAREStructuralConfig struct {
 	GlobalConcurrency int      `yaml:"global-concurrency,omitempty" json:"-"`
 	CacheEntries      int      `yaml:"cache-entries,omitempty" json:"-"`
 	CacheBytes        int      `yaml:"cache-bytes,omitempty" json:"-"`
+}
+
+// ClientConfig configures client-facing compatibility behavior.
+type ClientConfig struct {
+	Codex CodexClientConfig `yaml:"codex" json:"codex"`
+}
+
+// CodexClientConfig configures Codex client compatibility and the model catalog.
+type CodexClientConfig struct {
+	// OptimizeMultiAgentV2 optimizes official Codex multi-agent requests across providers.
+	// Default false leaves the client's multi-agent behavior unchanged.
+	OptimizeMultiAgentV2 bool `yaml:"optimize-multi-agent-v2" json:"optimize-multi-agent-v2"`
+
+	// EnableApplyPatch advertises freeform apply_patch only for supported models.
+	// Default false clears the capability regardless of template metadata.
+	EnableApplyPatch bool `yaml:"enable-apply-patch" json:"enable-apply-patch"`
 }
 
 // ClaudeCodeConfig configures Claude Code compatibility behavior.
