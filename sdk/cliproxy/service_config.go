@@ -166,6 +166,7 @@ func (s *Service) commitConfigUpdate(newCfg *config.Config) configCommit {
 	s.cfg = newCfg
 	s.cfgMu.Unlock()
 	applyReasoningPolicy(newCfg)
+	s.cancelStaleAntigravityProbes("")
 	s.configSequence++
 	return configCommit{cfg: newCfg, sequence: s.configSequence}
 }

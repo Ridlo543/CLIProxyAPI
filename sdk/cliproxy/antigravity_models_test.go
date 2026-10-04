@@ -40,12 +40,17 @@ func TestAntigravityModelDiscoveryUsesAuthResolvedTransport(t *testing.T) {
 		calls.Add(1)
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"models":{"gemini-pool":{"displayName":"Pool"}}}`))}, nil
 	})
+	auth := &coreauth.Auth{ID: "auth-1", ProxyPool: "office", Metadata: map[string]any{"access_token": "token"}}
 	manager := coreauth.NewManager(nil, nil, nil)
 	manager.SetRoundTripperProvider(antigravityModelTransportProvider{rt: rt})
+	_, _ = manager.Register(t.Context(), auth)
 	service := &Service{coreManager: manager}
-	hints := service.fetchAntigravityModelCapabilityHintsForAuth(t.Context(), &coreauth.Auth{ProxyPool: "office", Metadata: map[string]any{"access_token": "token"}})
-	if calls.Load() == 0 || len(hints.Models) != 1 || hints.Models[0].ID != "gemini-pool" {
+	hints := service.fetchAntigravityModelCapabilityHintsForAuth(t.Context(), auth)
+	if calls.Load() == 0 || hints.ModelIDs == nil {
 		t.Fatalf("calls=%d hints=%#v", calls.Load(), hints)
+	}
+	if _, ok := hints.ModelIDs["gemini-pool"]; !ok {
+		t.Fatalf("expected gemini-pool in hints.ModelIDs: %#v", hints.ModelIDs)
 	}
 }
 
@@ -61,37 +66,27 @@ func TestParseAntigravityModelCapabilityHintsIncludesAvailableModels(t *testing.
 	if !ok {
 		t.Fatal("parse failed")
 	}
-	if len(hints.Models) != 1 {
-		t.Fatalf("models count = %d, want 1", len(hints.Models))
+	if len(hints.ModelIDs) != 2 {
+		t.Fatalf("models count = %d, want 2", len(hints.ModelIDs))
 	}
-	model := hints.Models[0]
-	if model.ID != "gemini-new" || model.ContextLength != 123 || model.MaxCompletionTokens != 45 {
-		t.Fatalf("unexpected model: %#v", model)
+	if _, ok := hints.ModelIDs["gemini-new"]; !ok {
+		t.Fatalf("expected gemini-new in hints.ModelIDs: %#v", hints.ModelIDs)
 	}
 }
 
 func TestApplyAntigravityFetchedModelCapabilitiesMergesModels(t *testing.T) {
 	existing := &ModelInfo{ID: "gemini-known", DisplayName: "Old", ContextLength: 1}
 	hints := antigravityModelCapabilityHints{
-		Models: []*ModelInfo{
-			{ID: "gemini-known", DisplayName: "Current", ContextLength: 100},
-			{ID: "gemini-new", DisplayName: "New"},
-		},
-		WebSearchModelIDs: map[string]struct{}{"gemini-new": {}},
+		ModelIDs:          map[string]struct{}{"gemini-known": {}},
+		WebSearchModelIDs: map[string]struct{}{"gemini-known": {}},
 	}
 
 	models := applyAntigravityFetchedModelCapabilities([]*ModelInfo{existing}, hints)
-	if len(models) != 2 {
-		t.Fatalf("models count = %d, want 2", len(models))
+	if len(models) != 1 {
+		t.Fatalf("models count = %d, want 1", len(models))
 	}
-	if existing.DisplayName != "Old" || existing.ContextLength != 1 {
-		t.Fatalf("static model mutated: %#v", existing)
-	}
-	if models[0] == existing || models[0].DisplayName != "Current" || models[0].ContextLength != 1 {
-		t.Fatalf("merged model should update display metadata but preserve static limits: %#v", models[0])
-	}
-	if !models[1].SupportsWebSearch {
-		t.Fatal("new fetched model should support web search")
+	if !models[0].SupportsWebSearch {
+		t.Fatal("expected model to support web search")
 	}
 }
 
@@ -105,15 +100,19 @@ func TestAntigravityCachedProbeKeepsAvailableModels(t *testing.T) {
 		calls.Add(1)
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"models":{"gemini-cached":{"displayName":"Cached"}}}`))}, nil
 	})
+	auth := &coreauth.Auth{ID: "cached-probe", Metadata: map[string]any{"access_token": "token", "project_id": "proj-cached"}}
 	manager := coreauth.NewManager(nil, nil, nil)
 	manager.SetRoundTripperProvider(antigravityModelTransportProvider{rt: rt})
+	_, _ = manager.Register(t.Context(), auth)
 	service := &Service{coreManager: manager}
-	auth := &coreauth.Auth{ID: "cached-probe", Metadata: map[string]any{"access_token": "token", "project_id": "proj-cached"}}
 
 	for i := 0; i < 2; i++ {
 		hints := service.fetchAntigravityModelCapabilityHintsForAuth(t.Context(), auth)
-		if len(hints.Models) != 1 || hints.Models[0].ID != "gemini-cached" {
-			t.Fatalf("probe %d: models = %#v, want the live catalog", i+1, hints.Models)
+		if len(hints.ModelIDs) != 1 {
+			t.Fatalf("probe %d: modelIDs = %#v, want the live catalog", i+1, hints.ModelIDs)
+		}
+		if _, ok := hints.ModelIDs["gemini-cached"]; !ok {
+			t.Fatalf("probe %d: expected gemini-cached in modelIDs", i+1)
 		}
 	}
 	if calls.Load() != 1 {

@@ -75,7 +75,7 @@ func (s *Server) setupRoutes() {
 	v1.Use(AuthMiddleware(s.accessManager), APIKeyPolicyMiddleware())
 	{
 		v1.GET("/models", s.combosAugmentModels(s.unifiedModelsHandler(openaiHandlers, claudeCodeHandlers)))
-		v1.GET("/models/*model", s.getModelHandler())
+		v1.GET("/models/*model", s.getModelHandler(openaiHandlers, claudeCodeHandlers))
 		v1.POST("/chat/completions", s.combosChatWrapper(openaiHandlers.ChatCompletions))
 		v1.POST("/completions", s.combosChatWrapper(openaiHandlers.Completions))
 		v1.POST("/images/generations", openaiHandlers.ImagesGenerations)
@@ -648,7 +648,7 @@ func (s *Server) unifiedModelsHandler(openaiHandler *openai.OpenAIAPIHandler, cl
 	}
 }
 
-func (s *Server) getModelHandler() gin.HandlerFunc {
+func (s *Server) getModelHandler(openaiHandler *openai.OpenAIAPIHandler, claudeHandler *claude.ClaudeCodeAPIHandler) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		modelID := strings.TrimPrefix(strings.TrimSpace(c.Param("model")), "/")
 		if modelID == "" {
@@ -688,6 +688,7 @@ func (s *Server) getModelHandler() gin.HandlerFunc {
 				"created":               1700000000,
 				"owned_by":              "combos",
 				"type":                  "combos",
+				"display_name":          cmb.Name,
 				"context_length":        ctxLen,
 				"max_context_length":    ctxLen,
 				"inputTokenLimit":       ctxLen,
@@ -698,13 +699,18 @@ func (s *Server) getModelHandler() gin.HandlerFunc {
 			return
 		}
 
-		// 2. Regular model lookup in registry
+		// 2. Delegate to unified model detail handler if handlers are provided
+		if openaiHandler != nil && claudeHandler != nil {
+			c.Set(handlers.ModelDetailIDContextKey, modelID)
+			s.unifiedModelsHandler(openaiHandler, claudeHandler)(c)
+			return
+		}
+		// 3. Fallback for tests without handlers: regular model lookup in registry
 		reg := registry.GetGlobalRegistry()
 		info := reg.GetModelInfo(modelID, "")
 		if info == nil {
 			info = registry.LookupStaticModelInfo(modelID)
 		}
-
 		// 3. Namespaced model lookup (e.g. "agentrouter/gpt-6-astra" or "dahono/deepseek-v4-flash")
 		reqProv, bareModel, hasSlash := strings.Cut(modelID, "/")
 		if info == nil && hasSlash && bareModel != "" {

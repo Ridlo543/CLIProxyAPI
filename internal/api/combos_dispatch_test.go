@@ -263,7 +263,7 @@ func TestCombosContextWindowDefault1M_OpenAI_and_Anthropic(t *testing.T) {
 			},
 		})
 	}))
-	r.GET("/v1/models/*model", s.getModelHandler())
+	r.GET("/v1/models/*model", s.getModelHandler(nil, nil))
 
 	// Verify OpenAI /v1/models response
 	{
@@ -395,7 +395,7 @@ func TestCustomCompatProvidersExposedInModelsList(t *testing.T) {
 			},
 		})
 	}))
-	r.GET("/v1/models/*model", s.getModelHandler())
+	r.GET("/v1/models/*model", s.getModelHandler(nil, nil))
 
 	// 1. Verify GET /v1/models contains agentrouter/gpt-6-astra, dahono/ai-chat, etc.
 	{
