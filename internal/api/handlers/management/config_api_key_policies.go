@@ -230,23 +230,55 @@ func parseDiscoveredModelIDs(payload []byte) []string {
 			Name string `json:"name"`
 		} `json:"models"`
 	}
-	if err := json.Unmarshal(payload, &root); err != nil {
-		return nil
-	}
-	ids := make([]string, 0, len(root.Data)+len(root.Models))
-	for _, item := range root.Data {
-		if trimmed := strings.TrimSpace(item.ID); trimmed != "" {
-			ids = append(ids, trimmed)
+	if err := json.Unmarshal(payload, &root); err == nil && (len(root.Data) > 0 || len(root.Models) > 0) {
+		ids := make([]string, 0, len(root.Data)+len(root.Models))
+		for _, item := range root.Data {
+			if trimmed := strings.TrimSpace(item.ID); trimmed != "" {
+				ids = append(ids, trimmed)
+			}
 		}
-	}
-	for _, item := range root.Models {
-		value := strings.TrimSpace(item.ID)
-		if value == "" {
-			value = strings.TrimSpace(item.Name)
+		for _, item := range root.Models {
+			value := strings.TrimSpace(item.ID)
+			if value == "" {
+				value = strings.TrimSpace(item.Name)
+			}
+			if value != "" {
+				ids = append(ids, value)
+			}
 		}
-		if value != "" {
-			ids = append(ids, value)
-		}
+		return ids
 	}
-	return ids
+
+	// Also support top-level array [{"id":"..."}, {"name":"..."}]
+	var arrObj []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(payload, &arrObj); err == nil && len(arrObj) > 0 {
+		ids := make([]string, 0, len(arrObj))
+		for _, item := range arrObj {
+			val := strings.TrimSpace(item.ID)
+			if val == "" {
+				val = strings.TrimSpace(item.Name)
+			}
+			if val != "" {
+				ids = append(ids, val)
+			}
+		}
+		return ids
+	}
+
+	// Also support string array ["model-1", "model-2"]
+	var arrStr []string
+	if err := json.Unmarshal(payload, &arrStr); err == nil && len(arrStr) > 0 {
+		ids := make([]string, 0, len(arrStr))
+		for _, s := range arrStr {
+			if trimmed := strings.TrimSpace(s); trimmed != "" {
+				ids = append(ids, trimmed)
+			}
+		}
+		return ids
+	}
+
+	return nil
 }

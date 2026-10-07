@@ -47,6 +47,9 @@ func TestProbeProviderOK(t *testing.T) {
 	if count, _ := out["model_count"].(float64); int(count) != 3 {
 		t.Fatalf("model_count = %v, want 3", out["model_count"])
 	}
+	if count, _ := out["models_count"].(float64); int(count) != 3 {
+		t.Fatalf("models_count = %v, want 3", out["models_count"])
+	}
 }
 
 func TestProbeProviderAnthropicPath(t *testing.T) {

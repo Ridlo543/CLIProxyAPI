@@ -96,7 +96,12 @@ func (h *Handler) ProbeProvider(c *gin.Context) {
 	}
 
 	modelCount := len(parseDiscoveredModelIDs(body))
-	c.JSON(http.StatusOK, gin.H{"ok": true, "status": http.StatusOK, "model_count": modelCount})
+	c.JSON(http.StatusOK, gin.H{
+		"ok":           true,
+		"status":       http.StatusOK,
+		"model_count":  modelCount,
+		"models_count": modelCount,
+	})
 }
 
 func humanizeProbeStatus(status int) string {
