@@ -67,6 +67,9 @@ func GetVisionAdapterModels() []config.ComboModelRef {
 // HasVisionCapability reports if a given model natively supports image understanding.
 func HasVisionCapability(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
+	if _, after, ok := strings.Cut(m, "/"); ok {
+		m = after
+	}
 	// Models that definitely do not support images (e.g. text-only code review models or embeddings)
 	if strings.Contains(m, "-review") || strings.Contains(m, "embed") {
 		return false
@@ -78,6 +81,13 @@ func HasVisionCapability(model string) bool {
 		strings.Contains(m, "claude") ||
 		strings.Contains(m, "gpt-4") ||
 		strings.Contains(m, "gpt-5") ||
+		strings.Contains(m, "gpt-6") ||
+		strings.Contains(m, "sol") ||
+		strings.Contains(m, "luna") ||
+		strings.Contains(m, "astra") ||
+		strings.Contains(m, "terra") ||
+		strings.Contains(m, "kimi") ||
+		strings.Contains(m, "minimax") ||
 		strings.Contains(m, "vision") ||
 		strings.Contains(m, "vl") ||
 		strings.Contains(m, "qwen") ||
@@ -92,7 +102,9 @@ func RequestRequiresVision(rawJSON []byte) bool {
 	s := string(rawJSON)
 	return strings.Contains(s, `"image_url"`) ||
 		strings.Contains(s, `"input_image"`) ||
-		strings.Contains(s, `"image/`) ||
+		strings.Contains(s, `"data:image/`) ||
+		strings.Contains(s, `"type":"image"`) ||
+		strings.Contains(s, `"type": "image"`) ||
 		strings.Contains(s, `"inline_data"`) ||
 		strings.Contains(s, `"inlineData"`)
 }

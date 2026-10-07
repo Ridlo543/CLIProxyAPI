@@ -124,3 +124,57 @@ func TestFindAndSync(t *testing.T) {
 		t.Fatal("unexpected find")
 	}
 }
+
+func TestHasVisionCapability(t *testing.T) {
+	visionModels := []string{
+		"openagentic/gpt-6-sol-free",
+		"gpt-6-sol",
+		"gpt-6-astra",
+		"openagentic/gpt-6-astra",
+		"openagentic/gpt-5.6-luna",
+		"gemini-3.8-flash-high",
+		"claude-opus-5.5",
+		"kimi-k3",
+		"qwen3.8-max",
+	}
+	for _, m := range visionModels {
+		if !HasVisionCapability(m) {
+			t.Errorf("expected %q to have vision capability", m)
+		}
+	}
+
+	nonVisionModels := []string{
+		"text-embedding-3-small",
+		"codex-review",
+		"gpt-5.6-sol-review",
+	}
+	for _, m := range nonVisionModels {
+		if HasVisionCapability(m) {
+			t.Errorf("expected %q NOT to have vision capability", m)
+		}
+	}
+}
+
+func TestRequestRequiresVision(t *testing.T) {
+	// Normal programming text mentioning MIME types or code with "image/" must NOT trigger vision
+	plainCodeText := []byte(`{"messages":[{"role":"user","content":"how to serve image/png in Go? Use <img src=\"image/test.jpg\">"}]}`)
+	if RequestRequiresVision(plainCodeText) {
+		t.Fatal("expected plain text mentioning image/png NOT to trigger RequestRequiresVision")
+	}
+
+	// True vision payloads
+	openAIVision := []byte(`{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.com/pic.jpg"}}]}]}`)
+	if !RequestRequiresVision(openAIVision) {
+		t.Fatal("expected OpenAI image_url to trigger RequestRequiresVision")
+	}
+
+	anthropicVision := []byte(`{"messages":[{"role":"user","content":[{"type": "image", "source":{"type":"base64","data":"abc"}}]}]}`)
+	if !RequestRequiresVision(anthropicVision) {
+		t.Fatal("expected Anthropic type:image to trigger RequestRequiresVision")
+	}
+
+	dataURIVision := []byte(`{"messages":[{"role":"user","content":"data:image/jpeg;base64,/9j/4AAQSkZJRg=="}]}`)
+	if !RequestRequiresVision(dataURIVision) {
+		t.Fatal("expected base64 data:image/ to trigger RequestRequiresVision")
+	}
+}

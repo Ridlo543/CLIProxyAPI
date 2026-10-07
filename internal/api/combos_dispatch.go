@@ -50,7 +50,7 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 			if requiresVision {
 				hasVisionMember := false
 				for _, m := range chain {
-					if combos.HasVisionCapability(m.Model) {
+					if modelSupportsVision(m.Model) {
 						hasVisionMember = true
 						break
 					}
@@ -63,7 +63,7 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 					}
 				}
 			}
-		} else if requiresVision && !combos.HasVisionCapability(model) {
+		} else if requiresVision && !modelSupportsVision(model) {
 			// Single model request that cannot process vision -> auto-route to Vision Adapter Pool
 			visionPool := combos.GetVisionAdapterModels()
 			if len(visionPool) > 0 {
@@ -568,4 +568,32 @@ func ResolveComboDefaults(cmb config.ComboConfig) (int, int) {
 		}
 	}
 	return ctxLen, maxTok
+}
+
+func modelSupportsVision(model string) bool {
+	if combos.HasVisionCapability(model) {
+		return true
+	}
+	bare := model
+	if _, after, ok := strings.Cut(model, "/"); ok {
+		bare = after
+	}
+	if combos.HasVisionCapability(bare) {
+		return true
+	}
+	if info := registry.LookupStaticModelInfo(bare); info != nil {
+		for _, mod := range info.SupportedInputModalities {
+			if strings.EqualFold(mod, "image") {
+				return true
+			}
+		}
+	}
+	if info := registry.GetGlobalRegistry().GetModelInfo(bare, ""); info != nil {
+		for _, mod := range info.SupportedInputModalities {
+			if strings.EqualFold(mod, "image") {
+				return true
+			}
+		}
+	}
+	return false
 }
