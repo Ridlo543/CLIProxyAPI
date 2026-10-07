@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/tidwall/gjson"
 )
 
 var (
@@ -70,18 +71,21 @@ func HasVisionCapability(model string) bool {
 	if _, after, ok := strings.Cut(m, "/"); ok {
 		m = after
 	}
-	// Models that definitely do not support images (e.g. text-only code review models or embeddings)
-	if strings.Contains(m, "-review") || strings.Contains(m, "embed") {
+	// Models that definitely do not support images (embeddings, audio, review, moderation)
+	if strings.Contains(m, "-review") ||
+		strings.Contains(m, "embed") ||
+		strings.Contains(m, "rerank") ||
+		strings.Contains(m, "whisper") ||
+		strings.Contains(m, "tts") ||
+		strings.Contains(m, "moderation") {
 		return false
 	}
-	// Models known to support vision
+	// Models known to support vision across modern foundation model families
 	if strings.Contains(m, "flash") ||
 		strings.Contains(m, "pro") ||
 		strings.Contains(m, "gemini") ||
 		strings.Contains(m, "claude") ||
-		strings.Contains(m, "gpt-4") ||
-		strings.Contains(m, "gpt-5") ||
-		strings.Contains(m, "gpt-6") ||
+		strings.Contains(m, "gpt") ||
 		strings.Contains(m, "sol") ||
 		strings.Contains(m, "luna") ||
 		strings.Contains(m, "astra") ||
@@ -91,22 +95,84 @@ func HasVisionCapability(model string) bool {
 		strings.Contains(m, "vision") ||
 		strings.Contains(m, "vl") ||
 		strings.Contains(m, "qwen") ||
-		strings.Contains(m, "glm") {
+		strings.Contains(m, "glm") ||
+		strings.Contains(m, "grok") ||
+		strings.Contains(m, "deepseek") ||
+		strings.Contains(m, "mimo") ||
+		strings.Contains(m, "llama") ||
+		strings.Contains(m, "mistral") ||
+		strings.Contains(m, "fable") {
 		return true
 	}
 	return false
 }
 
-// RequestRequiresVision inspects request payload for images.
+// RequestRequiresVision inspects request payload structurally for real image blocks.
+// It checks message parts structurally rather than doing raw substring matching on prompt text,
+// preventing false positives when prompts discuss code, MIME types, or HTML tags.
 func RequestRequiresVision(rawJSON []byte) bool {
-	s := string(rawJSON)
-	return strings.Contains(s, `"image_url"`) ||
-		strings.Contains(s, `"input_image"`) ||
-		strings.Contains(s, `"data:image/`) ||
-		strings.Contains(s, `"type":"image"`) ||
-		strings.Contains(s, `"type": "image"`) ||
-		strings.Contains(s, `"inline_data"`) ||
-		strings.Contains(s, `"inlineData"`)
+	if len(rawJSON) == 0 {
+		return false
+	}
+
+	// 1. OpenAI & Anthropic: check messages array
+	messages := gjson.GetBytes(rawJSON, "messages")
+	if messages.IsArray() {
+		for _, msg := range messages.Array() {
+			content := msg.Get("content")
+			if content.IsArray() {
+				for _, part := range content.Array() {
+					partType := strings.ToLower(strings.TrimSpace(part.Get("type").String()))
+					if partType == "image_url" || partType == "image" || partType == "input_image" {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Google Gemini: check contents array
+	contents := gjson.GetBytes(rawJSON, "contents")
+	if contents.IsArray() {
+		for _, c := range contents.Array() {
+			parts := c.Get("parts")
+			if parts.IsArray() {
+				for _, part := range parts.Array() {
+					if part.Get("inline_data").Exists() || part.Get("inlineData").Exists() {
+						return true
+					}
+					if fileData := part.Get("file_data"); fileData.Exists() {
+						if strings.HasPrefix(strings.ToLower(fileData.Get("mime_type").String()), "image/") {
+							return true
+						}
+					}
+					if fileData := part.Get("fileData"); fileData.Exists() {
+						if strings.HasPrefix(strings.ToLower(fileData.Get("mimeType").String()), "image/") {
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Responses API / multimodal prompt
+	prompt := gjson.GetBytes(rawJSON, "prompt")
+	if prompt.IsArray() {
+		for _, part := range prompt.Array() {
+			partType := strings.ToLower(strings.TrimSpace(part.Get("type").String()))
+			if partType == "image_url" || partType == "image" || partType == "input_image" {
+				return true
+			}
+		}
+	}
+
+	// 4. Input images at root (e.g. specialized multimodal endpoints)
+	if gjson.GetBytes(rawJSON, "input_image").Exists() || gjson.GetBytes(rawJSON, "image").IsObject() {
+		return true
+	}
+
+	return false
 }
 
 func Snapshot() []config.ComboConfig {

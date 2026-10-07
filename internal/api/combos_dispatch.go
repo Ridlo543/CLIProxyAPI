@@ -571,29 +571,29 @@ func ResolveComboDefaults(cmb config.ComboConfig) (int, int) {
 }
 
 func modelSupportsVision(model string) bool {
-	if combos.HasVisionCapability(model) {
-		return true
-	}
 	bare := model
 	if _, after, ok := strings.Cut(model, "/"); ok {
 		bare = after
 	}
-	if combos.HasVisionCapability(bare) {
-		return true
-	}
-	if info := registry.LookupStaticModelInfo(bare); info != nil {
+
+	// 1. Authoritative check: Model registry metadata (SupportedInputModalities)
+	if info := registry.LookupStaticModelInfo(bare); info != nil && len(info.SupportedInputModalities) > 0 {
 		for _, mod := range info.SupportedInputModalities {
 			if strings.EqualFold(mod, "image") {
 				return true
 			}
 		}
+		return false
 	}
-	if info := registry.GetGlobalRegistry().GetModelInfo(bare, ""); info != nil {
+	if info := registry.GetGlobalRegistry().GetModelInfo(bare, ""); info != nil && len(info.SupportedInputModalities) > 0 {
 		for _, mod := range info.SupportedInputModalities {
 			if strings.EqualFold(mod, "image") {
 				return true
 			}
 		}
+		return false
 	}
-	return false
+
+	// 2. Model family heuristics for dynamic/unregistered/custom models
+	return combos.HasVisionCapability(model) || combos.HasVisionCapability(bare)
 }

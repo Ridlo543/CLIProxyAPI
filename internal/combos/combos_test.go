@@ -173,8 +173,20 @@ func TestRequestRequiresVision(t *testing.T) {
 		t.Fatal("expected Anthropic type:image to trigger RequestRequiresVision")
 	}
 
-	dataURIVision := []byte(`{"messages":[{"role":"user","content":"data:image/jpeg;base64,/9j/4AAQSkZJRg=="}]}`)
+	dataURIVision := []byte(`{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,/9j/4AAQSkZJRg=="}}]}]}`)
 	if !RequestRequiresVision(dataURIVision) {
-		t.Fatal("expected base64 data:image/ to trigger RequestRequiresVision")
+		t.Fatal("expected base64 data:image/ in image_url to trigger RequestRequiresVision")
+	}
+
+	// Gemini inline_data vision payload
+	geminiVision := []byte(`{"contents":[{"role":"user","parts":[{"inline_data":{"mime_type":"image/png","data":"abc=="}}]}]}`)
+	if !RequestRequiresVision(geminiVision) {
+		t.Fatal("expected Gemini inline_data to trigger RequestRequiresVision")
+	}
+
+	// Text talking about data URI or image_url must NOT trigger vision
+	promptDiscussingImage := []byte(`{"messages":[{"role":"user","content":"How do I embed data:image/png;base64 in CSS background?"}]}`)
+	if RequestRequiresVision(promptDiscussingImage) {
+		t.Fatal("expected prompt text discussing CSS data:image/png NOT to trigger RequestRequiresVision")
 	}
 }
