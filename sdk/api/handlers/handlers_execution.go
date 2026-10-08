@@ -54,6 +54,8 @@ func (h *BaseAPIHandler) executeWithAuthManagerFormats(ctx context.Context, entr
 			}
 		}
 	}
+	// Speech-only models are reachable solely through the speech entry protocol.
+	execOptions.AllowSpeechModel = isModelExecutionSpeechProtocol(entryProtocol)
 	routeDecision := h.applyModelRouter(ctx, entryProtocol, modelName, rawJSON, false, execOptions)
 	responseProtocol := modelExecutionResponseProtocol(entryProtocol, exitProtocol)
 	if errMsg := validateNativeInteractionsExecution(entryProtocol, execOptions, routeDecision); errMsg != nil {

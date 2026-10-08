@@ -479,6 +479,8 @@ func (m *Manager) ResetQuota(ctx context.Context, authID string) (*Auth, []strin
 	registeredModels := modelsForRegisteredAuth(authID)
 	cooldownStateChanged := false
 
+	releaseMutation := m.lockAuthMutation(authID)
+	defer releaseMutation()
 	m.mu.Lock()
 	auth, ok := m.auths[authID]
 	if !ok || auth == nil {
@@ -528,8 +530,9 @@ func (m *Manager) ResetQuota(ctx context.Context, authID string) (*Auth, []strin
 		cooldownRecordsAfter := m.cooldownStateRecordsForAuthLocked(auth, now)
 		cooldownStateChanged = !cooldownStateRecordsEqual(cooldownRecordsBefore, cooldownRecordsAfter)
 	}
-	errPersist := m.persist(ctx, auth)
+	errPersist := m.persistLocked(ctx, auth)
 	m.mu.Unlock()
+	releaseMutation()
 
 	defer func() {
 		if cooldownStateChanged {
@@ -748,6 +751,17 @@ func cooldownReason(statusMessage string, quota QuotaState, lastErr *Error) stri
 	return ""
 }
 
+// isStaleExecutionResult reports whether an execution result originated from a superseded
+// credential version or an earlier registration epoch than the currently active auth.
+func isStaleExecutionResult(result Result, current *Auth) bool {
+	if current == nil {
+		return false
+	}
+	staleVersion := result.CredentialVersion < current.CredentialVersion && (result.CredentialVersion > 0 || current.CredentialVersion > 1)
+	staleEpoch := result.RegistrationEpoch > 0 && result.RegistrationEpoch < current.RegistrationEpoch
+	return staleVersion || staleEpoch
+}
+
 // MarkResult records an execution result and notifies hooks.
 func (m *Manager) MarkResult(ctx context.Context, result Result) {
 	if result.AuthID == "" {
@@ -770,8 +784,17 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 	cooldownStateChanged := false
 	now := time.Now()
 
+	releaseMutation := m.lockAuthMutation(result.AuthID)
+	defer releaseMutation()
 	m.mu.Lock()
 	if auth, ok := m.auths[result.AuthID]; ok && auth != nil {
+		if isStaleExecutionResult(result, auth) {
+			m.mu.Unlock()
+			releaseMutation()
+			m.hook.OnResult(ctx, result)
+			m.publishErrorEvent(result, nil)
+			return
+		}
 		if modelKey == "" && strings.TrimSpace(result.RouteModel) != "" {
 			if m != nil {
 				modelKey = m.selectionModelKeyForAuth(auth, result.RouteModel)
@@ -1063,7 +1086,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 			}
 		}
 
-		_ = m.persist(ctx, auth)
+		_ = m.persistLocked(ctx, auth)
 		authSnapshot = auth.Clone()
 		if trackCooldownState {
 			cooldownRecordsAfter := m.cooldownStateRecordsForAuthLocked(auth, now)
@@ -1071,6 +1094,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 		}
 	}
 	m.mu.Unlock()
+	releaseMutation()
 	if m.scheduler != nil && authSnapshot != nil {
 		var targetModels []string
 		if !result.CredentialScope && modelKey != "" {
@@ -1116,6 +1140,14 @@ func (m *Manager) updateSessionAffinity(result Result) {
 }
 
 func (m *Manager) recordExecutionResult(ctx context.Context, result Result, auth *Auth, ephemeral bool) {
+	if auth != nil {
+		if result.CredentialVersion == 0 {
+			result.CredentialVersion = auth.CredentialVersion
+		}
+		if result.RegistrationEpoch == 0 {
+			result.RegistrationEpoch = auth.RegistrationEpoch
+		}
+	}
 	if !ephemeral {
 		m.MarkResult(ctx, result)
 		return
@@ -1143,8 +1175,17 @@ func (m *Manager) recordAvailabilityNeutralResult(ctx context.Context, result Re
 	}
 
 	var authSnapshot *Auth
+	releaseMutation := m.lockAuthMutation(result.AuthID)
+	defer releaseMutation()
 	m.mu.Lock()
 	if auth, ok := m.auths[result.AuthID]; ok && auth != nil {
+		if isStaleExecutionResult(result, auth) {
+			m.mu.Unlock()
+			releaseMutation()
+			m.hook.OnResult(ctx, result)
+			m.publishErrorEvent(result, nil)
+			return
+		}
 		now := time.Now()
 		auth.recordRecentRequest(now, result.Success)
 		if result.Success {
@@ -1154,10 +1195,11 @@ func (m *Manager) recordAvailabilityNeutralResult(ctx context.Context, result Re
 		}
 		auth.Generation++
 		auth.UpdatedAt = now
-		_ = m.persist(ctx, auth)
+		_ = m.persistLocked(ctx, auth)
 		authSnapshot = auth.Clone()
 	}
 	m.mu.Unlock()
+	releaseMutation()
 
 	m.hook.OnResult(ctx, result)
 	m.publishErrorEvent(result, authSnapshot)

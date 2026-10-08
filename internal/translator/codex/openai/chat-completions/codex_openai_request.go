@@ -28,8 +28,16 @@ import (
 //
 // Returns:
 //   - []byte: The transformed request data in OpenAI Responses API format
-func ConvertOpenAIRequestToCodex(modelName string, inputRawJSON []byte, stream bool) []byte {
+func ConvertOpenAIRequestToCodex(modelName string, inputRawJSON []byte, stream bool) ([]byte, error) {
+	return convertOpenAIRequestToCodex(modelName, inputRawJSON, stream)
+
+}
+
+// convertOpenAIRequestToCodex also reports a file or audio part Responses cannot
+// receive when it leaves a user turn with nothing to send.
+func convertOpenAIRequestToCodex(modelName string, inputRawJSON []byte, stream bool) ([]byte, error) {
 	rawJSON := inputRawJSON
+	var drops translatorcommon.UserTurnDrops
 	root := gjson.ParseBytes(rawJSON)
 	tools := root.Get("tools")
 	toolResults := tools.Array()
@@ -213,10 +221,13 @@ func ConvertOpenAIRequestToCodex(modelName string, inputRawJSON []byte, stream b
 				}
 
 				contentItems := make([][]byte, 0, 4)
+				// Counts the parts this user turn really sends; an empty text part does not.
+				turnSendable := 0
 
 				// Handle regular content
 				c := m.Get("content")
 				if c.Exists() && c.Type == gjson.String && c.String() != "" {
+					turnSendable++
 					// Single string content
 					partType := "input_text"
 					if role == "assistant" {
@@ -241,6 +252,9 @@ func ConvertOpenAIRequestToCodex(modelName string, inputRawJSON []byte, stream b
 							part, _ = sjson.SetBytes(part, "type", partType)
 							part, _ = sjson.SetBytes(part, "text", it.Get("text").String())
 							contentItems = append(contentItems, part)
+							if it.Get("text").String() != "" {
+								turnSendable++
+							}
 						case "image_url", "input_image":
 							// Map image inputs to input_image for Responses API
 							if role == "user" {
@@ -264,19 +278,15 @@ func ConvertOpenAIRequestToCodex(modelName string, inputRawJSON []byte, stream b
 									part, _ = sjson.SetBytes(part, "detail", d)
 								}
 								contentItems = append(contentItems, part)
+								turnSendable++
 							}
 						case "file":
 							if role == "user" {
-								fileData := it.Get("file.file_data").String()
-								filename := it.Get("file.filename").String()
-								if fileData != "" {
-									part := []byte(`{}`)
-									part, _ = sjson.SetBytes(part, "type", "input_file")
-									part, _ = sjson.SetBytes(part, "file_data", fileData)
-									if filename != "" {
-										part, _ = sjson.SetBytes(part, "filename", filename)
-									}
+								if part, ok := codexInputFilePart(it); ok {
 									contentItems = append(contentItems, part)
+									turnSendable++
+								} else {
+									drops.Drop(t)
 								}
 							}
 						case "input_audio":
@@ -291,10 +301,16 @@ func ConvertOpenAIRequestToCodex(modelName string, inputRawJSON []byte, stream b
 										part, _ = sjson.SetBytes(part, "format", audioFormat)
 									}
 									contentItems = append(contentItems, part)
+									turnSendable++
+								} else {
+									drops.Drop(t)
 								}
 							}
 						}
 					}
+				}
+				if role == "user" {
+					drops.EndTurn(turnSendable)
 				}
 
 				// Don't emit empty assistant messages when only tool_calls
@@ -533,7 +549,7 @@ func ConvertOpenAIRequestToCodex(modelName string, inputRawJSON []byte, stream b
 	}
 
 	out, _ = sjson.SetBytes(out, "store", false)
-	return out
+	return out, drops.Err()
 }
 
 func setToolCallOutputContent(funcOutput []byte, content gjson.Result) []byte {
@@ -595,30 +611,39 @@ func toolOutputContentPart(item gjson.Result) []byte {
 		}
 		return part
 	case "file":
-		fileID := item.Get("file.file_id").String()
-		fileData := item.Get("file.file_data").String()
-		fileURL := item.Get("file.file_url").String()
-		if fileID == "" && fileData == "" && fileURL == "" {
-			return toolOutputFallbackPart(item)
+		if part, ok := codexInputFilePart(item); ok {
+			return part
 		}
-		part := []byte(`{}`)
-		part, _ = sjson.SetBytes(part, "type", "input_file")
-		if fileID != "" {
-			part, _ = sjson.SetBytes(part, "file_id", fileID)
-		}
-		if fileData != "" {
-			part, _ = sjson.SetBytes(part, "file_data", fileData)
-		}
-		if fileURL != "" {
-			part, _ = sjson.SetBytes(part, "file_url", fileURL)
-		}
-		if filename := item.Get("file.filename").String(); filename != "" {
-			part, _ = sjson.SetBytes(part, "filename", filename)
-		}
-		return part
+		return toolOutputFallbackPart(item)
 	default:
 		return toolOutputFallbackPart(item)
 	}
+}
+
+// codexInputFilePart maps a Chat Completions file part onto a Responses input_file
+// part. It reports false when the part names no file id, bytes or url.
+func codexInputFilePart(item gjson.Result) ([]byte, bool) {
+	fileID := item.Get("file.file_id").String()
+	fileData := item.Get("file.file_data").String()
+	fileURL := item.Get("file.file_url").String()
+	if fileID == "" && fileData == "" && fileURL == "" {
+		return nil, false
+	}
+	part := []byte(`{}`)
+	part, _ = sjson.SetBytes(part, "type", "input_file")
+	if fileID != "" {
+		part, _ = sjson.SetBytes(part, "file_id", fileID)
+	}
+	if fileData != "" {
+		part, _ = sjson.SetBytes(part, "file_data", fileData)
+	}
+	if fileURL != "" {
+		part, _ = sjson.SetBytes(part, "file_url", fileURL)
+	}
+	if filename := item.Get("file.filename").String(); filename != "" {
+		part, _ = sjson.SetBytes(part, "filename", filename)
+	}
+	return part, true
 }
 
 func hasToolOutputImagePart(content gjson.Result) bool {
