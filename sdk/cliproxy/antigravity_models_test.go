@@ -127,3 +127,65 @@ func TestAntigravityProbeCacheIsScopedToTheProject(t *testing.T) {
 		t.Fatal("different projects produced the same probe payload, so they would share a cache entry")
 	}
 }
+func TestFilterAntigravityModels_RetainsClaude55ForClaudeEntitledAccount(t *testing.T) {
+	catalog := []*ModelInfo{
+		{ID: "claude-opus-4-6-thinking"},
+		{ID: "claude-sonnet-4-6"},
+		{ID: "claude-opus-5-5-high"},
+		{ID: "claude-opus-5-5-medium"},
+		{ID: "claude-opus-5-5-low"},
+		{ID: "claude-sonnet-5-5-high"},
+		{ID: "gemini-3.8-flash-high"},
+		{ID: "gemini-2.5-flash"},
+	}
+
+	// 1. Account with Claude Opus entitlement: must retain Opus 5.5 variants even if probe only returned 4.6
+	hintsOpus := antigravityModelCapabilityHints{
+		ModelIDs: map[string]struct{}{
+			"claude-opus-4-6-thinking": {},
+			"gemini-3.8-flash-high":    {},
+		},
+	}
+	filtered := filterAntigravityModels(catalog, hintsOpus)
+	ids := make(map[string]bool)
+	for _, m := range filtered {
+		ids[m.ID] = true
+	}
+
+	if !ids["claude-opus-4-6-thinking"] {
+		t.Error("expected claude-opus-4-6-thinking to be kept")
+	}
+	if !ids["claude-opus-5-5-high"] {
+		t.Error("expected claude-opus-5-5-high to be kept for Claude Opus entitled account")
+	}
+	if !ids["claude-opus-5-5-medium"] {
+		t.Error("expected claude-opus-5-5-medium to be kept for Claude Opus entitled account")
+	}
+	if ids["claude-sonnet-5-5-high"] {
+		t.Error("did not expect claude-sonnet-5-5-high when account has no Sonnet entitlement")
+	}
+	if !ids["gemini-3.8-flash-high"] {
+		t.Error("expected gemini-3.8-flash-high to be kept")
+	}
+	if ids["gemini-2.5-flash"] {
+		t.Error("did not expect gemini-2.5-flash when not in hints")
+	}
+
+	// 2. Account with Claude Sonnet entitlement: must retain Sonnet 5.5 variants
+	hintsSonnet := antigravityModelCapabilityHints{
+		ModelIDs: map[string]struct{}{
+			"claude-sonnet-4-6": {},
+		},
+	}
+	filteredSonnet := filterAntigravityModels(catalog, hintsSonnet)
+	idsSonnet := make(map[string]bool)
+	for _, m := range filteredSonnet {
+		idsSonnet[m.ID] = true
+	}
+	if !idsSonnet["claude-sonnet-4-6"] || !idsSonnet["claude-sonnet-5-5-high"] {
+		t.Error("expected claude-sonnet-4-6 and claude-sonnet-5-5-high to be kept")
+	}
+	if idsSonnet["claude-opus-5-5-high"] {
+		t.Error("did not expect claude-opus-5-5-high when account only has Sonnet")
+	}
+}

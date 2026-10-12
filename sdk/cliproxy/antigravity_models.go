@@ -658,11 +658,39 @@ func (s *Service) antigravityHomeEnabled() bool {
 }
 
 func filterAntigravityModels(models []*ModelInfo, hints antigravityModelCapabilityHints) []*ModelInfo {
+	if hints.ModelIDs == nil {
+		return models
+	}
+	if len(hints.ModelIDs) == 0 {
+		return nil
+	}
 	filtered := make([]*ModelInfo, 0, len(models))
+	hasClaudeOpus := false
+	hasClaudeSonnet := false
+	for id := range hints.ModelIDs {
+		if strings.HasPrefix(id, "claude-opus") {
+			hasClaudeOpus = true
+		}
+		if strings.HasPrefix(id, "claude-sonnet") {
+			hasClaudeSonnet = true
+		}
+	}
 	for _, model := range models {
 		if model != nil {
-			if _, ok := hints.ModelIDs[normalizeAntigravityFetchedModelID(model.ID)]; ok {
+			normID := normalizeAntigravityFetchedModelID(model.ID)
+			if _, ok := hints.ModelIDs[normID]; ok {
 				filtered = append(filtered, model)
+				continue
+			}
+			// If account has Claude Opus entitlement, retain Claude Opus 5.5 replacement models
+			if hasClaudeOpus && strings.HasPrefix(normID, "claude-opus-5-5") {
+				filtered = append(filtered, model)
+				continue
+			}
+			// If account has Claude Sonnet entitlement, retain Claude Sonnet 5.5 replacement models
+			if hasClaudeSonnet && strings.HasPrefix(normID, "claude-sonnet-5-5") {
+				filtered = append(filtered, model)
+				continue
 			}
 		}
 	}
