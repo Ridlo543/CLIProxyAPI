@@ -31,6 +31,7 @@ type routingRuntimeState struct {
 	sessionAffinity          bool
 	sessionAffinityTTL       time.Duration
 	sessionAffinitySubagents bool
+	sessionAffinityRebindOn  string
 }
 
 func normalizedRoutingRuntimeState(cfg *config.Config) routingRuntimeState {
@@ -39,6 +40,7 @@ func normalizedRoutingRuntimeState(cfg *config.Config) routingRuntimeState {
 		sticky:                   1,
 		sessionAffinityTTL:       time.Hour,
 		sessionAffinitySubagents: true,
+		sessionAffinityRebindOn:  coreauth.SessionAffinityRebindOnAny,
 	}
 	if cfg == nil {
 		return state
@@ -65,10 +67,13 @@ func normalizedRoutingRuntimeState(cfg *config.Config) routingRuntimeState {
 	if state.sessionAffinity && cfg.Routing.SessionAffinitySubagents != nil {
 		state.sessionAffinitySubagents = *cfg.Routing.SessionAffinitySubagents
 	}
+	if state.sessionAffinity && strings.EqualFold(strings.TrimSpace(cfg.Routing.SessionAffinityRebindOn), coreauth.SessionAffinityRebindOnQuota) {
+		state.sessionAffinityRebindOn = coreauth.SessionAffinityRebindOnQuota
+	}
 	return state
 }
 
-func buildSingleSelector(strategy string, sticky int, sessionAffinity bool, sessionAffinityTTL time.Duration, sessionAffinitySubagents *bool) coreauth.Selector {
+func buildSingleSelector(strategy string, sticky int, sessionAffinity bool, sessionAffinityTTL time.Duration, sessionAffinitySubagents *bool, sessionAffinityRebindOn string) coreauth.Selector {
 	var selector coreauth.Selector
 	switch strategy {
 	case "weighted-round-robin":
@@ -85,13 +90,14 @@ func buildSingleSelector(strategy string, sticky int, sessionAffinity bool, sess
 			Fallback:         selector,
 			TTL:              sessionAffinityTTL,
 			SubagentAffinity: sessionAffinitySubagents,
+			RebindOn:         sessionAffinityRebindOn,
 		})
 	}
 	return selector
 }
 
 func newRoutingSelector(state routingRuntimeState, cfg *config.Config) coreauth.Selector {
-	globalSelector := buildSingleSelector(state.strategy, state.sticky, state.sessionAffinity, state.sessionAffinityTTL, &state.sessionAffinitySubagents)
+	globalSelector := buildSingleSelector(state.strategy, state.sticky, state.sessionAffinity, state.sessionAffinityTTL, &state.sessionAffinitySubagents, state.sessionAffinityRebindOn)
 	if cfg == nil || len(cfg.Routing.Providers) == 0 {
 		return globalSelector
 	}
@@ -126,7 +132,7 @@ func newRoutingSelector(state routingRuntimeState, cfg *config.Config) coreauth.
 			}
 		}
 
-		providerSelectors[pName] = buildSingleSelector(effStrat, effSticky, effAffinity, effTTL, &state.sessionAffinitySubagents)
+		providerSelectors[pName] = buildSingleSelector(effStrat, effSticky, effAffinity, effTTL, &state.sessionAffinitySubagents, state.sessionAffinityRebindOn)
 	}
 
 	return coreauth.NewMultiProviderSelector(globalSelector, providerSelectors)
