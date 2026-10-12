@@ -44,8 +44,12 @@ func (h *Handler) ProbeProvider(c *gin.Context) {
 		return
 	}
 	if apiKey == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "api_key is required"})
-		return
+		if strings.Contains(strings.ToLower(baseURL), "opencode.ai") {
+			apiKey = "public"
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "api_key is required"})
+			return
+		}
 	}
 
 	listURL := baseURL + "/models"

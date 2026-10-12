@@ -915,6 +915,11 @@ type OpenAICompatibility struct {
 	// BaseURL is the base URL for the external OpenAI-compatible API endpoint.
 	BaseURL string `yaml:"base-url" json:"base-url"`
 
+	// Protocol selects the upstream protocol. Empty (the default) keeps the
+	// classic OpenAI chat/completions behavior. "responses" makes the provider
+	// speak the OpenAI Responses API instead.
+	Protocol string `yaml:"protocol,omitempty" json:"protocol,omitempty"`
+
 	// APIKeyEntries defines API keys with optional per-key proxy configuration.
 	APIKeyEntries []OpenAICompatibilityAPIKey `yaml:"api-key-entries,omitempty" json:"api-key-entries,omitempty"`
 

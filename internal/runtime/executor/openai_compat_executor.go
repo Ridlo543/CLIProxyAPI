@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	cryptorand "crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,8 +14,8 @@ import (
 	"net/textproto"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
-
 	"github.com/google/uuid"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
@@ -57,7 +58,7 @@ func (e *OpenAICompatExecutor) PrepareRequest(req *http.Request, auth *cliproxya
 	if req == nil {
 		return nil
 	}
-	_, apiKey := e.resolveCredentials(auth)
+	baseURL, apiKey := e.resolveCredentials(auth)
 	if strings.TrimSpace(apiKey) != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
@@ -66,6 +67,7 @@ func (e *OpenAICompatExecutor) PrepareRequest(req *http.Request, auth *cliproxya
 		attrs = auth.Attributes
 	}
 	util.ApplyCustomHeadersFromAttrs(req, attrs)
+	applyOpenCodeZenHeaders(req, baseURL, apiKey)
 	return nil
 }
 
@@ -104,12 +106,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 
 	from := opts.SourceFormat
 	responseFormat := cliproxyexecutor.ResponseFormatOrSource(opts)
-	to := sdktranslator.FromString("openai")
-	endpoint := "/chat/completions"
-	if opts.Alt == "responses/compact" {
-		to = sdktranslator.FromString("openai-response")
-		endpoint = "/responses/compact"
-	}
+	to, endpoint := e.upstreamProtocol(auth, req, baseModel, baseURL, opts.Alt)
 	originalPayloadSource := req.Payload
 	if len(opts.OriginalRequest) > 0 {
 		originalPayloadSource = opts.OriginalRequest
@@ -145,9 +142,31 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		}
 		translated = sanitizeOpenAIResponsesReasoningEncryptedContent(ctx, "openai compat executor", translated)
 	}
+	if endpoint == responsesEndpoint && !opts.Stream {
+		if updated, errSet := sjson.SetBytes(translated, "stream", true); errSet == nil {
+			translated = updated
+		}
+	}
+	if endpoint == responsesEndpoint {
+		if updated, errDelete := sjson.DeleteBytes(translated, "stream_options"); errDelete == nil {
+			translated = updated
+		}
+		translated = ensureZenGateTools(translated)
+	}
+	if endpoint == chatCompletionsEndpoint && isZenChatUpstream(baseURL) {
+		if !opts.Stream {
+			if updated, errSet := sjson.SetBytes(translated, "stream", true); errSet == nil {
+				translated = updated
+			}
+		}
+		translated = ensureZenChatGateTools(translated)
+	}
+	if endpoint == systemOneEndpoint {
+		translated = buildOpenCodeSystemOneRequest(baseModel, translated)
+	}
 	reporter.SetTranslatedReasoningEffort(translated, to.String())
 
-	url := strings.TrimSuffix(baseURL, "/") + endpoint
+	url := upstreamURL(baseURL, endpoint)
 	translated = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", translated, originalTranslated, requestedModel, requestPath, opts.Headers)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(translated))
 	if err != nil {
@@ -163,6 +182,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		attrs = auth.Attributes
 	}
 	util.ApplyCustomHeadersFromAttrs(httpReq, attrs, opts.Headers)
+	applyOpenCodeZenHeaders(httpReq, baseURL, apiKey)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -207,13 +227,32 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		return resp, err
 	}
 	helps.AppendAPIResponseChunk(ctx, e.cfg, body)
+	if endpoint == responsesEndpoint && responsesBodyIsSSE(httpResp.Header.Get("Content-Type"), body) {
+		body, err = reassembleResponsesSSE(body)
+		if err != nil {
+			helps.RecordAPIResponseError(ctx, e.cfg, err)
+			return resp, err
+		}
+	}
+	if endpoint == chatCompletionsEndpoint && isZenChatUpstream(baseURL) && !opts.Stream && responsesBodyIsSSE(httpResp.Header.Get("Content-Type"), body) {
+		body, err = reassembleChatCompletionsSSE(body)
+		if err != nil {
+			helps.RecordAPIResponseError(ctx, e.cfg, err)
+			return resp, err
+		}
+	}
+	if endpoint == systemOneEndpoint {
+		body = wrapSystemOneAsChatCompletion(body, baseModel)
+	}
 	reporter.ObserveResponseModel(body)
+	if endpoint == responsesEndpoint {
+		body = completedResponseEnvelope(body)
+	}
 	// Ensure we at least record the request even if upstream doesn't return usage
 	// Translate response back to source format when needed
 	var param any
 	out := sdktranslator.TranslateNonStream(ctx, to, responseFormat, req.Model, helps.ApplyPatchOriginalRequest(req, opts), translated, body, &param)
 	if helps.ApplyPatchTranslationError(param) != nil || len(out) == 0 {
-		return cliproxyexecutor.Response{}, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}
 	}
 	reporter.Publish(ctx, helps.ParseOpenAIUsage(body))
 	if responseFormat == sdktranslator.FormatOpenAIResponse {
@@ -249,7 +288,7 @@ func (e *OpenAICompatExecutor) executeImages(ctx context.Context, auth *cliproxy
 	}
 	reporter.SetTranslatedReasoningEffort(payload, "openai")
 
-	url := strings.TrimSuffix(baseURL, "/") + endpointPath
+	url := upstreamURL(baseURL, endpointPath)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return resp, err
@@ -336,7 +375,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 
 	from := opts.SourceFormat
 	responseFormat := cliproxyexecutor.ResponseFormatOrSource(opts)
-	to := sdktranslator.FromString("openai")
+	to, endpoint := e.upstreamProtocol(auth, req, baseModel, baseURL, opts.Alt)
 	originalPayloadSource := req.Payload
 	if len(opts.OriginalRequest) > 0 {
 		originalPayloadSource = opts.OriginalRequest
@@ -369,10 +408,24 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 
 	// Request usage data in the final streaming chunk so that token statistics
 	// are captured even when the upstream is an OpenAI-compatible provider.
-	translated = helps.SetBoolIfDifferent(translated, "stream_options.include_usage", true)
+	if endpoint == chatCompletionsEndpoint {
+		translated = helps.SetBoolIfDifferent(translated, "stream_options.include_usage", true)
+	}
+	if endpoint == responsesEndpoint {
+		if updated, errDelete := sjson.DeleteBytes(translated, "stream_options"); errDelete == nil {
+			translated = updated
+		}
+		translated = ensureZenGateTools(translated)
+	}
+	if endpoint == chatCompletionsEndpoint && isZenChatUpstream(baseURL) {
+		translated = ensureZenChatGateTools(translated)
+	}
+	if endpoint == systemOneEndpoint {
+		translated = buildOpenCodeSystemOneRequest(baseModel, translated)
+	}
 	reporter.SetTranslatedReasoningEffort(translated, to.String())
 
-	url := strings.TrimSuffix(baseURL, "/") + "/chat/completions"
+	url := upstreamURL(baseURL, endpoint)
 	translated = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", translated, originalTranslated, requestedModel, requestPath, opts.Headers)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(translated))
 	if err != nil {
@@ -390,6 +443,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	util.ApplyCustomHeadersFromAttrs(httpReq, attrs, opts.Headers)
 	httpReq.Header.Set("Accept", "text/event-stream")
 	httpReq.Header.Set("Cache-Control", "no-cache")
+	applyOpenCodeZenHeaders(httpReq, baseURL, apiKey)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -435,7 +489,14 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 				log.Errorf("openai compat executor: close response body error: %v", errClose)
 			}
 		}()
-		scanner := bufio.NewScanner(httpResp.Body)
+		var streamReader io.Reader = httpResp.Body
+		if endpoint == systemOneEndpoint {
+			rawBody, errRead := io.ReadAll(httpResp.Body)
+			if errRead == nil {
+				streamReader = bytes.NewReader(wrapSystemOneAsChatSSE(rawBody, baseModel))
+			}
+		}
+		scanner := bufio.NewScanner(streamReader)
 		scanner.Buffer(nil, 52_428_800) // 50MB
 		claudeInputTokens := helps.NewClaudeInputTokenState(from, to, responseFormat, originalPayload)
 		var param any
@@ -501,7 +562,11 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 			}
 
 			// Observe complete upstream frames before translation or downstream backpressure.
-			helps.ObserveChatTokenEvent(reporter, dataPayload)
+			if endpoint == responsesEndpoint {
+				helps.ObserveResponsesTokenEvent(reporter, dataPayload)
+			} else {
+				helps.ObserveChatTokenEvent(reporter, dataPayload)
+			}
 			streamLine := append([]byte("data: "), dataPayload...)
 			chunks := helps.TranslateStreamWithClaudeInputTokens(ctx, to, responseFormat, req.Model, helps.ApplyPatchOriginalRequest(req, opts), translated, streamLine, &param, claudeInputTokens)
 			helps.RecordApplyPatchStreamFailure(ctx, param, reporter, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage})
@@ -516,6 +581,12 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 			if helps.ApplyPatchTranslationError(param) != nil {
 				publishStreamError(statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}, false)
 				return true
+			}
+			if endpoint == responsesEndpoint && !isDone {
+				if evType := gjson.GetBytes(dataPayload, "type").String(); evType == "response.completed" || evType == "response.incomplete" {
+					seenDone = true
+					return true
+				}
 			}
 			if isDone {
 				seenDone = true
@@ -1168,3 +1239,490 @@ func openAICompatRetryAfter(status int, headers http.Header, body []byte, now ti
 
 // SupportsApplyPatch reports the actual executor contract, independent of its provider name.
 func (e *OpenAICompatExecutor) SupportsApplyPatch() bool { return e != nil }
+
+const (
+	// chatCompletionsEndpoint is the default upstream path for compat providers.
+	chatCompletionsEndpoint = "/chat/completions"
+	// responsesEndpoint is the Responses API path, used by providers that
+	// declare `protocol: responses` or serve Responses-only models on OpenCode Zen.
+	responsesEndpoint = "/responses"
+	// responsesCompactEndpoint keeps the dedicated compact endpoint.
+	responsesCompactEndpoint = "/responses/compact"
+	// systemOneEndpoint is the TypeSafe SystemOne decision endpoint on OpenCode Zen.
+	systemOneEndpoint = "/systemone"
+	// responsesProtocol is the per-provider config value selecting the
+	// Responses API upstream.
+	responsesProtocol = "responses"
+	// openCodeZenUserAgent mimics an official OpenCode CLI release (>= 1.17.0)
+	// required by the OpenCode Zen free-tier gate.
+	openCodeZenUserAgent = "opencode/1.18.35 ai-sdk/provider-utils/4.0.40 runtime/bun/1.3.14"
+	openCodeBase62Chars  = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+)
+
+var (
+	openCodeIDMu        sync.Mutex
+	openCodeIDLastMilli int64
+	openCodeIDCounter   uint64
+)
+
+// generateOpenCodeZenID produces a timestamp-encoded base62 identifier matching
+// OpenCode CLI's Identifier.create("ses"|"msg", descending, timestamp) format.
+func generateOpenCodeZenID(prefix string, descending bool, timestampMs int64) string {
+	openCodeIDMu.Lock()
+	if timestampMs != openCodeIDLastMilli {
+		openCodeIDLastMilli = timestampMs
+		openCodeIDCounter = 0
+	}
+	openCodeIDCounter++
+	counter := openCodeIDCounter
+	openCodeIDMu.Unlock()
+
+	current := uint64(timestampMs)*0x1000 + counter
+	value := current
+	if descending {
+		value = ^current
+	}
+	timeHex := fmt.Sprintf("%012x", value&0xffffffffffff)
+
+	var rawBytes [14]byte
+	_, _ = cryptorand.Read(rawBytes[:])
+	var suffix [14]byte
+	for i, b := range rawBytes {
+		suffix[i] = openCodeBase62Chars[int(b)%len(openCodeBase62Chars)]
+	}
+	return prefix + "_" + timeHex + string(suffix[:])
+}
+
+func isOpenCodeZenUpstream(baseURL string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(baseURL))
+	return strings.Contains(trimmed, "opencode.ai/zen")
+}
+
+func isOpenCodeZenResponsesModel(baseModel string) bool {
+	lower := strings.ToLower(strings.TrimSpace(baseModel))
+	return strings.HasPrefix(lower, "muse-spark") ||
+		strings.HasPrefix(lower, "grok-4.6") ||
+		strings.HasPrefix(lower, "grok-4.7") ||
+		strings.HasPrefix(lower, "gpt-5") ||
+		strings.HasPrefix(lower, "gpt-6")
+}
+
+func isOpenCodeZenSystemOneModel(baseModel string) bool {
+	lower := strings.ToLower(strings.TrimSpace(baseModel))
+	return strings.HasPrefix(lower, "jev-") || lower == "jev"
+}
+
+func applyOpenCodeZenHeaders(httpReq *http.Request, baseURL, apiKey string) {
+	if httpReq == nil || !isOpenCodeZenUpstream(baseURL) {
+		return
+	}
+	if strings.TrimSpace(apiKey) == "" && strings.TrimSpace(httpReq.Header.Get("Authorization")) == "" {
+		httpReq.Header.Set("Authorization", "Bearer public")
+	}
+	ua := strings.TrimSpace(httpReq.Header.Get("User-Agent"))
+	if ua == "" || ua == "cli-proxy-openai-compat" || !strings.HasPrefix(strings.ToLower(ua), "opencode/") {
+		httpReq.Header.Set("User-Agent", openCodeZenUserAgent)
+	}
+	if strings.TrimSpace(httpReq.Header.Get("x-opencode-client")) == "" {
+		httpReq.Header.Set("x-opencode-client", "cli")
+	}
+	if strings.TrimSpace(httpReq.Header.Get("x-opencode-project")) == "" {
+		httpReq.Header.Set("x-opencode-project", "global")
+	}
+	nowMs := time.Now().UnixMilli()
+	if sess := strings.TrimSpace(httpReq.Header.Get("x-opencode-session")); !strings.HasPrefix(sess, "ses_") || len(sess) < 20 {
+		httpReq.Header.Set("x-opencode-session", generateOpenCodeZenID("ses", true, nowMs-3000))
+	}
+	if reqID := strings.TrimSpace(httpReq.Header.Get("x-opencode-request")); !strings.HasPrefix(reqID, "msg_") || len(reqID) < 20 {
+		httpReq.Header.Set("x-opencode-request", generateOpenCodeZenID("msg", false, nowMs))
+	}
+}
+
+// upstreamProtocol returns the translator format and the endpoint path for this
+// provider and model.
+func (e *OpenAICompatExecutor) upstreamProtocol(auth *cliproxyauth.Auth, req cliproxyexecutor.Request, baseModel, baseURL, alt string) (sdktranslator.Format, string) {
+	switch {
+	case alt == "responses/compact":
+		return sdktranslator.FromString("openai-response"), responsesCompactEndpoint
+	case isOpenCodeZenUpstream(baseURL) && isOpenCodeZenSystemOneModel(baseModel):
+		return sdktranslator.FromString("openai"), systemOneEndpoint
+	case providerUsesResponsesProtocol(e.resolveCompatConfig(auth, req), baseModel, baseURL):
+		return sdktranslator.FromString("codex"), responsesEndpoint
+	default:
+		return sdktranslator.FromString("openai"), chatCompletionsEndpoint
+	}
+}
+
+func providerUsesResponsesProtocol(compat *config.OpenAICompatibility, baseModel, baseURL string) bool {
+	if compat != nil {
+		if strings.EqualFold(strings.TrimSpace(compat.Protocol), responsesProtocol) {
+			return true
+		}
+		if strings.HasSuffix(strings.ToLower(strings.TrimSuffix(strings.TrimSpace(compat.BaseURL), "/")), responsesEndpoint) {
+			return true
+		}
+	}
+	if strings.HasSuffix(strings.ToLower(strings.TrimSuffix(strings.TrimSpace(baseURL), "/")), responsesEndpoint) {
+		return true
+	}
+	return isOpenCodeZenUpstream(baseURL) && isOpenCodeZenResponsesModel(baseModel)
+}
+
+func isZenChatUpstream(baseURL string) bool {
+	trimmed := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(baseURL), "/"))
+	if !strings.Contains(trimmed, "opencode.ai/zen") {
+		return false
+	}
+	return !strings.HasSuffix(trimmed, responsesEndpoint) && !strings.HasSuffix(trimmed, responsesCompactEndpoint)
+}
+
+var zenChatGateToolDefs = []struct{ name, def string }{
+	{"bash", `{"type":"function","function":{"name":"bash","description":"Executes a bash command","parameters":{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}}}`},
+	{"read", `{"type":"function","function":{"name":"read","description":"Reads a file","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}}`},
+}
+
+func ensureZenChatGateTools(payload []byte) []byte {
+	tools := gjson.GetBytes(payload, "tools")
+	seen := map[string]bool{}
+	if tools.IsArray() {
+		for _, item := range tools.Array() {
+			if name := item.Get("name").String(); name != "" {
+				seen[name] = true
+				continue
+			}
+			if name := item.Get("function.name").String(); name != "" {
+				seen[name] = true
+			}
+		}
+	}
+	for _, tool := range zenChatGateToolDefs {
+		if seen[tool.name] {
+			continue
+		}
+		var updated []byte
+		var err error
+		if tools.IsArray() {
+			updated, err = sjson.SetRawBytes(payload, "tools."+strconv.Itoa(len(tools.Array())), []byte(tool.def))
+		} else {
+			updated, err = sjson.SetRawBytes(payload, "tools", []byte("["+tool.def+"]"))
+		}
+		if err == nil {
+			payload = updated
+			tools = gjson.GetBytes(payload, "tools")
+		}
+	}
+	return payload
+}
+
+func reassembleChatCompletionsSSE(body []byte) ([]byte, error) {
+	var contentSB, reasoningSB strings.Builder
+	var id, model, finish string
+	var created int64
+	var usageRaw string
+	saw := false
+	for _, line := range bytes.Split(body, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if !bytes.HasPrefix(line, []byte("data:")) {
+			continue
+		}
+		data := bytes.TrimSpace(line[len("data:"):])
+		if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) || !json.Valid(data) {
+			continue
+		}
+		saw = true
+		if v := gjson.GetBytes(data, "id").String(); v != "" {
+			id = v
+		}
+		if v := gjson.GetBytes(data, "model").String(); v != "" {
+			model = v
+		}
+		if v := gjson.GetBytes(data, "created").Int(); v != 0 {
+			created = v
+		}
+		if u := gjson.GetBytes(data, "usage"); u.Exists() && u.Type == gjson.JSON {
+			usageRaw = u.Raw
+		}
+		for _, ch := range gjson.GetBytes(data, "choices").Array() {
+			contentSB.WriteString(ch.Get("delta.content").String())
+			if r := ch.Get("delta.reasoning").String(); r != "" {
+				reasoningSB.WriteString(r)
+			} else if rc := ch.Get("delta.reasoning_content").String(); rc != "" {
+				reasoningSB.WriteString(rc)
+			}
+			if v := ch.Get("finish_reason").String(); v != "" && v != "null" {
+				finish = v
+			}
+		}
+	}
+	if !saw {
+		return nil, statusErr{code: http.StatusBadGateway, msg: "upstream chat stream ended without data events"}
+	}
+	if finish == "" {
+		finish = "stop"
+	}
+	msg := map[string]any{
+		"role":    "assistant",
+		"content": contentSB.String(),
+	}
+	if reasoningSB.Len() > 0 {
+		msg["reasoning_content"] = reasoningSB.String()
+	}
+	root := map[string]any{
+		"id":      id,
+		"object":  "chat.completion",
+		"created": created,
+		"model":   model,
+		"choices": []any{map[string]any{"index": 0, "message": msg, "finish_reason": finish}},
+	}
+	out, err := json.Marshal(root)
+	if err != nil {
+		return nil, err
+	}
+	if usageRaw != "" {
+		if updated, errSet := sjson.SetRawBytes(out, "usage", []byte(usageRaw)); errSet == nil {
+			out = updated
+		}
+	}
+	return out, nil
+}
+
+var zenGateToolDefs = []struct{ name, def string }{
+	{"bash", `{"type":"function","name":"bash","description":"Executes a bash command","parameters":{"type":"object","properties":{},"required":["command"]}}`},
+	{"read", `{"type":"function","name":"read","description":"Reads a file","parameters":{"type":"object","properties":{},"required":["path"]}}`},
+}
+
+func ensureZenGateTools(payload []byte) []byte {
+	for _, tool := range zenGateToolDefs {
+		found := false
+		for _, item := range gjson.GetBytes(payload, "tools").Array() {
+			if item.Get("name").String() == tool.name {
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		var updated []byte
+		var err error
+		if gjson.GetBytes(payload, "tools").IsArray() {
+			idx := len(gjson.GetBytes(payload, "tools").Array())
+			updated, err = sjson.SetRawBytes(payload, "tools."+strconv.Itoa(idx), []byte(tool.def))
+		} else {
+			updated, err = sjson.SetRawBytes(payload, "tools", []byte("["+tool.def+"]"))
+		}
+		if err == nil {
+			payload = updated
+		}
+	}
+	return payload
+}
+
+func upstreamURL(baseURL, endpoint string) string {
+	trimmed := strings.TrimSuffix(strings.TrimSpace(baseURL), "/")
+	if endpoint == "" {
+		return trimmed
+	}
+	lower := strings.ToLower(trimmed)
+	endpointLower := strings.ToLower(endpoint)
+	switch {
+	case strings.HasSuffix(lower, endpointLower):
+		return trimmed
+	case strings.HasSuffix(lower, responsesEndpoint) && strings.HasPrefix(endpointLower, responsesEndpoint):
+		return trimmed + strings.TrimPrefix(endpoint, responsesEndpoint)
+	default:
+		return trimmed + endpoint
+	}
+}
+
+func responsesBodyIsSSE(contentType string, body []byte) bool {
+	if strings.Contains(contentType, "text/event-stream") {
+		return true
+	}
+	for _, line := range bytes.Split(body, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		return bytes.HasPrefix(line, []byte("data:")) || bytes.HasPrefix(line, []byte("event:"))
+	}
+	return false
+}
+
+func reassembleResponsesSSE(body []byte) ([]byte, error) {
+	for _, line := range bytes.Split(body, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if !bytes.HasPrefix(line, []byte("data:")) {
+			continue
+		}
+		data := bytes.TrimSpace(line[len("data:"):])
+		if len(data) == 0 || !json.Valid(data) {
+			continue
+		}
+		if gjson.GetBytes(data, "type").String() == "response.completed" {
+			if raw := gjson.GetBytes(data, "response").Raw; raw != "" {
+				return []byte(raw), nil
+			}
+		}
+	}
+	return nil, statusErr{code: http.StatusBadGateway, msg: "upstream responses stream ended without a response.completed event"}
+}
+
+func completedResponseEnvelope(body []byte) []byte {
+	var root map[string]json.RawMessage
+	if errUnmarshal := json.Unmarshal(body, &root); errUnmarshal != nil {
+		return body
+	}
+	if _, hasType := root["type"]; hasType {
+		return body
+	}
+	var meta struct {
+		Status string `json:"status"`
+	}
+	_ = json.Unmarshal(body, &meta)
+	eventType := "response.completed"
+	if strings.EqualFold(strings.TrimSpace(meta.Status), "incomplete") {
+		eventType = "response.incomplete"
+	}
+	eventTypeJSON, errMarshal := json.Marshal(eventType)
+	if errMarshal != nil {
+		return body
+	}
+	envelope, errMarshal := json.Marshal(map[string]json.RawMessage{
+		"type":     eventTypeJSON,
+		"response": json.RawMessage(body),
+	})
+	if errMarshal != nil {
+		return body
+	}
+	return envelope
+}
+
+func buildOpenCodeSystemOneRequest(baseModel string, payload []byte) []byte {
+	if gjson.GetBytes(payload, "state").Exists() && gjson.GetBytes(payload, "questions").Exists() {
+		out, err := sjson.SetBytes(payload, "model", baseModel)
+		if err == nil {
+			return out
+		}
+		return payload
+	}
+	var stateParts []string
+	lastUser := "Is this input valid and actionable?"
+	for _, msg := range gjson.GetBytes(payload, "messages").Array() {
+		role := msg.Get("role").String()
+		content := msg.Get("content")
+		text := ""
+		if content.IsArray() {
+			var parts []string
+			for _, p := range content.Array() {
+				if t := p.Get("text").String(); t != "" {
+					parts = append(parts, t)
+				}
+			}
+			text = strings.Join(parts, "\n")
+		} else {
+			text = content.String()
+		}
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
+		}
+		stateParts = append(stateParts, role+": "+text)
+		if role == "user" {
+			lastUser = text
+		}
+	}
+	stateText := strings.Join(stateParts, "\n\n")
+	if stateText == "" {
+		stateText = lastUser
+	}
+	reqObj := map[string]any{
+		"model": baseModel,
+		"state": stateText,
+		"questions": map[string]any{
+			"verdict": map[string]any{
+				"type":         "noul",
+				"instructions": lastUser,
+			},
+		},
+	}
+	if out, err := json.Marshal(reqObj); err == nil {
+		return out
+	}
+	return payload
+}
+
+func wrapSystemOneAsChatCompletion(body []byte, baseModel string) []byte {
+	model := gjson.GetBytes(body, "model").String()
+	if model == "" {
+		model = baseModel
+	}
+	content := string(bytes.TrimSpace(body))
+	if answers := gjson.GetBytes(body, "answers"); answers.Exists() {
+		content = answers.Raw
+	}
+	inTok := gjson.GetBytes(body, "usage.input_tokens").Int()
+	outTok := gjson.GetBytes(body, "usage.output_tokens").Int()
+	respObj := map[string]any{
+		"id":      "jev-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		"object":  "chat.completion",
+		"created": time.Now().Unix(),
+		"model":   model,
+		"choices": []any{
+			map[string]any{
+				"index":         0,
+				"finish_reason": "stop",
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": content,
+				},
+			},
+		},
+		"usage": map[string]any{
+			"prompt_tokens":     inTok,
+			"completion_tokens": outTok,
+			"total_tokens":      inTok + outTok,
+		},
+	}
+	out, err := json.Marshal(respObj)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+func wrapSystemOneAsChatSSE(body []byte, baseModel string) []byte {
+	model := gjson.GetBytes(body, "model").String()
+	if model == "" {
+		model = baseModel
+	}
+	content := string(bytes.TrimSpace(body))
+	if answers := gjson.GetBytes(body, "answers"); answers.Exists() {
+		content = answers.Raw
+	}
+	inTok := gjson.GetBytes(body, "usage.input_tokens").Int()
+	outTok := gjson.GetBytes(body, "usage.output_tokens").Int()
+	chunkObj := map[string]any{
+		"id":      "jev-" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		"object":  "chat.completion.chunk",
+		"created": time.Now().Unix(),
+		"model":   model,
+		"choices": []any{
+			map[string]any{
+				"index":         0,
+				"finish_reason": "stop",
+				"delta": map[string]any{
+					"role":    "assistant",
+					"content": content,
+				},
+			},
+		},
+		"usage": map[string]any{
+			"prompt_tokens":     inTok,
+			"completion_tokens": outTok,
+			"total_tokens":      inTok + outTok,
+		},
+	}
+	chunkBytes, _ := json.Marshal(chunkObj)
+	return []byte("data: " + string(chunkBytes) + "\n\ndata: [DONE]\n\n")
+}
