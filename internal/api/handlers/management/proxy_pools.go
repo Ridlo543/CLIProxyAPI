@@ -33,14 +33,27 @@ func sanitizeProxyURL(raw string) string {
 	}
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Host == "" {
-		// Unparseable entries are never echoed back; the name and counts
-		// already tell the operator which pool is misconfigured.
+		if !strings.Contains(raw, "://") && strings.Contains(raw, ":") {
+			return "http://" + normalizeProxyEndpoint(raw)
+		}
 		return "invalid"
 	}
 	if parsed.Scheme == "" {
-		return parsed.Host
+		return "http://" + parsed.Host
 	}
 	return parsed.Scheme + "://" + parsed.Host
+}
+
+func normalizeProxyEndpoint(raw string) string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(raw, "http://")
+	raw = strings.TrimPrefix(raw, "https://")
+	raw = strings.TrimPrefix(raw, "socks5://")
+	raw = strings.TrimPrefix(raw, "socks5h://")
+	if at := strings.LastIndex(raw, "@"); at >= 0 {
+		raw = raw[at+1:]
+	}
+	return strings.TrimRight(raw, "/")
 }
 
 type ProxyPoolResponseItem struct {
@@ -511,17 +524,16 @@ func (h *Handler) VerifyProxy(c *gin.Context) {
 	rawURL := strings.TrimSpace(req.URL)
 	poolName := strings.TrimSpace(req.Pool)
 
-	// If URL is sanitized (no credentials) but pool name is provided, resolve the real entry from pool
-	if poolName != "" && h.cfg != nil {
+	targetEndpoint := normalizeProxyEndpoint(rawURL)
+	if h.cfg != nil {
 		for _, p := range h.cfg.ProxyPools {
-			if strings.EqualFold(strings.TrimSpace(p.Name), poolName) {
+			if poolName == "" || strings.EqualFold(strings.TrimSpace(p.Name), poolName) {
 				for _, entry := range p.Entries {
-					if rawURL == "" || sanitizeProxyURL(entry.URL) == rawURL {
+					if normalizeProxyEndpoint(entry.URL) == targetEndpoint || rawURL == "" {
 						rawURL = entry.URL
 						break
 					}
 				}
-				break
 			}
 		}
 	}
@@ -532,38 +544,25 @@ func (h *Handler) VerifyProxy(c *gin.Context) {
 	}
 
 	start := time.Now()
-	transport := &http.Transport{
-		TLSHandshakeTimeout:   5 * time.Second,
-		ResponseHeaderTimeout: 5 * time.Second,
+	transport, _, errTransport := proxyutil.BuildHTTPTransport(rawURL)
+	if errTransport != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"ok":         false,
+			"error":      fmt.Sprintf("invalid proxy: %v", errTransport),
+			"endpoint":   sanitizeProxyURL(rawURL),
+			"latency_ms": 0,
+		})
+		return
 	}
-
-	if !strings.EqualFold(rawURL, "direct") {
-		parsed, errParse := url.Parse(rawURL)
-		if errParse != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"ok":         false,
-				"error":      fmt.Sprintf("invalid proxy URL: %v", errParse),
-				"endpoint":   sanitizeProxyURL(rawURL),
-				"latency_ms": 0,
-			})
-			return
-		}
-		setting, errSetting := proxyutil.Parse(rawURL)
-		if errSetting != nil || setting.Mode != proxyutil.ModeProxy {
-			c.JSON(http.StatusOK, gin.H{
-				"ok":         false,
-				"error":      "unsupported or invalid proxy format",
-				"endpoint":   sanitizeProxyURL(rawURL),
-				"latency_ms": 0,
-			})
-			return
-		}
-		transport.Proxy = http.ProxyURL(parsed)
+	if transport == nil {
+		transport = proxyutil.NewDirectTransport()
 	}
+	transport.TLSHandshakeTimeout = 6 * time.Second
+	transport.ResponseHeaderTimeout = 6 * time.Second
 
 	client := &http.Client{
 		Transport: transport,
-		Timeout:   7 * time.Second,
+		Timeout:   8 * time.Second,
 	}
 
 	reqPing, errReq := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, "http://connectivitycheck.gstatic.com/generate_204", nil)
@@ -571,6 +570,7 @@ func (h *Handler) VerifyProxy(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": false, "error": errReq.Error()})
 		return
 	}
+	reqPing.Header.Set("User-Agent", "curl/7.88.1")
 
 	resp, errDo := client.Do(reqPing)
 	latency := time.Since(start).Milliseconds()

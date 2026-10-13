@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/apikeypolicy"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -275,8 +276,7 @@ func (h *Handler) Middleware() gin.HandlerFunc {
 		c.Header("X-CPA-SUPPORT-PLUGIN", pluginhost.SupportPluginHeaderValue())
 
 		clientIP := c.ClientIP()
-		localClient := clientIP == "127.0.0.1" || clientIP == "::1"
-
+		localClient := clientIP == "127.0.0.1" || clientIP == "::1" || isLoopbackOrLocalIP(clientIP)
 		// Accept either Authorization: Bearer <key> or X-Management-Key
 		var provided string
 		if ah := c.GetHeader("Authorization"); ah != "" {
@@ -324,26 +324,32 @@ func (h *Handler) AuthenticateManagementKey(clientIP string, localClient bool, p
 	}
 	envSecret := h.envSecret
 
+	isWhitelisted := localClient || isLoopbackOrLocalIP(clientIP)
 	now := time.Now()
-	h.attemptsMu.Lock()
-	ai := h.failedAttempts[clientIP]
-	if ai != nil && !ai.blockedUntil.IsZero() {
-		if now.Before(ai.blockedUntil) {
-			remaining := ai.blockedUntil.Sub(now).Round(time.Second)
-			h.attemptsMu.Unlock()
-			return false, http.StatusForbidden, fmt.Sprintf("IP banned due to too many failed attempts. Try again in %s", remaining)
+	if !isWhitelisted {
+		h.attemptsMu.Lock()
+		ai := h.failedAttempts[clientIP]
+		if ai != nil && !ai.blockedUntil.IsZero() {
+			if now.Before(ai.blockedUntil) {
+				remaining := ai.blockedUntil.Sub(now).Round(time.Second)
+				h.attemptsMu.Unlock()
+				return false, http.StatusForbidden, fmt.Sprintf("IP banned due to too many failed attempts. Try again in %s", remaining)
+			}
+			// Ban expired, reset state
+			ai.blockedUntil = time.Time{}
+			ai.count = 0
 		}
-		// Ban expired, reset state
-		ai.blockedUntil = time.Time{}
-		ai.count = 0
+		h.attemptsMu.Unlock()
 	}
-	h.attemptsMu.Unlock()
 
 	if !localClient && !allowRemote {
 		return false, http.StatusForbidden, "remote management disabled"
 	}
 
 	fail := func() {
+		if isWhitelisted {
+			return
+		}
 		h.attemptsMu.Lock()
 		aip := h.failedAttempts[clientIP]
 		if aip == nil {
@@ -461,4 +467,13 @@ func (h *Handler) updateStringField(c *gin.Context, set func(string)) {
 	}
 	set(*body.Value)
 	h.persist(c)
+}
+
+func isLoopbackOrLocalIP(ipStr string) bool {
+	trimmed := strings.TrimSpace(ipStr)
+	if trimmed == "" || trimmed == "127.0.0.1" || trimmed == "::1" || trimmed == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(trimmed)
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate())
 }
