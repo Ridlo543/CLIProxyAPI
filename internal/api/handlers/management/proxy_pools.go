@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -42,6 +43,25 @@ func sanitizeProxyURL(raw string) string {
 		return "http://" + parsed.Host
 	}
 	return parsed.Scheme + "://" + parsed.Host
+}
+func bindFlexibleJSON(c *gin.Context, obj any) error {
+	if c == nil || c.Request == nil || c.Request.Body == nil {
+		return fmt.Errorf("empty request body")
+	}
+	data, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return err
+	}
+	var wrapper map[string]json.RawMessage
+	if errUnmarshal := json.Unmarshal(data, &wrapper); errUnmarshal == nil {
+		if inner, ok := wrapper["body"]; ok && len(inner) > 0 {
+			var testObj map[string]any
+			if errInner := json.Unmarshal(inner, &testObj); errInner == nil {
+				return json.Unmarshal(inner, obj)
+			}
+		}
+	}
+	return json.Unmarshal(data, obj)
 }
 
 func normalizeProxyEndpoint(raw string) string {
@@ -312,7 +332,7 @@ func (h *Handler) PostProxyPool(c *gin.Context) {
 		return
 	}
 	var req ProxyPoolPayload
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := bindFlexibleJSON(c, &req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
 		return
 	}
@@ -375,7 +395,7 @@ func (h *Handler) PutProxyPool(c *gin.Context) {
 	}
 
 	var req ProxyPoolPayload
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := bindFlexibleJSON(c, &req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
 		return
 	}
@@ -589,7 +609,7 @@ func (h *Handler) VerifyProxy(c *gin.Context) {
 		URL  string `json:"url"`
 		Pool string `json:"pool"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := bindFlexibleJSON(c, &req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
 		return
 	}
@@ -673,7 +693,7 @@ func (h *Handler) AssignProxyPool(c *gin.Context) {
 		Accounts []string `json:"accounts"`
 		Scope    string   `json:"scope"` // "all", "provider", "accounts"
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := bindFlexibleJSON(c, &req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
 		return
 	}
