@@ -65,7 +65,11 @@ func (s *sink) HandleUsage(ctx context.Context, record coreusage.Record) {
 		}
 		failMsg = TrimFailBody(failMsg)
 		if strings.Contains(strings.ToLower(failMsg), "verify") || strings.Contains(strings.ToLower(failMsg), "captcha") || strings.Contains(strings.ToLower(failMsg), "unauthorized") {
-			log.Warnf("[AUTH] ⚠️ %s | %s%s%s | verification required / credential issue: %s", p, model, accountStr, reasoningStr, failMsg)
+			if valURL := extractValidationURL(failMsg); valURL != "" {
+				log.Warnf("[AUTH] ⚠️ %s | %s%s%s | VALIDATION REQUIRED - URL: %s", p, model, accountStr, reasoningStr, valURL)
+			} else {
+				log.Warnf("[AUTH] ⚠️ %s | %s%s%s | verification required / credential issue: %s", p, model, accountStr, reasoningStr, failMsg)
+			}
 		} else {
 			log.Warnf("[USAGE] ❌ %s | %s%s%s | in=%d | out=%d | latency=%dms | FAILED (%d): %s", p, model, accountStr, reasoningStr, detail.InputTokens, detail.OutputTokens, record.Latency.Milliseconds(), status, failMsg)
 		}
@@ -82,4 +86,19 @@ func TrimFailBody(body string) string {
 		return body[:max]
 	}
 	return body
+}
+
+func extractValidationURL(msg string) string {
+	start := strings.Index(msg, "https://accounts.google.com")
+	if start < 0 {
+		return ""
+	}
+	sub := msg[start:]
+	end := strings.IndexFunc(sub, func(r rune) bool {
+		return r == '"' || r == '\'' || r == ' ' || r == '\t' || r == '\r' || r == '\n' || r == '\\'
+	})
+	if end > 0 {
+		return sub[:end]
+	}
+	return sub
 }

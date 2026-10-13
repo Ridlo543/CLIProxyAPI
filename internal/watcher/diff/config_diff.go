@@ -181,8 +181,10 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 	if oldLiveRelay.UDPPortMax != newLiveRelay.UDPPortMax {
 		changes = append(changes, fmt.Sprintf("codex.live-media-relay.udp-port-max: %d -> %d", oldLiveRelay.UDPPortMax, newLiveRelay.UDPPortMax))
 	}
-	if !reflect.DeepEqual(oldLiveRelay.ICEServers, newLiveRelay.ICEServers) {
-		changes = append(changes, fmt.Sprintf("codex.live-media-relay.ice-servers: updated (%d -> %d entries, credentials redacted)", len(oldLiveRelay.ICEServers), len(newLiveRelay.ICEServers)))
+	if len(oldLiveRelay.ICEServers) != 0 || len(newLiveRelay.ICEServers) != 0 {
+		if !reflect.DeepEqual(oldLiveRelay.ICEServers, newLiveRelay.ICEServers) {
+			changes = append(changes, fmt.Sprintf("codex.live-media-relay.ice-servers: updated (%d -> %d entries, credentials redacted)", len(oldLiveRelay.ICEServers), len(newLiveRelay.ICEServers)))
+		}
 	}
 
 	if oldCfg.Routing.Strategy != newCfg.Routing.Strategy {
@@ -563,6 +565,9 @@ func appendPayloadConfigChanges(changes []string, oldPayload, newPayload config.
 }
 
 func appendPayloadRuleChanges(changes []string, section string, oldRules, newRules []config.PayloadRule) []string {
+	if len(oldRules) == 0 && len(newRules) == 0 {
+		return changes
+	}
 	if reflect.DeepEqual(oldRules, newRules) {
 		return changes
 	}
@@ -570,6 +575,9 @@ func appendPayloadRuleChanges(changes []string, section string, oldRules, newRul
 }
 
 func appendPayloadFilterRuleChanges(changes []string, section string, oldRules, newRules []config.PayloadFilterRule) []string {
+	if len(oldRules) == 0 && len(newRules) == 0 {
+		return changes
+	}
 	if reflect.DeepEqual(oldRules, newRules) {
 		return changes
 	}

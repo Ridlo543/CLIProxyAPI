@@ -373,6 +373,10 @@ func newAntigravityStatusErr(statusCode int, body []byte) statusErr {
 	} else if statusCode == http.StatusForbidden {
 		if strings.Contains(string(body), "VALIDATION_REQUIRED") {
 			err.credentialScoped = true
+			if valURL := extractAntigravityValidationURL(body); valURL != "" {
+				log.Warnf("[AUTH] ⚠️ Antigravity VALIDATION REQUIRED - Verify at: %s", valURL)
+				err.msg = fmt.Sprintf("Verify your account to continue: %s", valURL)
+			}
 		}
 	}
 	return err

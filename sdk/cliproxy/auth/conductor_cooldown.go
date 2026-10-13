@@ -21,6 +21,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	log "github.com/sirupsen/logrus"
 )
 
 var quotaCooldownDisabled atomic.Bool
@@ -911,6 +912,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 								auth.Attributes = make(map[string]string)
 							}
 							auth.Attributes["validation_url"] = valURL
+							log.Warnf("[AUTH] ⚠️ %s | account=%s | VALIDATION REQUIRED - URL: %s", auth.Provider, auth.ID, valURL)
 						}
 						for _, otherState := range auth.ModelStates {
 							if otherState != nil {
@@ -2441,6 +2443,7 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 				auth.Attributes = make(map[string]string)
 			}
 			auth.Attributes["validation_url"] = valURL
+			log.Warnf("[AUTH] ⚠️ %s | account=%s | VALIDATION REQUIRED - URL: %s", auth.Provider, auth.ID, valURL)
 		}
 	} else {
 		switch statusCode {

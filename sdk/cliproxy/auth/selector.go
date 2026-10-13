@@ -1435,7 +1435,7 @@ func (s *SessionAffinitySelector) pickLCP(ctx context.Context, provider, model s
 					delete(opts.Metadata, cliproxyexecutor.IsCompactionMetadataKey)
 					delete(opts.Metadata, cliproxyexecutor.NodeKindMetadataKey)
 				}
-				entry.Infof("session-affinity: LCP cache hit | session=%s prefix=%d auth=%s provider=%s model=%s%s", truncateSessionID(match.SessionID), match.PrefixLength, auth.ID, provider, model, effortStr)
+				entry.Debugf("session-affinity: LCP cache hit | session=%s prefix=%d auth=%s provider=%s model=%s%s", truncateSessionID(match.SessionID), match.PrefixLength, auth.ID, provider, model, effortStr)
 			}
 			return auth, true, nil
 		}
@@ -1479,7 +1479,7 @@ func (s *SessionAffinitySelector) pickLCP(ctx context.Context, provider, model s
 				delete(opts.Metadata, cliproxyexecutor.IsCompactionMetadataKey)
 				delete(opts.Metadata, cliproxyexecutor.NodeKindMetadataKey)
 			}
-			entry.Infof("session-affinity: LCP cache hit but auth transiently unavailable, failover without rebinding | session=%s bound_auth=%s failover_auth=%s provider=%s model=%s", truncateSessionID(bindRes.SessionID), preservedAuthID, auth.ID, provider, model)
+			entry.Debugf("session-affinity: LCP cache hit but auth transiently unavailable, failover without rebinding | session=%s bound_auth=%s failover_auth=%s provider=%s model=%s", truncateSessionID(bindRes.SessionID), preservedAuthID, auth.ID, provider, model)
 		} else if bindRes.IsFork {
 			if opts.Metadata != nil {
 				opts.Metadata[cliproxyexecutor.IsForkMetadataKey] = true

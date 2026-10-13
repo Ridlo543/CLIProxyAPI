@@ -121,7 +121,7 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 				log.Debugf("auth file unchanged (hash match), skipping reload: %s", filepath.Base(event.Name))
 				return
 			}
-			log.Infof("auth file changed (%s): %s, processing incrementally", event.Op.String(), filepath.Base(event.Name))
+			log.Debugf("auth file changed (%s): %s, processing incrementally", event.Op.String(), filepath.Base(event.Name))
 			w.addOrUpdateClientLocked(event.Name)
 			return
 		}
@@ -129,7 +129,7 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 			log.Debugf("ignoring remove for unknown auth file: %s", filepath.Base(event.Name))
 			return
 		}
-		log.Infof("auth file changed (%s): %s, processing incrementally", event.Op.String(), filepath.Base(event.Name))
+			log.Debugf("auth file changed (%s): %s, processing incrementally", event.Op.String(), filepath.Base(event.Name))
 		w.removeClientLocked(event.Name)
 		return
 	}
@@ -138,7 +138,7 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 			log.Debugf("auth file unchanged (hash match), skipping reload: %s", filepath.Base(event.Name))
 			return
 		}
-		log.Infof("auth file changed (%s): %s, processing incrementally", event.Op.String(), filepath.Base(event.Name))
+		log.Debugf("auth file changed (%s): %s, processing incrementally", event.Op.String(), filepath.Base(event.Name))
 		w.addOrUpdateClientLocked(event.Name)
 	}
 }
