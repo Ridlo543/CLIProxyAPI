@@ -102,3 +102,109 @@ func TestAPICallStrictPoolExhaustionIsGeneric(t *testing.T) {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestProxyPoolsCRUDLifecycle(t *testing.T) {
+	cfg := &config.Config{}
+	h := &Handler{cfg: cfg}
+	router := gin.New()
+	router.POST("/proxy-pools", h.PostProxyPool)
+	router.PUT("/proxy-pools/:name", h.PutProxyPool)
+	router.DELETE("/proxy-pools/:name", h.DeleteProxyPool)
+
+	// 1. Create a pool
+	createPayload := `{"name":"pool-a","strategy":"round-robin","strict":false,"cooldown":"30s","entries":["direct","http://127.0.0.1:8080"]}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/proxy-pools", strings.NewReader(createPayload))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(cfg.ProxyPools) != 1 || cfg.ProxyPools[0].Name != "pool-a" {
+		t.Fatalf("cfg.ProxyPools = %#v", cfg.ProxyPools)
+	}
+
+	// 2. Update pool
+	updatePayload := `{"strategy":"random","strict":true,"cooldown":"1m"}`
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, "/proxy-pools/pool-a", strings.NewReader(updatePayload))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if cfg.ProxyPools[0].Strategy != "random" || !cfg.ProxyPools[0].Strict || cfg.ProxyPools[0].Cooldown != "1m" {
+		t.Fatalf("updated pool = %#v", cfg.ProxyPools[0])
+	}
+
+	// 3. Delete pool
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/proxy-pools/pool-a", nil)
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(cfg.ProxyPools) != 0 {
+		t.Fatalf("expected 0 pools after delete, got %d", len(cfg.ProxyPools))
+	}
+}
+
+func TestProxyPoolsVerifyDirect(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}}
+	router := gin.New()
+	router.POST("/proxy-pools/verify", h.VerifyProxy)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/proxy-pools/verify", strings.NewReader(`{"url":"direct"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("verify status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestProxyPoolsAssign(t *testing.T) {
+	manager := coreauth.NewManager(nil, nil, nil)
+	auth := &coreauth.Auth{ID: "test-auth.json", FileName: "test-auth.json", Provider: "antigravity", Status: coreauth.StatusActive}
+	_, _ = manager.Register(context.Background(), auth)
+
+	cfg := &config.Config{
+		SDKConfig: config.SDKConfig{
+			ProxyPools: []config.ProxyPool{{
+				Name:     "webshare",
+				Strategy: "round-robin",
+				Entries:  []config.ProxyPoolEntry{{URL: "direct"}},
+			}},
+		},
+		GeminiKey: []config.GeminiKey{{APIKey: "k1"}},
+	}
+	h := &Handler{cfg: cfg, authManager: manager}
+	router := gin.New()
+	router.POST("/proxy-pools/assign", h.AssignProxyPool)
+
+	// Assign to provider antigravity
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/proxy-pools/assign", strings.NewReader(`{"pool":"webshare","provider":"antigravity"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("assign status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	updated, _ := manager.GetByID("test-auth.json")
+	if updated == nil || updated.ProxyPool != "webshare" {
+		t.Fatalf("updated.ProxyPool = %v, want webshare", updated)
+	}
+
+	// Toggle back to direct (none)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/proxy-pools/assign", strings.NewReader(`{"pool":"direct","provider":"antigravity"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("assign status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	updated, _ = manager.GetByID("test-auth.json")
+	if updated == nil || updated.ProxyPool != "" {
+		t.Fatalf("updated.ProxyPool = %v, want empty (direct)", updated)
+	}
+}
