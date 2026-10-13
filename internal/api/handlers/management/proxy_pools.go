@@ -90,6 +90,69 @@ type ProxyPoolResponseItem struct {
 	BoundProviders []string `json:"bound_providers,omitempty"`
 }
 
+func poolContains(assigned, target string) bool {
+	target = strings.ToLower(strings.TrimSpace(target))
+	if target == "" {
+		return false
+	}
+	for _, part := range strings.FieldsFunc(assigned, func(r rune) bool {
+		return r == ',' || r == '+' || r == ';'
+	}) {
+		if strings.EqualFold(strings.TrimSpace(part), target) {
+			return true
+		}
+	}
+	return false
+}
+
+func togglePoolInList(current, target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" || strings.EqualFold(target, "direct") || strings.EqualFold(target, "none") {
+		return ""
+	}
+	var list []string
+	exists := false
+	for _, part := range strings.FieldsFunc(current, func(r rune) bool {
+		return r == ',' || r == '+' || r == ';'
+	}) {
+		p := strings.TrimSpace(part)
+		if p == "" {
+			continue
+		}
+		if strings.EqualFold(p, target) {
+			exists = true
+		} else {
+			list = append(list, p)
+		}
+	}
+	if !exists {
+		list = append(list, target)
+	}
+	return strings.Join(list, ",")
+}
+
+func replacePoolInList(current, oldName, newName string) string {
+	oldName = strings.TrimSpace(oldName)
+	newName = strings.TrimSpace(newName)
+	var list []string
+	for _, part := range strings.FieldsFunc(current, func(r rune) bool {
+		return r == ',' || r == '+' || r == ';'
+	}) {
+		p := strings.TrimSpace(part)
+		if p == "" {
+			continue
+		}
+		if strings.EqualFold(p, oldName) {
+			if newName != "" && !strings.EqualFold(newName, "direct") && !strings.EqualFold(newName, "none") {
+				list = append(list, newName)
+			}
+		} else {
+			list = append(list, p)
+		}
+	}
+	return strings.Join(list, ",")
+}
+
 func (h *Handler) collectBoundAccounts(poolName string) []string {
 	var accounts []string
 	if poolName == "" {
@@ -108,7 +171,7 @@ func (h *Handler) collectBoundAccounts(poolName string) []string {
 			if a == nil {
 				continue
 			}
-			if strings.EqualFold(strings.TrimSpace(a.ProxyPool), poolName) {
+			if poolContains(a.ProxyPool, poolName) {
 				name := a.Label
 				if name == "" {
 					name = a.FileName
@@ -122,23 +185,23 @@ func (h *Handler) collectBoundAccounts(poolName string) []string {
 	}
 	if h != nil && h.cfg != nil {
 		for _, k := range h.cfg.GeminiKey {
-			if strings.EqualFold(strings.TrimSpace(k.ProxyPool), poolName) {
+			if poolContains(k.ProxyPool, poolName) {
 				add("gemini-api-key")
 			}
 		}
 		for _, k := range h.cfg.ClaudeKey {
-			if strings.EqualFold(strings.TrimSpace(k.ProxyPool), poolName) {
+			if poolContains(k.ProxyPool, poolName) {
 				add("claude-api-key")
 			}
 		}
 		for _, k := range h.cfg.CodexKey {
-			if strings.EqualFold(strings.TrimSpace(k.ProxyPool), poolName) {
+			if poolContains(k.ProxyPool, poolName) {
 				add("codex-api-key")
 			}
 		}
 		for _, compat := range h.cfg.OpenAICompatibility {
 			for _, entry := range compat.APIKeyEntries {
-				if strings.EqualFold(strings.TrimSpace(entry.ProxyPool), poolName) {
+				if poolContains(entry.ProxyPool, poolName) {
 					add("openai-compat:" + compat.Name)
 				}
 			}
@@ -162,35 +225,35 @@ func (h *Handler) collectBoundProviders(poolName string) []string {
 	}
 	if h != nil && h.authManager != nil {
 		for _, a := range h.authManager.List() {
-			if a != nil && strings.EqualFold(strings.TrimSpace(a.ProxyPool), poolName) {
+			if a != nil && poolContains(a.ProxyPool, poolName) {
 				add(a.Provider)
 			}
 		}
 	}
 	if h != nil && h.cfg != nil {
 		for _, k := range h.cfg.GeminiKey {
-			if strings.EqualFold(strings.TrimSpace(k.ProxyPool), poolName) {
+			if poolContains(k.ProxyPool, poolName) {
 				add("gemini")
 			}
 		}
 		for _, k := range h.cfg.ClaudeKey {
-			if strings.EqualFold(strings.TrimSpace(k.ProxyPool), poolName) {
+			if poolContains(k.ProxyPool, poolName) {
 				add("claude")
 			}
 		}
 		for _, k := range h.cfg.CodexKey {
-			if strings.EqualFold(strings.TrimSpace(k.ProxyPool), poolName) {
+			if poolContains(k.ProxyPool, poolName) {
 				add("codex")
 			}
 		}
 		for _, k := range h.cfg.XAIKey {
-			if strings.EqualFold(strings.TrimSpace(k.ProxyPool), poolName) {
+			if poolContains(k.ProxyPool, poolName) {
 				add("xai")
 			}
 		}
 		for _, compat := range h.cfg.OpenAICompatibility {
 			for _, entry := range compat.APIKeyEntries {
-				if strings.EqualFold(strings.TrimSpace(entry.ProxyPool), poolName) {
+				if poolContains(entry.ProxyPool, poolName) {
 					add(compat.Name)
 				}
 			}
@@ -511,54 +574,43 @@ func (h *Handler) updateProxyPoolReferences(oldPoolName, newPoolName string) {
 		return
 	}
 	for i := range h.cfg.GeminiKey {
-		if strings.EqualFold(strings.TrimSpace(h.cfg.GeminiKey[i].ProxyPool), oldPoolName) {
-			h.cfg.GeminiKey[i].ProxyPool = newPoolName
-		}
+		h.cfg.GeminiKey[i].ProxyPool = replacePoolInList(h.cfg.GeminiKey[i].ProxyPool, oldPoolName, newPoolName)
 	}
 	for i := range h.cfg.InteractionsKey {
-		if strings.EqualFold(strings.TrimSpace(h.cfg.InteractionsKey[i].ProxyPool), oldPoolName) {
-			h.cfg.InteractionsKey[i].ProxyPool = newPoolName
-		}
+		h.cfg.InteractionsKey[i].ProxyPool = replacePoolInList(h.cfg.InteractionsKey[i].ProxyPool, oldPoolName, newPoolName)
 	}
 	for i := range h.cfg.ClaudeKey {
-		if strings.EqualFold(strings.TrimSpace(h.cfg.ClaudeKey[i].ProxyPool), oldPoolName) {
-			h.cfg.ClaudeKey[i].ProxyPool = newPoolName
-		}
+		h.cfg.ClaudeKey[i].ProxyPool = replacePoolInList(h.cfg.ClaudeKey[i].ProxyPool, oldPoolName, newPoolName)
 	}
 	for i := range h.cfg.CodexKey {
-		if strings.EqualFold(strings.TrimSpace(h.cfg.CodexKey[i].ProxyPool), oldPoolName) {
-			h.cfg.CodexKey[i].ProxyPool = newPoolName
-		}
+		h.cfg.CodexKey[i].ProxyPool = replacePoolInList(h.cfg.CodexKey[i].ProxyPool, oldPoolName, newPoolName)
 	}
 	for i := range h.cfg.XAIKey {
-		if strings.EqualFold(strings.TrimSpace(h.cfg.XAIKey[i].ProxyPool), oldPoolName) {
-			h.cfg.XAIKey[i].ProxyPool = newPoolName
-		}
+		h.cfg.XAIKey[i].ProxyPool = replacePoolInList(h.cfg.XAIKey[i].ProxyPool, oldPoolName, newPoolName)
 	}
 	for i := range h.cfg.VertexCompatAPIKey {
-		if strings.EqualFold(strings.TrimSpace(h.cfg.VertexCompatAPIKey[i].ProxyPool), oldPoolName) {
-			h.cfg.VertexCompatAPIKey[i].ProxyPool = newPoolName
-		}
+		h.cfg.VertexCompatAPIKey[i].ProxyPool = replacePoolInList(h.cfg.VertexCompatAPIKey[i].ProxyPool, oldPoolName, newPoolName)
 	}
 	for i := range h.cfg.OpenAICompatibility {
 		for j := range h.cfg.OpenAICompatibility[i].APIKeyEntries {
-			if strings.EqualFold(strings.TrimSpace(h.cfg.OpenAICompatibility[i].APIKeyEntries[j].ProxyPool), oldPoolName) {
-				h.cfg.OpenAICompatibility[i].APIKeyEntries[j].ProxyPool = newPoolName
-			}
+			h.cfg.OpenAICompatibility[i].APIKeyEntries[j].ProxyPool = replacePoolInList(h.cfg.OpenAICompatibility[i].APIKeyEntries[j].ProxyPool, oldPoolName, newPoolName)
 		}
 	}
 	if h.authManager != nil {
 		for _, a := range h.authManager.List() {
-			if a != nil && strings.EqualFold(strings.TrimSpace(a.ProxyPool), oldPoolName) {
-				a.ProxyPool = newPoolName
+			if a != nil && poolContains(a.ProxyPool, oldPoolName) {
+				updated := replacePoolInList(a.ProxyPool, oldPoolName, newPoolName)
+				a.ProxyPool = updated
 				if a.Metadata != nil {
-					if newPoolName == "" {
+					if updated == "" {
 						delete(a.Metadata, "proxy_pool")
 					} else {
-						a.Metadata["proxy_pool"] = newPoolName
+						a.Metadata["proxy_pool"] = updated
 					}
 				}
-				h.persistAuthFileProxyPool(a, newPoolName)
+				a.UpdatedAt = time.Now()
+				_, _ = h.authManager.Update(context.Background(), a)
+				h.persistAuthFileProxyPool(a, updated)
 			}
 		}
 	}
@@ -691,7 +743,8 @@ func (h *Handler) AssignProxyPool(c *gin.Context) {
 		Pool     string   `json:"pool"` // empty, "direct", or named pool
 		Provider string   `json:"provider"`
 		Accounts []string `json:"accounts"`
-		Scope    string   `json:"scope"` // "all", "provider", "accounts"
+		Scope    string   `json:"scope"`  // "all", "provider", "accounts"
+		Action   string   `json:"action"` // "toggle" (default for single pool toggle), "set", "remove"
 	}
 	if err := bindFlexibleJSON(c, &req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
@@ -709,6 +762,20 @@ func (h *Handler) AssignProxyPool(c *gin.Context) {
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	computeNewPool := func(current string) string {
+		if targetPool == "" {
+			return ""
+		}
+		if req.Action == "set" {
+			return targetPool
+		}
+		if req.Action == "remove" {
+			return replacePoolInList(current, targetPool, "")
+		}
+		// Default action: toggle inclusion in list
+		return togglePoolInList(current, targetPool)
+	}
 
 	updatedCount := 0
 	targetProvider := strings.ToLower(strings.TrimSpace(req.Provider))
@@ -732,18 +799,19 @@ func (h *Handler) AssignProxyPool(c *gin.Context) {
 			}
 
 			if match {
-				a.ProxyPool = targetPool
+				newPool := computeNewPool(a.ProxyPool)
+				a.ProxyPool = newPool
 				if a.Metadata == nil {
 					a.Metadata = make(map[string]any)
 				}
-				if targetPool == "" {
+				if newPool == "" {
 					delete(a.Metadata, "proxy_pool")
 				} else {
-					a.Metadata["proxy_pool"] = targetPool
+					a.Metadata["proxy_pool"] = newPool
 				}
 				a.UpdatedAt = time.Now()
 				_, _ = h.authManager.Update(context.Background(), a)
-				h.persistAuthFileProxyPool(a, targetPool)
+				h.persistAuthFileProxyPool(a, newPool)
 				updatedCount++
 			}
 		}
@@ -753,28 +821,28 @@ func (h *Handler) AssignProxyPool(c *gin.Context) {
 	if req.Scope == "all" || targetProvider != "" {
 		if req.Scope == "all" || targetProvider == "gemini" {
 			for i := range h.cfg.GeminiKey {
-				h.cfg.GeminiKey[i].ProxyPool = targetPool
+				h.cfg.GeminiKey[i].ProxyPool = computeNewPool(h.cfg.GeminiKey[i].ProxyPool)
 			}
 		}
 		if req.Scope == "all" || targetProvider == "claude" {
 			for i := range h.cfg.ClaudeKey {
-				h.cfg.ClaudeKey[i].ProxyPool = targetPool
+				h.cfg.ClaudeKey[i].ProxyPool = computeNewPool(h.cfg.ClaudeKey[i].ProxyPool)
 			}
 		}
 		if req.Scope == "all" || targetProvider == "codex" {
 			for i := range h.cfg.CodexKey {
-				h.cfg.CodexKey[i].ProxyPool = targetPool
+				h.cfg.CodexKey[i].ProxyPool = computeNewPool(h.cfg.CodexKey[i].ProxyPool)
 			}
 		}
 		if req.Scope == "all" || targetProvider == "xai" {
 			for i := range h.cfg.XAIKey {
-				h.cfg.XAIKey[i].ProxyPool = targetPool
+				h.cfg.XAIKey[i].ProxyPool = computeNewPool(h.cfg.XAIKey[i].ProxyPool)
 			}
 		}
 		for i := range h.cfg.OpenAICompatibility {
 			if req.Scope == "all" || strings.EqualFold(h.cfg.OpenAICompatibility[i].Name, targetProvider) {
 				for j := range h.cfg.OpenAICompatibility[i].APIKeyEntries {
-					h.cfg.OpenAICompatibility[i].APIKeyEntries[j].ProxyPool = targetPool
+					h.cfg.OpenAICompatibility[i].APIKeyEntries[j].ProxyPool = computeNewPool(h.cfg.OpenAICompatibility[i].APIKeyEntries[j].ProxyPool)
 				}
 			}
 		}
@@ -789,7 +857,6 @@ func (h *Handler) AssignProxyPool(c *gin.Context) {
 			h.reloadConfigAfterManagementSaveAsync(reqCtx, snapshot)
 		}
 	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"status":        "ok",
 		"pool":          targetPool,

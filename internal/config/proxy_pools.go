@@ -27,12 +27,29 @@ func (cfg *Config) HasProxyPool(name string) bool {
 	if cfg == nil || name == "" {
 		return false
 	}
-	for i := range cfg.ProxyPools {
-		if strings.EqualFold(strings.TrimSpace(cfg.ProxyPools[i].Name), name) {
-			return true
+	parts := strings.FieldsFunc(name, func(r rune) bool {
+		return r == ',' || r == '+' || r == ';'
+	})
+	if len(parts) == 0 {
+		return false
+	}
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		found := false
+		for i := range cfg.ProxyPools {
+			if strings.EqualFold(strings.TrimSpace(cfg.ProxyPools[i].Name), part) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func (cfg *Config) NormalizeProxyPools() error {
@@ -86,13 +103,21 @@ func (cfg *Config) NormalizeProxyPools() error {
 }
 
 func (cfg *Config) validateProxyPoolReferences(names map[string]struct{}) error {
-	check := func(location, name string) error {
-		name = strings.TrimSpace(name)
-		if name == "" {
+	check := func(location, raw string) error {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
 			return nil
 		}
-		if _, ok := names[strings.ToLower(name)]; !ok {
-			return fmt.Errorf("%s: unknown proxy pool %q", location, name)
+		for _, part := range strings.FieldsFunc(raw, func(r rune) bool {
+			return r == ',' || r == '+' || r == ';'
+		}) {
+			p := strings.ToLower(strings.TrimSpace(part))
+			if p == "" {
+				continue
+			}
+			if _, ok := names[p]; !ok {
+				return fmt.Errorf("%s: unknown proxy pool %q", location, part)
+			}
 		}
 		return nil
 	}

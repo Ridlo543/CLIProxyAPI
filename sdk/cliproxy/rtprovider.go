@@ -35,10 +35,11 @@ type proxyPoolState struct {
 // defaultRoundTripperProvider resolves credential proxy overrides and named pools.
 // Pool transport failures affect subsequent outbound attempts; requests are never replayed here.
 type defaultRoundTripperProvider struct {
-	mu     sync.Mutex
-	cache  map[string]http.RoundTripper
-	pools  map[string]*proxyPoolState
-	global string
+	mu            sync.Mutex
+	cache         map[string]http.RoundTripper
+	pools         map[string]*proxyPoolState
+	global        string
+	compositeNext uint64
 }
 
 func newDefaultRoundTripperProvider(configs ...*config.Config) *defaultRoundTripperProvider {
@@ -144,26 +145,78 @@ func (p *defaultRoundTripperProvider) RoundTripperFor(auth *coreauth.Auth) http.
 	if proxyURL := strings.TrimSpace(auth.ProxyURL); proxyURL != "" {
 		return p.transportLocked(proxyURL)
 	}
-	poolName := normalizePoolName(auth.ProxyPool)
-	if poolName == "" {
+	poolNames := parsePoolNames(auth.ProxyPool)
+	if len(poolNames) == 0 {
 		return p.transportLocked(p.global)
 	}
-	pool := p.pools[poolName]
-	if pool == nil {
-		return errorRoundTripper{err: errors.New("selected proxy pool is not configured")}
+	if len(poolNames) == 1 {
+		poolName := poolNames[0]
+		pool := p.pools[poolName]
+		if pool == nil {
+			return errorRoundTripper{err: errors.New("selected proxy pool is not configured")}
+		}
+		index := selectPoolEntryLocked(pool, time.Now())
+		if index < 0 {
+			if p.global != "" && !pool.strict {
+				return p.transportLocked(p.global)
+			}
+			return errorRoundTripper{err: errors.New("selected proxy pool has no healthy entries")}
+		}
+		rt := p.transportLocked(pool.entries[index].url)
+		if rt == nil {
+			rt = http.DefaultTransport
+		}
+		return &poolRoundTripper{base: rt, provider: p, pool: poolName, entryID: pool.entries[index].id}
 	}
-	index := selectPoolEntryLocked(pool, time.Now())
-	if index < 0 {
-		if p.global != "" && !pool.strict {
+
+	// Multiple pools combined: collect healthy entries across all pools
+	now := time.Now()
+	type poolCandidate struct {
+		poolName string
+		entryID  string
+		url      string
+	}
+	var candidates []poolCandidate
+	allStrict := true
+	anyConfigured := false
+	for _, poolName := range poolNames {
+		pool := p.pools[poolName]
+		if pool == nil {
+			continue
+		}
+		anyConfigured = true
+		if !pool.strict {
+			allStrict = false
+		}
+		for i := range pool.entries {
+			if !pool.entries[i].cooldownUntil.After(now) {
+				candidates = append(candidates, poolCandidate{
+					poolName: poolName,
+					entryID:  pool.entries[i].id,
+					url:      pool.entries[i].url,
+				})
+			}
+		}
+	}
+
+	if !anyConfigured {
+		return errorRoundTripper{err: errors.New("selected proxy pools are not configured")}
+	}
+
+	if len(candidates) == 0 {
+		if p.global != "" && !allStrict {
 			return p.transportLocked(p.global)
 		}
-		return errorRoundTripper{err: errors.New("selected proxy pool has no healthy entries")}
+		return errorRoundTripper{err: errors.New("selected proxy pools have no healthy entries")}
 	}
-	rt := p.transportLocked(pool.entries[index].url)
+
+	selected := candidates[p.compositeNext%uint64(len(candidates))]
+	p.compositeNext++
+	rt := p.transportLocked(selected.url)
 	if rt == nil {
 		rt = http.DefaultTransport
 	}
-	return &poolRoundTripper{base: rt, provider: p, pool: poolName, entryID: pool.entries[index].id}
+	return &poolRoundTripper{base: rt, provider: p, pool: selected.poolName, entryID: selected.entryID}
 }
 
 func (p *defaultRoundTripperProvider) ProxyPoolAttemptLimit(auth *coreauth.Auth) int {
@@ -172,14 +225,27 @@ func (p *defaultRoundTripperProvider) ProxyPoolAttemptLimit(auth *coreauth.Auth)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if pool := p.pools[normalizePoolName(auth.ProxyPool)]; pool != nil {
-		limit := len(pool.entries)
-		if !pool.strict && p.global != "" {
-			limit++
-		}
-		return limit
+	poolNames := parsePoolNames(auth.ProxyPool)
+	if len(poolNames) == 0 {
+		return 1
 	}
-	return 1
+	totalLimit := 0
+	allStrict := true
+	for _, name := range poolNames {
+		if pool := p.pools[name]; pool != nil {
+			totalLimit += len(pool.entries)
+			if !pool.strict {
+				allStrict = false
+			}
+		}
+	}
+	if !allStrict && p.global != "" {
+		totalLimit++
+	}
+	if totalLimit <= 0 {
+		return 1
+	}
+	return totalLimit
 }
 
 func selectPoolEntryLocked(pool *proxyPoolState, now time.Time) int {
@@ -202,6 +268,17 @@ func selectPoolEntryLocked(pool *proxyPoolState, now time.Time) int {
 	default:
 		return healthy[0]
 	}
+}
+func parsePoolNames(raw string) []string {
+	var out []string
+	for _, part := range strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '+' || r == ';'
+	}) {
+		if s := normalizePoolName(part); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func (p *defaultRoundTripperProvider) transportLocked(raw string) http.RoundTripper {
