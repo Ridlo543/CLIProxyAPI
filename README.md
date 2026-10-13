@@ -2,7 +2,7 @@
 
 English | [中文](README_CN.md) | [日本語](README_JA.md)
 
-## AinyRouter fork — run locally like 9Router
+## AinyRouter fork — run locally like AinyRouter
 
 ### Install (end users, Windows)
 
@@ -352,7 +352,7 @@ Browser agent that can connect to CLIProxyAPI's local OpenAI-compatible endpoint
 
 ### [Infinitus](https://github.com/deathemperor/infinitus)
 
-Native macOS menu bar app that runs a fleet of Claude accounts through CLIProxyAPI's Management API (claude-swap and 9Router too): 5h / 7d / per-model quota gauges, switch / hold / star from the popup, a run-rate forecast of when each window runs out, and an iPhone companion that mirrors it all - no API keys needed.
+Native macOS menu bar app that runs a fleet of Claude accounts through CLIProxyAPI's Management API (claude-swap and AinyRouter too): 5h / 7d / per-model quota gauges, switch / hold / star from the popup, a run-rate forecast of when each window runs out, and an iPhone companion that mirrors it all - no API keys needed.
 
 ### [PiCloud](https://github.com/cookerpapa/pi-cloud)
 
@@ -377,7 +377,7 @@ A modern, responsive web dashboard and management console for CLIProxyAPI built 
 
 Those projects are ports of CLIProxyAPI or inspired by it:
 
-### [9Router](https://github.com/decolua/9router)
+### [AinyRouter](https://github.com/decolua/ainyrouter)
 
 A Next.js implementation inspired by CLIProxyAPI, easy to install and use, built from scratch with format translation (OpenAI/Claude/Gemini/Ollama), combo system with auto-fallback, multi-account management with exponential backoff, a Next.js web dashboard, and support for CLI tools (Cursor, Claude Code, Cline, RooCode) - no API keys needed.
 

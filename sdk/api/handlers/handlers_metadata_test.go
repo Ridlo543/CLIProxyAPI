@@ -76,12 +76,12 @@ func TestRequestExecutionMetadataIncludesExecutionSessionWithoutIdempotencyKey(t
 
 func TestContextCompressionOptOutHeaderContract(t *testing.T) {
 	for _, value := range []string{"off", "OFF"} {
-		if !contextCompressionOptOut(context.Background(), http.Header{"X-9router-Token-Saver": []string{value}}) {
+		if !contextCompressionOptOut(context.Background(), http.Header{"X-ainyrouter-Token-Saver": []string{value}}) {
 			t.Fatalf("value %q did not opt out", value)
 		}
 	}
 	for _, value := range []string{"", "false", "0", "disabled", " Off "} {
-		if contextCompressionOptOut(context.Background(), http.Header{"X-9router-Token-Saver": []string{value}}) {
+		if contextCompressionOptOut(context.Background(), http.Header{"X-ainyrouter-Token-Saver": []string{value}}) {
 			t.Fatalf("value %q unexpectedly opted out", value)
 		}
 	}

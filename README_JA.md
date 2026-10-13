@@ -277,7 +277,7 @@ CLIProxyAPI のローカル OpenAI 互換エンドポイントをモデルプロ
 
 ### [Infinitus](https://github.com/deathemperor/infinitus)
 
-CLIProxyAPI の Management API 経由で複数の Claude アカウントを管理するネイティブ macOS メニューバーアプリ（claude-swap と 9Router にも対応）。5 時間 / 7 日 / モデル別のクォータゲージ、ポップアップからの切り替え / 保留 / スター、現在のペースから各ウィンドウが尽きる時刻を予測する機能に加え、iPhone からも同じ状態を確認できます。
+CLIProxyAPI の Management API 経由で複数の Claude アカウントを管理するネイティブ macOS メニューバーアプリ（claude-swap と AinyRouter にも対応）。5 時間 / 7 日 / モデル別のクォータゲージ、ポップアップからの切り替え / 保留 / スター、現在のペースから各ウィンドウが尽きる時刻を予測する機能に加え、iPhone からも同じ状態を確認できます。
 
 ### [PiCloud](https://github.com/cookerpapa/pi-cloud)
 
@@ -302,7 +302,7 @@ React と Tailwind CSS で構築された、CLIProxyAPI 向けのモダンでレ
 
 以下のプロジェクトはCLIProxyAPIの移植版またはそれに触発されたものです：
 
-### [9Router](https://github.com/decolua/9router)
+### [AinyRouter](https://github.com/decolua/ainyrouter)
 
 CLIProxyAPIに触発されたNext.js実装。インストールと使用が簡単で、フォーマット変換（OpenAI/Claude/Gemini/Ollama）、自動フォールバック付きコンボシステム、指数バックオフ付きマルチアカウント管理、Next.js Webダッシュボード、CLIツール（Cursor、Claude Code、Cline、RooCode）のサポートをゼロから構築 - APIキー不要
 

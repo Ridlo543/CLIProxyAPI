@@ -267,7 +267,7 @@ func contextCompressionOptOut(ctx context.Context, explicit http.Header) bool {
 			value = ginCtx.GetHeader(contextcompression.OptOutHeader)
 		}
 	}
-	// Match 9Router exactly: lowercase comparison without whitespace normalization.
+	// Match AinyRouter exactly: lowercase comparison without whitespace normalization.
 	return strings.EqualFold(value, "off")
 }
 

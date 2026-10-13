@@ -18,7 +18,7 @@ const (
 )
 
 // ComboModelRef references one concrete upstream model as "provider/model",
-// mirroring 9Router's combo chain entries (e.g. "ag/claude-sonnet-4-5").
+// mirroring AinyRouter's combo chain entries (e.g. "ag/claude-sonnet-4-5").
 // provider must match a provider identifier known to the router
 // (oauth channel, openai-compatibility name, or keyless listing id).
 type ComboModelRef struct {
@@ -55,7 +55,7 @@ func (c *ComboConfig) Normalize() {
 }
 
 // Validate reports whether the combo is safe to persist. minModels guards
-// against degenerate chains (9Router requires at least two members too).
+// against degenerate chains (AinyRouter requires at least two members too).
 func (c *ComboConfig) Validate(minModels int) error {
 	if c.Name == "" {
 		return fmt.Errorf("combo name is required")

@@ -29,7 +29,7 @@ type ConsoleMenuOptions struct {
 }
 
 // RunConsoleMenu starts the proxy in the background and drives the
-// 9Router-style terminal menu:
+// AinyRouter-style terminal menu:
 //
 //  1. Web UI (Open in Browser)
 //  2. Hide to Tray (Background)

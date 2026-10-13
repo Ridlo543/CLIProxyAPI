@@ -28,7 +28,7 @@ func (s *sink) HandleUsage(ctx context.Context, record coreusage.Record) {
 	}
 	Default().Add(RecordFromUsage(record, status))
 
-	// Detailed 9Router-style [USAGE] & [ERROR] logging
+	// Detailed AinyRouter-style [USAGE] & [ERROR] logging
 	p := strings.ToUpper(strings.TrimSpace(record.Provider))
 	if p == "" {
 		p = "LLM"

@@ -20,7 +20,7 @@ func NewRuntime() *Runtime { return &Runtime{} }
 // Shutdown is a no-op when external TARE binary execution is removed.
 func (r *Runtime) Shutdown(ctx context.Context) error { return nil }
 
-const OptOutHeader = "x-9router-token-saver"
+const OptOutHeader = "x-ainyrouter-token-saver"
 
 type Stats struct {
 	Engine      string `json:"engine"`

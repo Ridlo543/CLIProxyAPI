@@ -143,7 +143,7 @@ func (s *Server) setupRoutes() {
 		v1beta.GET("/models/*action", s.geminiGetHandler(geminiHandlers))
 	}
 
-	// Root endpoint: open the management dashboard directly (9Router-style).
+	// Root endpoint: open the management dashboard directly (AinyRouter-style).
 	// When the control panel is unavailable (headless/docker builds without
 	// the asset), fall back to the legacy API summary, also kept at /api-info.
 	s.engine.GET("/", func(c *gin.Context) {

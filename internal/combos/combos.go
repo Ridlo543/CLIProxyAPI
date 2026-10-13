@@ -221,7 +221,7 @@ func Order(c config.ComboConfig) []config.ComboModelRef {
 	return append(append([]config.ComboModelRef(nil), members[head:]...), members[:head]...)
 }
 
-// ShouldFallbackStatus mirrors 9Router's accountFallback rules: transient,
+// ShouldFallbackStatus mirrors AinyRouter's accountFallback rules: transient,
 // capacity, and auth-exhaustion failures try the next member; definite client
 // mistakes do not.
 func ShouldFallbackStatus(status int) bool {

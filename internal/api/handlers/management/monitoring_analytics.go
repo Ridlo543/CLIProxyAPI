@@ -137,7 +137,7 @@ type accountIdentity struct {
 }
 
 // canonicalProvider collapses the many provider spellings seen in events
-// (legacy 9Router values, executor names, per-entry compat names like
+// (legacy AinyRouter values, executor names, per-entry compat names like
 // "openai-compatible-dahono-dahono-1") into tidy brand keys and display
 // labels so topology/aggregations render one node per real provider.
 func canonicalProvider(raw string) (key, label string) {
