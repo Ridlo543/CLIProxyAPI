@@ -57,16 +57,17 @@ func normalizeProxyEndpoint(raw string) string {
 }
 
 type ProxyPoolResponseItem struct {
-	Name          string   `json:"name"`
-	Strategy      string   `json:"strategy"`
-	Strict        bool     `json:"strict"`
-	Cooldown      string   `json:"cooldown,omitempty"`
-	EntryCount    int      `json:"entry_count"`
-	Healthy       int      `json:"healthy"`
-	Cooling       int      `json:"cooling"`
-	FailureCount  uint64   `json:"failure_count"`
-	URLs          []string `json:"urls,omitempty"`
-	BoundAccounts []string `json:"bound_accounts,omitempty"`
+	Name           string   `json:"name"`
+	Strategy       string   `json:"strategy"`
+	Strict         bool     `json:"strict"`
+	Cooldown       string   `json:"cooldown,omitempty"`
+	EntryCount     int      `json:"entry_count"`
+	Healthy        int      `json:"healthy"`
+	Cooling        int      `json:"cooling"`
+	FailureCount   uint64   `json:"failure_count"`
+	URLs           []string `json:"urls,omitempty"`
+	BoundAccounts  []string `json:"bound_accounts,omitempty"`
+	BoundProviders []string `json:"bound_providers,omitempty"`
 }
 
 func (h *Handler) collectBoundAccounts(poolName string) []string {
@@ -124,6 +125,59 @@ func (h *Handler) collectBoundAccounts(poolName string) []string {
 		}
 	}
 	return accounts
+}
+
+func (h *Handler) collectBoundProviders(poolName string) []string {
+	var providers []string
+	if poolName == "" {
+		return providers
+	}
+	seen := make(map[string]bool)
+	add := func(p string) {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p != "" && !seen[p] {
+			seen[p] = true
+			providers = append(providers, p)
+		}
+	}
+	if h != nil && h.authManager != nil {
+		for _, a := range h.authManager.List() {
+			if a != nil && strings.EqualFold(strings.TrimSpace(a.ProxyPool), poolName) {
+				add(a.Provider)
+			}
+		}
+	}
+	if h != nil && h.cfg != nil {
+		for _, k := range h.cfg.GeminiKey {
+			if strings.EqualFold(strings.TrimSpace(k.ProxyPool), poolName) {
+				add("gemini")
+			}
+		}
+		for _, k := range h.cfg.ClaudeKey {
+			if strings.EqualFold(strings.TrimSpace(k.ProxyPool), poolName) {
+				add("claude")
+			}
+		}
+		for _, k := range h.cfg.CodexKey {
+			if strings.EqualFold(strings.TrimSpace(k.ProxyPool), poolName) {
+				add("codex")
+			}
+		}
+		for _, k := range h.cfg.XAIKey {
+			if strings.EqualFold(strings.TrimSpace(k.ProxyPool), poolName) {
+				add("xai")
+			}
+		}
+		for _, compat := range h.cfg.OpenAICompatibility {
+			for _, entry := range compat.APIKeyEntries {
+				if strings.EqualFold(strings.TrimSpace(entry.ProxyPool), poolName) {
+					add(compat.Name)
+				}
+			}
+		}
+	}
+	sort.Strings(providers)
+	return providers
 }
 
 // GetProxyPools returns the sanitized status of all configured proxy pools.
@@ -184,7 +238,8 @@ func (h *Handler) GetProxyPools(c *gin.Context) {
 				Cooling:       cooling,
 				FailureCount:  failCount,
 				URLs:          urls,
-				BoundAccounts: h.collectBoundAccounts(name),
+				BoundAccounts:  h.collectBoundAccounts(name),
+				BoundProviders: h.collectBoundProviders(name),
 			})
 		}
 	}
@@ -209,7 +264,8 @@ func (h *Handler) GetProxyPools(c *gin.Context) {
 			Cooling:       p.Cooling,
 			FailureCount:  p.FailureCount,
 			URLs:          urls,
-			BoundAccounts: h.collectBoundAccounts(name),
+			BoundAccounts:  h.collectBoundAccounts(name),
+			BoundProviders: h.collectBoundProviders(name),
 		})
 	}
 
@@ -489,13 +545,29 @@ func (h *Handler) updateProxyPoolReferences(oldPoolName, newPoolName string) {
 }
 
 func (h *Handler) persistAuthFileProxyPool(a *coreauth.Auth, poolName string) {
-	if h == nil || h.cfg == nil || a == nil || a.FileName == "" {
+	if h == nil || h.cfg == nil || a == nil {
 		return
 	}
-	filePath := filepath.Join(h.cfg.AuthDir, a.FileName)
+	fileName := a.FileName
+	if fileName == "" {
+		fileName = a.ID
+	}
+	if fileName == "" {
+		return
+	}
+	filePath := filepath.Join(h.cfg.AuthDir, fileName)
+	if a.Attributes != nil && a.Attributes["path"] != "" {
+		filePath = a.Attributes["path"]
+	}
 	data, errRead := os.ReadFile(filePath)
 	if errRead != nil {
-		return
+		if !strings.HasSuffix(filePath, ".json") {
+			filePath += ".json"
+			data, errRead = os.ReadFile(filePath)
+		}
+		if errRead != nil {
+			return
+		}
 	}
 	var rawMap map[string]any
 	if errUnmarshal := json.Unmarshal(data, &rawMap); errUnmarshal != nil {
