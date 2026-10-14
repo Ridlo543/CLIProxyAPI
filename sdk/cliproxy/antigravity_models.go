@@ -667,12 +667,20 @@ func filterAntigravityModels(models []*ModelInfo, hints antigravityModelCapabili
 	filtered := make([]*ModelInfo, 0, len(models))
 	hasClaudeOpus := false
 	hasClaudeSonnet := false
+	hasGeminiFlash := false
+	hasGeminiPro := false
 	for id := range hints.ModelIDs {
 		if strings.HasPrefix(id, "claude-opus") {
 			hasClaudeOpus = true
 		}
 		if strings.HasPrefix(id, "claude-sonnet") {
 			hasClaudeSonnet = true
+		}
+		if strings.HasPrefix(id, "gemini") {
+			hasGeminiFlash = true
+		}
+		if strings.Contains(id, "gemini-2.5-pro") || strings.Contains(id, "gemini-3-pro") || strings.Contains(id, "gemini-3.1-pro") {
+			hasGeminiPro = true
 		}
 	}
 	for _, model := range models {
@@ -689,6 +697,11 @@ func filterAntigravityModels(models []*ModelInfo, hints antigravityModelCapabili
 			}
 			// If account has Claude Sonnet entitlement, retain Claude Sonnet 5.5 replacement models
 			if hasClaudeSonnet && strings.HasPrefix(normID, "claude-sonnet-5-5") {
+				filtered = append(filtered, model)
+				continue
+			}
+			// If account has Gemini entitlement, retain Gemini 4 Argon models
+			if (hasGeminiFlash || hasGeminiPro) && strings.Contains(normID, "argon") {
 				filtered = append(filtered, model)
 				continue
 			}

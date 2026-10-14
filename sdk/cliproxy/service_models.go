@@ -115,6 +115,7 @@ func (s *Service) registerModelsForAuthWithConfigAndCache(ctx context.Context, c
 		models = registry.GetAIStudioModels()
 		models = applyExcludedModels(models, excluded)
 	case "antigravity":
+		models = registry.GetAntigravityModels()
 		if !(cfg != nil && cfg.Home.Enabled) {
 			expectedRegEpoch := GlobalModelRegistry().ClientRegistrationEpoch(a.ID)
 			expectedKey := s.antigravityCapabilityKey(a)
@@ -127,8 +128,6 @@ func (s *Service) registerModelsForAuthWithConfigAndCache(ctx context.Context, c
 				s.asyncProbeAntigravityCapabilities(ctx, a, provider)
 				return
 			}
-		} else {
-			models = registry.GetAntigravityModels()
 		}
 		models = applyExcludedModels(models, excluded)
 	case "claude":
