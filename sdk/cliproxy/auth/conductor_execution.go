@@ -596,6 +596,39 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 			errExec = markUpstreamExecutionAttemptFromContext(execCtx, errExec)
 			durationExec := time.Since(startExec)
 			if errExec != nil {
+				if strings.TrimSpace(auth.ProxyPool) != "" && m.rtProvider != nil {
+					proxyLimit := 1
+					if lp, ok := m.rtProvider.(interface{ ProxyPoolAttemptLimit(*Auth) int }); ok {
+						proxyLimit = lp.ProxyPoolAttemptLimit(auth)
+						if proxyLimit > 4 {
+							proxyLimit = 4
+						}
+					}
+					for pAttempt := 1; pAttempt < proxyLimit; pAttempt++ {
+						status := statusCodeFromError(errExec)
+						isRetryable := status == http.StatusTooManyRequests ||
+							status == http.StatusBadGateway ||
+							status == http.StatusServiceUnavailable ||
+							status == http.StatusGatewayTimeout ||
+							isTransientTransportError(errExec)
+						if !isRetryable || execCtx.Err() != nil {
+							break
+						}
+						if rt := m.roundTripperFor(auth); rt != nil {
+							execCtx = context.WithValue(execCtx, roundTripperContextKey{}, rt)
+							execCtx = context.WithValue(execCtx, "cliproxy.roundtripper", rt)
+						}
+						startRetry := time.Now()
+						resp, errExec = executor.Execute(execCtx, auth, execReq, execOpts)
+						errExec = markUpstreamExecutionAttemptFromContext(execCtx, errExec)
+						durationExec = time.Since(startRetry)
+						if errExec == nil {
+							break
+						}
+					}
+				}
+			}
+			if errExec != nil {
 				if hasUpstreamExecutionAttempt(errExec) {
 					upstreamErr = errExec
 				}

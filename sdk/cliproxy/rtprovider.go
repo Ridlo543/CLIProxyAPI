@@ -332,8 +332,16 @@ func (r *poolRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 	resp, err := r.base.RoundTrip(req)
 	if err != nil {
 		r.recordFailure()
-	} else if resp != nil && resp.Body != nil {
-		resp.Body = &poolResponseBody{ReadCloser: resp.Body, owner: r}
+	} else if resp != nil {
+		if resp.StatusCode == http.StatusTooManyRequests ||
+			resp.StatusCode == http.StatusBadGateway ||
+			resp.StatusCode == http.StatusServiceUnavailable ||
+			resp.StatusCode == http.StatusGatewayTimeout {
+			r.recordFailure()
+		}
+		if resp.Body != nil {
+			resp.Body = &poolResponseBody{ReadCloser: resp.Body, owner: r}
+		}
 	}
 	return resp, err
 }

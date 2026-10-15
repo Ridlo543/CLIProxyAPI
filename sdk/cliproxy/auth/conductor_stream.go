@@ -268,6 +268,40 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			upstreamErr = errStream
 		}
 		durationStream := time.Since(startStream)
+		if errStream != nil && strings.TrimSpace(auth.ProxyPool) != "" && m.rtProvider != nil {
+			proxyLimit := 1
+			if lp, ok := m.rtProvider.(interface{ ProxyPoolAttemptLimit(*Auth) int }); ok {
+				proxyLimit = lp.ProxyPoolAttemptLimit(auth)
+				if proxyLimit > 4 {
+					proxyLimit = 4
+				}
+			}
+			for pAttempt := 1; pAttempt < proxyLimit; pAttempt++ {
+				status := statusCodeFromError(errStream)
+				isRetryable := status == http.StatusTooManyRequests ||
+					status == http.StatusBadGateway ||
+					status == http.StatusServiceUnavailable ||
+					status == http.StatusGatewayTimeout ||
+					isTransientTransportError(errStream)
+				if !isRetryable || ctx.Err() != nil {
+					break
+				}
+				if rt := m.roundTripperFor(auth); rt != nil {
+					ctx = context.WithValue(ctx, roundTripperContextKey{}, rt)
+					ctx = context.WithValue(ctx, "cliproxy.roundtripper", rt)
+				}
+				startRetry := time.Now()
+				streamResult, errStream = executor.ExecuteStream(ctx, auth, execReq, execOpts)
+				errStream = markUpstreamExecutionAttemptFromContext(ctx, errStream)
+				if hasUpstreamExecutionAttempt(errStream) {
+					upstreamErr = errStream
+				}
+				durationStream = time.Since(startRetry)
+				if errStream == nil {
+					break
+				}
+			}
+		}
 		if errStream != nil {
 			if errCtx := ctx.Err(); errCtx != nil {
 				m.recordCanceledUpstreamCooldown(ctx, auth, provider, resultModel, routeModel, execOpts, errStream, ephemeralResult)
