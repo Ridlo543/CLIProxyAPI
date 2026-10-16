@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -63,6 +64,11 @@ func (h *Handler) ProbeProvider(c *gin.Context) {
 		}
 		headers["x-api-key"] = apiKey
 		headers["anthropic-version"] = "2023-06-01"
+	case "gemini":
+		if strings.Contains(baseURL, "googleapis.com") || baseURL == "" {
+			baseURL = "https://generativelanguage.googleapis.com"
+		}
+		listURL = baseURL + "/v1beta/models?key=" + url.QueryEscape(apiKey)
 	default: // "openai-compat"
 		headers["Authorization"] = "Bearer " + apiKey
 	}
