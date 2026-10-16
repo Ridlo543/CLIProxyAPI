@@ -18,19 +18,29 @@ func SaveConfigPreserveComments(configFile string, cfg *Config, migrateV8 ...boo
 	migrating := len(migrateV8) > 0 && migrateV8[0]
 	// Load original YAML as a node tree to preserve comments and ordering.
 	data, err := os.ReadFile(configFile)
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		return err
+	}
+
+	// If file does not exist or is empty, write fresh config directly.
+	if err != nil || len(bytes.TrimSpace(data)) == 0 {
+		rendered, errMarshal := yaml.Marshal((*legacyConfig)(persistCfg))
+		if errMarshal != nil {
+			return errMarshal
+		}
+		return os.WriteFile(configFile, rendered, 0600)
 	}
 
 	var original yaml.Node
 	if err = yaml.Unmarshal(data, &original); err != nil {
 		return err
 	}
-	if original.Kind != yaml.DocumentNode || len(original.Content) == 0 {
-		return fmt.Errorf("invalid yaml document structure")
-	}
-	if original.Content[0] == nil || original.Content[0].Kind != yaml.MappingNode {
-		return fmt.Errorf("expected root mapping node")
+	if original.Kind != yaml.DocumentNode || len(original.Content) == 0 || original.Content[0] == nil || original.Content[0].Kind != yaml.MappingNode {
+		rendered, errMarshal := yaml.Marshal((*legacyConfig)(persistCfg))
+		if errMarshal != nil {
+			return errMarshal
+		}
+		return os.WriteFile(configFile, rendered, 0600)
 	}
 	layout := deepCopyNode(original.Content[0])
 	flat, err := flattenV8(layout)
@@ -624,6 +634,14 @@ func sequenceElementIdentity(node *yaml.Node) string {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return ""
 	}
+	// For model references (e.g. combos and capacity adapters), both provider and model
+	// are present; combine them so models from the same provider are distinct and reorderable.
+	prov := mappingScalarValue(node, "provider")
+	mod := mappingScalarValue(node, "model")
+	if prov != "" && mod != "" {
+		return "provider=" + prov + "/model=" + mod
+	}
+
 	identityKeys := []string{"id", "name", "alias", "api-key", "api_key", "apikey", "key", "provider", "model"}
 	for _, k := range identityKeys {
 		if v := mappingScalarValue(node, k); v != "" {

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"gopkg.in/yaml.v3"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 )
@@ -150,5 +151,63 @@ func TestCombosNormalizeStrategyCase(t *testing.T) {
 	first, _ := models[0].(map[string]any)
 	if first["provider"] != "a" || first["model"] != "m1" {
 		t.Fatalf("member not trimmed: %v", first)
+	}
+}
+func TestCombosReorderSameProviderModels(t *testing.T) {
+	r, h := newCombosTestServer(t)
+
+	// Initial: antigravity/gemini-3.8-flash-high then antigravity/claude-opus-4-6-thinking
+	code, _ := doJSON(t, r, http.MethodPost, "/v0/management/combos",
+		`{"name":"test-combo","strategy":"fallback","models":[
+		  {"provider":"antigravity","model":"gemini-3.8-flash-high"},
+		  {"provider":"antigravity","model":"claude-opus-4-6-thinking"}]}`)
+	if code != http.StatusCreated {
+		t.Fatalf("create status = %d", code)
+	}
+
+	// Reorder: swap them so claude-opus is first
+	code, out := doJSON(t, r, http.MethodPut, "/v0/management/combos/test-combo",
+		`{"name":"test-combo","strategy":"fallback","models":[
+		  {"provider":"antigravity","model":"claude-opus-4-6-thinking"},
+		  {"provider":"antigravity","model":"gemini-3.8-flash-high"}]}`)
+	if code != http.StatusOK {
+		t.Fatalf("update status = %d: %v", code, out)
+	}
+
+	// Read back via GET and verify order in memory
+	code, out = doJSON(t, r, http.MethodGet, "/v0/management/combos/test-combo", "")
+	if code != http.StatusOK {
+		t.Fatalf("get status = %d", code)
+	}
+	models, _ := out["models"].([]any)
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d", len(models))
+	}
+	m0 := models[0].(map[string]any)["model"]
+	m1 := models[1].(map[string]any)["model"]
+	if m0 != "claude-opus-4-6-thinking" || m1 != "gemini-3.8-flash-high" {
+		t.Fatalf("reordered models wrong: [0]=%v, [1]=%v", m0, m1)
+	}
+
+	// Verify persisted YAML file on disk has the exact swapped order
+	data, err := os.ReadFile(h.configFilePath)
+	if err != nil {
+		t.Fatalf("read config file: %v", err)
+	}
+	var cfg config.Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	found := false
+	for _, c := range cfg.Combos {
+		if c.Name == "test-combo" {
+			found = true
+			if len(c.Models) != 2 || c.Models[0].Model != "claude-opus-4-6-thinking" || c.Models[1].Model != "gemini-3.8-flash-high" {
+				t.Fatalf("disk yaml order wrong: %#v", c.Models)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("combo not found in disk yaml")
 	}
 }
