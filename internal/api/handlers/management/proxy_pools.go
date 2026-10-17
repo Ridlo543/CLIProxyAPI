@@ -179,6 +179,7 @@ func (h *Handler) collectBoundAccounts(poolName string) []string {
 				if name == "" {
 					name = a.ID
 				}
+				name = strings.TrimPrefix(name, "openai-compatibility:")
 				add(name)
 			}
 		}
@@ -202,7 +203,7 @@ func (h *Handler) collectBoundAccounts(poolName string) []string {
 		for _, compat := range h.cfg.OpenAICompatibility {
 			for _, entry := range compat.APIKeyEntries {
 				if poolContains(entry.ProxyPool, poolName) {
-					add("openai-compat:" + compat.Name)
+					add(compat.Name)
 				}
 			}
 		}
@@ -218,6 +219,8 @@ func (h *Handler) collectBoundProviders(poolName string) []string {
 	seen := make(map[string]bool)
 	add := func(p string) {
 		p = strings.ToLower(strings.TrimSpace(p))
+		p = strings.TrimPrefix(p, "openai-compatible-")
+		p = strings.TrimPrefix(p, "openai-compatibility:")
 		if p != "" && !seen[p] {
 			seen[p] = true
 			providers = append(providers, p)
@@ -792,9 +795,10 @@ func (h *Handler) AssignProxyPool(c *gin.Context) {
 			match := false
 			if req.Scope == "all" {
 				match = true
-			} else if targetProvider != "" && strings.EqualFold(a.Provider, targetProvider) {
+			} else if targetProvider != "" && (strings.EqualFold(a.Provider, targetProvider) ||
+				strings.EqualFold(strings.TrimPrefix(strings.TrimPrefix(strings.ToLower(a.Provider), "openai-compatible-"), "openai-compatibility:"), strings.ToLower(targetProvider))) {
 				match = true
-			} else if targetAccounts[a.ID] || targetAccounts[a.FileName] || targetAccounts[a.Label] {
+			} else if targetAccounts[a.ID] || targetAccounts[a.FileName] || targetAccounts[a.Label] || targetAccounts[strings.TrimPrefix(a.Label, "openai-compatibility:")] {
 				match = true
 			}
 
@@ -840,7 +844,9 @@ func (h *Handler) AssignProxyPool(c *gin.Context) {
 			}
 		}
 		for i := range h.cfg.OpenAICompatibility {
-			if req.Scope == "all" || strings.EqualFold(h.cfg.OpenAICompatibility[i].Name, targetProvider) {
+			cleanName := strings.ToLower(strings.TrimSpace(h.cfg.OpenAICompatibility[i].Name))
+			cleanTarget := strings.TrimPrefix(strings.TrimPrefix(strings.ToLower(targetProvider), "openai-compatible-"), "openai-compatibility:")
+			if req.Scope == "all" || strings.EqualFold(cleanName, targetProvider) || strings.EqualFold(cleanName, cleanTarget) {
 				for j := range h.cfg.OpenAICompatibility[i].APIKeyEntries {
 					h.cfg.OpenAICompatibility[i].APIKeyEntries[j].ProxyPool = computeNewPool(h.cfg.OpenAICompatibility[i].APIKeyEntries[j].ProxyPool)
 				}
