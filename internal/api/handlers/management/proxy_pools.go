@@ -25,6 +25,10 @@ type proxyPoolReporter interface {
 	RecordEntrySuccess(poolName, rawURL string)
 }
 
+type proxyPoolConfigUpdater interface {
+	UpdateConfig(cfg *config.Config)
+}
+
 func (h *Handler) getProxyPoolReporter() proxyPoolReporter {
 	if h != nil && h.authManager != nil {
 		if reporter, ok := h.authManager.RoundTripperProvider().(proxyPoolReporter); ok {
@@ -302,27 +306,31 @@ func (h *Handler) GetProxyPools(c *gin.Context) {
 			seenPoolNames[key] = true
 
 			var urls []string
-			runtimeStatus, hasRuntime := statusMap[key]
-			if hasRuntime && len(runtimeStatus.URLs) > 0 {
-				for _, u := range runtimeStatus.URLs {
-					urls = append(urls, sanitizeProxyURL(u))
-				}
-			} else {
-				for _, entry := range cp.Entries {
-					urls = append(urls, sanitizeProxyURL(entry.URL))
-				}
+			for _, entry := range cp.Entries {
+				urls = append(urls, sanitizeProxyURL(entry.URL))
 			}
 
 			entryCount := len(cp.Entries)
-			healthy := len(cp.Entries)
 			cooling := 0
+			var coolingURLs []string
+			runtimeStatus, hasRuntime := statusMap[key]
+			if hasRuntime {
+				for _, u := range urls {
+					for _, cu := range runtimeStatus.CoolingURLs {
+						if sanitizeProxyURL(cu) == u {
+							cooling++
+							coolingURLs = append(coolingURLs, u)
+							break
+						}
+					}
+				}
+			}
+			healthy := entryCount - cooling
+			if healthy < 0 {
+				healthy = 0
+			}
 			var failCount uint64
 			if hasRuntime {
-				if runtimeStatus.EntryCount > 0 {
-					entryCount = runtimeStatus.EntryCount
-				}
-				healthy = runtimeStatus.Healthy
-				cooling = runtimeStatus.Cooling
 				failCount = runtimeStatus.FailureCount
 			}
 
@@ -336,12 +344,12 @@ func (h *Handler) GetProxyPools(c *gin.Context) {
 				Cooling:       cooling,
 				FailureCount:  failCount,
 				URLs:          urls,
-				CoolingURLs:   runtimeStatus.CoolingURLs,
+				CoolingURLs:   coolingURLs,
 				BoundAccounts:  h.collectBoundAccounts(name),
+				BoundProviders: h.collectBoundProviders(name),
 			})
 		}
 	}
-
 	for _, p := range pools {
 		name := strings.TrimSpace(p.Name)
 		key := strings.ToLower(name)
@@ -975,6 +983,11 @@ func (h *Handler) AssignProxyPool(c *gin.Context) {
 }
 
 func (h *Handler) persistProxyPools(c *gin.Context, status int, payload any) bool {
+	if h != nil && h.authManager != nil {
+		if updater, ok := h.authManager.RoundTripperProvider().(proxyPoolConfigUpdater); ok {
+			updater.UpdateConfig(h.cfg)
+		}
+	}
 	if h.configFilePath != "" {
 		if err := config.SaveConfigPreserveComments(h.configFilePath, h.cfg, c.GetBool(ConfigV8ContextKey)); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to save config: %v", err)})

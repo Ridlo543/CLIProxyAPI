@@ -198,12 +198,16 @@ func (s *Server) UpdateClientsContext(ctx context.Context, cfg *config.Config) b
 	s.cfgMu.Unlock()
 
 	s.handlers.UpdateClients(effectiveSDKConfig(cfg))
+	if s.handlers.AuthManager != nil {
+		if updater, ok := s.handlers.AuthManager.RoundTripperProvider().(interface{ UpdateConfig(*config.Config) }); ok {
+			updater.UpdateConfig(cfg)
+		}
+	}
 	s.handlers.SetPluginHost(s.pluginHost)
 	if s.pluginHost != nil {
 		s.pluginHost.SetModelExecutor(s.handlers)
 		s.pluginHost.SetAuthManager(s.handlers.AuthManager)
 	}
-
 	if s.mgmt != nil {
 		s.mgmt.SetConfig(cfg)
 		s.mgmt.SetAuthManager(s.handlers.AuthManager)
