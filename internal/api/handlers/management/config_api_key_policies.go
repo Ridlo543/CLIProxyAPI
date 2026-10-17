@@ -90,7 +90,8 @@ func (h *Handler) ImportOpenAICompatModels(c *gin.Context) {
 	h.mu.Lock()
 	targetIndex := -1
 	for i := range h.cfg.OpenAICompatibility {
-		if h.cfg.OpenAICompatibility[i].Name == name {
+		if h.cfg.OpenAICompatibility[i].Name == name ||
+			(name == "cloudflare-ai" && (strings.HasPrefix(h.cfg.OpenAICompatibility[i].Name, "cloudflare") || strings.Contains(h.cfg.OpenAICompatibility[i].BaseURL, "cloudflare.com"))) {
 			targetIndex = i
 			break
 		}
@@ -113,12 +114,15 @@ func (h *Handler) ImportOpenAICompatModels(c *gin.Context) {
 		return
 	}
 
-	req, errReq := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, baseURL+"/models", nil)
+	listURL := baseURL + "/models"
+	if strings.Contains(baseURL, "api.cloudflare.com") {
+		listURL = strings.Replace(baseURL, "/ai/v1", "/ai/models/search", 1)
+	}
+	req, errReq := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, listURL, nil)
 	if errReq != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid base-url: %v", errReq)})
 		return
 	}
-	req.Header.Set("Accept", "application/json")
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
@@ -149,8 +153,15 @@ func (h *Handler) ImportOpenAICompatModels(c *gin.Context) {
 	addedCount := len(added)
 	current.Models = append(append([]config.OpenAICompatibilityModel(nil), current.Models...), added...)
 	h.cfg.OpenAICompatibility[targetIndex] = current
+
+	if name == "cloudflare-ai" {
+		for i := range h.cfg.OpenAICompatibility {
+			if strings.HasPrefix(h.cfg.OpenAICompatibility[i].Name, "cloudflare") || strings.Contains(h.cfg.OpenAICompatibility[i].BaseURL, "cloudflare.com") {
+				h.cfg.OpenAICompatibility[i].Models = append(append([]config.OpenAICompatibilityModel(nil), h.cfg.OpenAICompatibility[i].Models...), added...)
+			}
+		}
+	}
 	h.cfg.SanitizeOpenAICompatibility()
-	// Persist without the standard persistLocked response so this endpoint can
 	// return its own merge summary.
 	if errSave := config.SaveConfigPreserveComments(h.configFilePath, h.cfg); errSave != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to save config: %v", errSave)})

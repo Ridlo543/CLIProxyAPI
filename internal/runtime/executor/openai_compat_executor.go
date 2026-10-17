@@ -1427,6 +1427,8 @@ func reassembleChatCompletionsSSE(body []byte) ([]byte, error) {
 	var id, model, finish string
 	var created int64
 	var usageRaw string
+	toolCallsMap := make(map[int]map[string]any)
+	toolCallArgs := make(map[int]*strings.Builder)
 	saw := false
 	for _, line := range bytes.Split(body, []byte("\n")) {
 		line = bytes.TrimSpace(line)
@@ -1460,6 +1462,35 @@ func reassembleChatCompletionsSSE(body []byte) ([]byte, error) {
 			if v := ch.Get("finish_reason").String(); v != "" && v != "null" {
 				finish = v
 			}
+			for _, tc := range ch.Get("delta.tool_calls").Array() {
+				idx := int(tc.Get("index").Int())
+				entry, exists := toolCallsMap[idx]
+				if !exists {
+					entry = map[string]any{
+						"index": idx,
+						"type":  "function",
+						"function": map[string]any{
+							"name":      "",
+							"arguments": "",
+						},
+					}
+					toolCallsMap[idx] = entry
+					toolCallArgs[idx] = &strings.Builder{}
+				}
+				if tid := tc.Get("id").String(); tid != "" {
+					entry["id"] = tid
+				}
+				if ttype := tc.Get("type").String(); ttype != "" {
+					entry["type"] = ttype
+				}
+				fn := entry["function"].(map[string]any)
+				if fname := tc.Get("function.name").String(); fname != "" {
+					fn["name"] = fname
+				}
+				if fargs := tc.Get("function.arguments").String(); fargs != "" {
+					toolCallArgs[idx].WriteString(fargs)
+				}
+			}
 		}
 	}
 	if !saw {
@@ -1474,6 +1505,39 @@ func reassembleChatCompletionsSSE(body []byte) ([]byte, error) {
 	}
 	if reasoningSB.Len() > 0 {
 		msg["reasoning_content"] = reasoningSB.String()
+	}
+	if len(toolCallsMap) > 0 {
+		var toolCallsList []any
+		for i := 0; i < len(toolCallsMap); i++ {
+			if tc, ok := toolCallsMap[i]; ok {
+				fn := tc["function"].(map[string]any)
+				if sb, hasArgs := toolCallArgs[i]; hasArgs {
+					fn["arguments"] = sb.String()
+				}
+				toolCallsList = append(toolCallsList, tc)
+			}
+		}
+		if len(toolCallsList) > 0 {
+			msg["tool_calls"] = toolCallsList
+			if contentSB.Len() == 0 {
+				// If no text content was produced, extract any command/code from bash tool call into content
+				for _, item := range toolCallsList {
+					if m, ok := item.(map[string]any); ok {
+						fn, _ := m["function"].(map[string]any)
+						if fn["name"] == "bash" {
+							argsStr, _ := fn["arguments"].(string)
+							var argsObj struct {
+								Command string `json:"command"`
+							}
+							if json.Unmarshal([]byte(argsStr), &argsObj) == nil && argsObj.Command != "" {
+								msg["content"] = argsObj.Command
+								break
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 	root := map[string]any{
 		"id":      id,
