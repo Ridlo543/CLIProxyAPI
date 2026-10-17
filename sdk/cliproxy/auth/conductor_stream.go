@@ -278,7 +278,8 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			}
 			for pAttempt := 1; pAttempt < proxyLimit; pAttempt++ {
 				status := statusCodeFromError(errStream)
-				isRetryable := status == http.StatusTooManyRequests ||
+				isRetryable := status == http.StatusForbidden ||
+					status == http.StatusTooManyRequests ||
 					status == http.StatusBadGateway ||
 					status == http.StatusServiceUnavailable ||
 					status == http.StatusGatewayTimeout ||

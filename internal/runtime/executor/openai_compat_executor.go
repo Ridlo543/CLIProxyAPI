@@ -1295,11 +1295,16 @@ func generateOpenCodeZenID(prefix string, descending bool, timestampMs int64) st
 
 func isOpenCodeZenUpstream(baseURL string) bool {
 	trimmed := strings.ToLower(strings.TrimSpace(baseURL))
-	return strings.Contains(trimmed, "opencode.ai/zen")
+	return strings.Contains(trimmed, "opencode.ai/zen") ||
+		strings.Contains(trimmed, "opencode.ai") ||
+		strings.Contains(trimmed, "/zen/")
 }
 
 func isOpenCodeZenResponsesModel(baseModel string) bool {
 	lower := strings.ToLower(strings.TrimSpace(baseModel))
+	if idx := strings.LastIndex(lower, "/"); idx >= 0 {
+		lower = lower[idx+1:]
+	}
 	return strings.HasPrefix(lower, "muse-spark") ||
 		strings.HasPrefix(lower, "grok-4.6") ||
 		strings.HasPrefix(lower, "grok-4.7") ||
@@ -1309,6 +1314,9 @@ func isOpenCodeZenResponsesModel(baseModel string) bool {
 
 func isOpenCodeZenSystemOneModel(baseModel string) bool {
 	lower := strings.ToLower(strings.TrimSpace(baseModel))
+	if idx := strings.LastIndex(lower, "/"); idx >= 0 {
+		lower = lower[idx+1:]
+	}
 	return strings.HasPrefix(lower, "jev-") || lower == "jev"
 }
 
@@ -1599,13 +1607,55 @@ func completedResponseEnvelope(body []byte) []byte {
 }
 
 func buildOpenCodeSystemOneRequest(baseModel string, payload []byte) []byte {
+	modelName := baseModel
+	if idx := strings.LastIndex(modelName, "/"); idx >= 0 {
+		modelName = modelName[idx+1:]
+	}
+
 	if gjson.GetBytes(payload, "state").Exists() && gjson.GetBytes(payload, "questions").Exists() {
-		out, err := sjson.SetBytes(payload, "model", baseModel)
-		if err == nil {
+		// OpenCode Zen free /systemone only natively accepts type: "noul".
+		// Normalize any "choice", "boolean", or other question types into noul instructions
+		// so upstream accepts the request cleanly.
+		transformedQuestions := map[string]any{}
+		for k, q := range gjson.GetBytes(payload, "questions").Map() {
+			qType := q.Get("type").String()
+			prompt := q.Get("prompt").String()
+			if prompt == "" {
+				prompt = q.Get("instructions").String()
+			}
+			if qType == "choice" {
+				var optTexts []string
+				for i, opt := range q.Get("options").Array() {
+					optTexts = append(optTexts, fmt.Sprintf("(%d) %s", i+1, opt.String()))
+				}
+				transformedQuestions[k] = map[string]any{
+					"type":         "noul",
+					"instructions": fmt.Sprintf("Choice question: %s Options: %s. Evaluate the most sound option.", prompt, strings.Join(optTexts, "; ")),
+				}
+			} else if qType == "boolean" {
+				transformedQuestions[k] = map[string]any{
+					"type":         "noul",
+					"instructions": fmt.Sprintf("Is this true or affirmative? %s", prompt),
+				}
+			} else {
+				transformedQuestions[k] = map[string]any{
+					"type":         "noul",
+					"instructions": prompt,
+				}
+			}
+		}
+
+		reqObj := map[string]any{
+			"model":     modelName,
+			"state":     gjson.GetBytes(payload, "state").String(),
+			"questions": transformedQuestions,
+		}
+		if out, err := json.Marshal(reqObj); err == nil {
 			return out
 		}
 		return payload
 	}
+
 	var stateParts []string
 	lastUser := "Is this input valid and actionable?"
 	for _, msg := range gjson.GetBytes(payload, "messages").Array() {
@@ -1637,7 +1687,7 @@ func buildOpenCodeSystemOneRequest(baseModel string, payload []byte) []byte {
 		stateText = lastUser
 	}
 	reqObj := map[string]any{
-		"model": baseModel,
+		"model": modelName,
 		"state": stateText,
 		"questions": map[string]any{
 			"verdict": map[string]any{

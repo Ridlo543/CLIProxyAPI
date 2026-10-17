@@ -333,7 +333,8 @@ func (r *poolRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 	if err != nil {
 		r.recordFailure()
 	} else if resp != nil {
-		if resp.StatusCode == http.StatusTooManyRequests ||
+		if resp.StatusCode == http.StatusForbidden ||
+			resp.StatusCode == http.StatusTooManyRequests ||
 			resp.StatusCode == http.StatusBadGateway ||
 			resp.StatusCode == http.StatusServiceUnavailable ||
 			resp.StatusCode == http.StatusGatewayTimeout {

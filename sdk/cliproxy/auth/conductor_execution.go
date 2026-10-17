@@ -606,7 +606,8 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 					}
 					for pAttempt := 1; pAttempt < proxyLimit; pAttempt++ {
 						status := statusCodeFromError(errExec)
-						isRetryable := status == http.StatusTooManyRequests ||
+						isRetryable := status == http.StatusForbidden ||
+							status == http.StatusTooManyRequests ||
 							status == http.StatusBadGateway ||
 							status == http.StatusServiceUnavailable ||
 							status == http.StatusGatewayTimeout ||

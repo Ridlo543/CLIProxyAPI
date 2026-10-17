@@ -208,3 +208,148 @@ func TestReassembleChatCompletionsSSE(t *testing.T) {
 		t.Fatalf("reasoning_content not preserved, got %q: %s", got, out)
 	}
 }
+func TestOpenCodeZenSystemOneMapping(t *testing.T) {
+	if !isOpenCodeZenSystemOneModel("jev-1.13-free") {
+		t.Fatal("expected jev-1.13-free to be recognized as system one model")
+	}
+	if !isOpenCodeZenSystemOneModel("opencode-free/jev-1.13-free") {
+		t.Fatal("expected opencode-free/jev-1.13-free to be recognized as system one model")
+	}
+
+	inputPayload := []byte(`{
+		"model": "opencode-free/jev-1.13-free",
+		"state": "Pre-registered quality gate",
+		"questions": {
+			"q1": {"type": "choice", "prompt": "How to treat?", "options": ["opt A", "opt B"]},
+			"q2": {"type": "boolean", "prompt": "Is tie-break reasonable?"}
+		}
+	}`)
+
+	transformed := buildOpenCodeSystemOneRequest("opencode-free/jev-1.13-free", inputPayload)
+	if gotModel := gjson.GetBytes(transformed, "model").String(); gotModel != "jev-1.13-free" {
+		t.Fatalf("expected stripped model jev-1.13-free, got %q", gotModel)
+	}
+	if gotQ1Type := gjson.GetBytes(transformed, "questions.q1.type").String(); gotQ1Type != "noul" {
+		t.Fatalf("expected q1 type noul, got %q", gotQ1Type)
+	}
+	if gotQ2Type := gjson.GetBytes(transformed, "questions.q2.type").String(); gotQ2Type != "noul" {
+		t.Fatalf("expected q2 type noul, got %q", gotQ2Type)
+	}
+}
+func TestOpenCodeZenSystemOneEndToEnd(t *testing.T) {
+	var gotPath string
+	var gotBody []byte
+	var gotUA string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotUA = r.Header.Get("User-Agent")
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"jev-1.13-free","answers":{"q1":{"type":"noul","noul":0.85},"q2":{"type":"noul","noul":0.20}},"usage":{"input_tokens":100,"output_tokens":20}}`))
+	}))
+	defer server.Close()
+
+	executor := NewOpenAICompatExecutor("openai-compatibility", &config.Config{
+		OpenAICompatibility: []config.OpenAICompatibility{{
+			Name:    "opencode-free",
+			BaseURL: server.URL + "/zen/v1",
+		}},
+	})
+
+	auth := &cliproxyauth.Auth{
+		Provider: "openai-compatibility",
+		Attributes: map[string]string{
+			"base_url":     server.URL + "/zen/v1",
+			"compat_name":  "opencode-free",
+			"provider_key": "opencode-free",
+		},
+	}
+
+	inputPayload := []byte(`{
+		"model": "opencode-free/jev-1.13-free",
+		"state": "Test evaluation context",
+		"questions": {
+			"q1": {"type": "choice", "prompt": "Choose A or B", "options": ["A", "B"]},
+			"q2": {"type": "boolean", "prompt": "Is valid?"}
+		}
+	}`)
+
+	resp, err := executor.Execute(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "opencode-free/jev-1.13-free",
+		Payload: inputPayload,
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("openai"),
+		Stream:       false,
+	})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if gotPath != "/zen/v1/systemone" {
+		t.Fatalf("upstream path = %q, want %q", gotPath, "/zen/v1/systemone")
+	}
+	if !strings.HasPrefix(gotUA, "opencode/") {
+		t.Fatalf("upstream UA missing opencode prefix: %q", gotUA)
+	}
+	if gotModel := gjson.GetBytes(gotBody, "model").String(); gotModel != "jev-1.13-free" {
+		t.Fatalf("upstream body model = %q, want jev-1.13-free", gotModel)
+	}
+	content := gjson.GetBytes(resp.Payload, "choices.0.message.content").String()
+	if !strings.Contains(content, `"q1"`) || !strings.Contains(content, `"q2"`) {
+		t.Fatalf("response choices.0.message.content does not contain answers: %s", content)
+	}
+}
+func TestOpenCodeZenSystemOneStreamEndToEnd(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"jev-1.13-free","answers":{"q1":{"type":"noul","noul":0.85}},"usage":{"input_tokens":100,"output_tokens":20}}`))
+	}))
+	defer server.Close()
+
+	executor := NewOpenAICompatExecutor("openai-compatibility", &config.Config{
+		OpenAICompatibility: []config.OpenAICompatibility{{
+			Name:    "opencode-free",
+			BaseURL: server.URL + "/zen/v1",
+		}},
+	})
+
+	auth := &cliproxyauth.Auth{
+		Provider: "openai-compatibility",
+		Attributes: map[string]string{
+			"base_url":     server.URL + "/zen/v1",
+			"compat_name":  "opencode-free",
+			"provider_key": "opencode-free",
+		},
+	}
+
+	inputPayload := []byte(`{
+		"model": "opencode-free/jev-1.13-free",
+		"state": "Test streaming context",
+		"questions": {
+			"q1": {"type": "boolean", "prompt": "Is true?"}
+		}
+	}`)
+
+	res, err := executor.ExecuteStream(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "opencode-free/jev-1.13-free",
+		Payload: inputPayload,
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("openai"),
+		Stream:       true,
+	})
+	if err != nil {
+		t.Fatalf("ExecuteStream failed: %v", err)
+	}
+
+	var receivedChunks []string
+	for chunk := range res.Chunks {
+		if chunk.Err != nil {
+			t.Fatalf("unexpected chunk error: %v", chunk.Err)
+		}
+		receivedChunks = append(receivedChunks, string(chunk.Payload))
+	}
+	allChunks := strings.Join(receivedChunks, "")
+	if !strings.Contains(allChunks, "q1") {
+		t.Fatalf("stream result missing q1 answers: %s", allChunks)
+	}
+}
