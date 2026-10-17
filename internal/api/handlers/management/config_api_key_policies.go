@@ -145,19 +145,18 @@ func (h *Handler) ImportOpenAICompatModels(c *gin.Context) {
 	// free_only restricts imports to the provider's officially free tier,
 	// so a keyless/free listing never pulls in paid models by accident.
 	freeOnly := c.Query("free_only") == "true"
-	added, skipped := mergeDiscoveredModels(entry.Models, body, freeOnly)
-
+	prune := c.Query("prune") != "false"
+	finalModels, added, pruned, skipped := syncDiscoveredModels(entry.Models, body, freeOnly, prune)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	current := h.cfg.OpenAICompatibility[targetIndex]
-	addedCount := len(added)
-	current.Models = append(append([]config.OpenAICompatibilityModel(nil), current.Models...), added...)
+	current.Models = finalModels
 	h.cfg.OpenAICompatibility[targetIndex] = current
 
 	if name == "cloudflare-ai" {
 		for i := range h.cfg.OpenAICompatibility {
 			if strings.HasPrefix(h.cfg.OpenAICompatibility[i].Name, "cloudflare") || strings.Contains(h.cfg.OpenAICompatibility[i].BaseURL, "cloudflare.com") {
-				h.cfg.OpenAICompatibility[i].Models = append(append([]config.OpenAICompatibilityModel(nil), h.cfg.OpenAICompatibility[i].Models...), added...)
+				h.cfg.OpenAICompatibility[i].Models = finalModels
 			}
 		}
 	}
@@ -170,10 +169,12 @@ func (h *Handler) ImportOpenAICompatModels(c *gin.Context) {
 	snapshot := h.reloadSnapshotConfigLocked()
 	h.reloadConfigAfterManagementSaveAsync(c.Request.Context(), snapshot)
 	c.JSON(http.StatusOK, gin.H{
-		"status":      "ok",
-		"added":       modelNames(added),
-		"skipped":     skipped,
-		"added_count": addedCount,
+		"status":       "ok",
+		"added":        added,
+		"skipped":      skipped,
+		"pruned":       pruned,
+		"added_count":  len(added),
+		"pruned_count": len(pruned),
 	})
 }
 
@@ -197,19 +198,45 @@ func isFreeModelID(id string) bool {
 	return strings.HasSuffix(id, "-free") || id == "big-pickle"
 }
 
-func mergeDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []byte, freeOnly bool) ([]config.OpenAICompatibilityModel, []string) {
-	known := make(map[string]struct{}, len(existing))
-	for _, m := range existing {
-		if trimmed := strings.TrimSpace(m.Name); trimmed != "" {
-			known[strings.ToLower(trimmed)] = struct{}{}
+func syncDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []byte, freeOnly, prune bool) ([]config.OpenAICompatibilityModel, []string, []string, []string) {
+	discovered := parseDiscoveredModelIDs(payload)
+	validUpstream := make(map[string]struct{}, len(discovered))
+	for _, id := range discovered {
+		if freeOnly && !isFreeModelID(id) {
+			continue
 		}
-		if trimmed := strings.TrimSpace(m.Alias); trimmed != "" {
-			known[strings.ToLower(trimmed)] = struct{}{}
+		validUpstream[strings.ToLower(id)] = struct{}{}
+	}
+
+	var kept []config.OpenAICompatibilityModel
+	var pruned []string
+	known := make(map[string]struct{}, len(existing))
+
+	for _, m := range existing {
+		nameKey := strings.ToLower(strings.TrimSpace(m.Name))
+		if prune {
+			if _, exists := validUpstream[nameKey]; exists {
+				kept = append(kept, m)
+				known[nameKey] = struct{}{}
+				if trimmed := strings.TrimSpace(m.Alias); trimmed != "" {
+					known[strings.ToLower(trimmed)] = struct{}{}
+				}
+			} else {
+				pruned = append(pruned, m.Name)
+			}
+		} else {
+			kept = append(kept, m)
+			if nameKey != "" {
+				known[nameKey] = struct{}{}
+			}
+			if trimmed := strings.TrimSpace(m.Alias); trimmed != "" {
+				known[strings.ToLower(trimmed)] = struct{}{}
+			}
 		}
 	}
 
-	discovered := parseDiscoveredModelIDs(payload)
 	var added []config.OpenAICompatibilityModel
+	var addedNames []string
 	var skipped []string
 	seenNew := map[string]struct{}{}
 	for _, id := range discovered {
@@ -227,6 +254,18 @@ func mergeDiscoveredModels(existing []config.OpenAICompatibilityModel, payload [
 		}
 		seenNew[key] = struct{}{}
 		added = append(added, config.OpenAICompatibilityModel{Name: id})
+		addedNames = append(addedNames, id)
+	}
+	finalList := append(kept, added...)
+	return finalList, addedNames, pruned, skipped
+}
+
+func mergeDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []byte, freeOnly bool) ([]config.OpenAICompatibilityModel, []string) {
+	finalList, addedNames, _, skipped := syncDiscoveredModels(existing, payload, freeOnly, false)
+	_ = finalList
+	var added []config.OpenAICompatibilityModel
+	for _, name := range addedNames {
+		added = append(added, config.OpenAICompatibilityModel{Name: name})
 	}
 	return added, skipped
 }
@@ -262,9 +301,9 @@ func parseDiscoveredModelIDs(payload []byte) []string {
 			}
 		}
 		for _, item := range root.Result {
-			value := strings.TrimSpace(item.ID)
+			value := strings.TrimSpace(item.Name)
 			if value == "" {
-				value = strings.TrimSpace(item.Name)
+				value = strings.TrimSpace(item.ID)
 			}
 			if value != "" {
 				ids = append(ids, value)

@@ -47,7 +47,12 @@ func performJSON(h *Handler, method, path string, body any) *httptest.ResponseRe
 	case strings.HasSuffix(path, "/api-key-policies") && method == http.MethodPut:
 		h.PutAPIKeyPolicies(ctx)
 	case strings.Contains(path, "import-models"):
-		ctx.Params = gin.Params{{Key: "name", Value: "vendor"}}
+		name := "vendor"
+		parts := strings.Split(strings.TrimPrefix(path, "/openai-compatibility/"), "/")
+		if len(parts) > 0 && parts[0] != "" {
+			name = parts[0]
+		}
+		ctx.Params = gin.Params{{Key: "name", Value: name}}
 		h.ImportOpenAICompatModels(ctx)
 	}
 	return recorder
@@ -110,6 +115,47 @@ func TestImportModelsMergesAndSkips(t *testing.T) {
 	_ = json.Unmarshal(resp.Body.Bytes(), &payload)
 	if payload.AddedCount != 1 || len(payload.Added) != 1 || payload.Added[0] != "new-model" || len(payload.Skipped) != 2 {
 		t.Fatalf("payload=%s", resp.Body.String())
+	}
+}
+func TestImportModelsSyncPrunesObsolete(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+			{"id": "beam-free"},
+			{"id": "deepseek-v4.1-flash-free"},
+		}})
+	}))
+	defer upstream.Close()
+
+	// Initial config has obsolete x-preview-f-free and valid beam-free
+	initial := "openai-compatibility:\n  - name: opencode-free\n    base-url: \"" + upstream.URL + "\"\n    models:\n      - name: x-preview-f-free\n      - name: beam-free\n"
+	h := policiesTestHandler(t, initial)
+
+	resp := performJSON(h, http.MethodPost, "/openai-compatibility/opencode-free/import-models?prune=true&free_only=true", nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		Added       []string `json:"added"`
+		Pruned      []string `json:"pruned"`
+		AddedCount  int      `json:"added_count"`
+		PrunedCount int      `json:"pruned_count"`
+	}
+	_ = json.Unmarshal(resp.Body.Bytes(), &payload)
+	if payload.AddedCount != 1 || len(payload.Added) != 1 || payload.Added[0] != "deepseek-v4.1-flash-free" {
+		t.Fatalf("expected deepseek-v4.1-flash-free added, got: %v", payload.Added)
+	}
+	if payload.PrunedCount != 1 || len(payload.Pruned) != 1 || payload.Pruned[0] != "x-preview-f-free" {
+		t.Fatalf("expected x-preview-f-free pruned, got: %v", payload.Pruned)
+	}
+
+	// Verify on-disk config has pruned x-preview-f-free
+	data, _ := os.ReadFile(h.configFilePath)
+	if strings.Contains(string(data), "x-preview-f-free") {
+		t.Fatalf("obsolete model was not pruned from config: %s", data)
+	}
+	if !strings.Contains(string(data), "deepseek-v4.1-flash-free") {
+		t.Fatalf("new model was not added to config: %s", data)
 	}
 }
 
