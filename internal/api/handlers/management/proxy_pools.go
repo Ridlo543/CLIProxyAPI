@@ -1,6 +1,7 @@
 package management
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,7 +13,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
@@ -21,6 +21,17 @@ import (
 
 type proxyPoolReporter interface {
 	ProxyPoolStatuses() []coreauth.ProxyPoolStatus
+	RecordEntryFailure(poolName, rawURL string)
+	RecordEntrySuccess(poolName, rawURL string)
+}
+
+func (h *Handler) getProxyPoolReporter() proxyPoolReporter {
+	if h != nil && h.authManager != nil {
+		if reporter, ok := h.authManager.RoundTripperProvider().(proxyPoolReporter); ok {
+			return reporter
+		}
+	}
+	return nil
 }
 
 // sanitizeProxyURL reduces a pool entry to the endpoint the operator needs to
@@ -86,6 +97,7 @@ type ProxyPoolResponseItem struct {
 	Cooling        int      `json:"cooling"`
 	FailureCount   uint64   `json:"failure_count"`
 	URLs           []string `json:"urls,omitempty"`
+	CoolingURLs    []string `json:"cooling_urls,omitempty"`
 	BoundAccounts  []string `json:"bound_accounts,omitempty"`
 	BoundProviders []string `json:"bound_providers,omitempty"`
 }
@@ -324,8 +336,8 @@ func (h *Handler) GetProxyPools(c *gin.Context) {
 				Cooling:       cooling,
 				FailureCount:  failCount,
 				URLs:          urls,
+				CoolingURLs:   runtimeStatus.CoolingURLs,
 				BoundAccounts:  h.collectBoundAccounts(name),
-				BoundProviders: h.collectBoundProviders(name),
 			})
 		}
 	}
@@ -350,6 +362,7 @@ func (h *Handler) GetProxyPools(c *gin.Context) {
 			Cooling:       p.Cooling,
 			FailureCount:  p.FailureCount,
 			URLs:          urls,
+			CoolingURLs:   p.CoolingURLs,
 			BoundAccounts:  h.collectBoundAccounts(name),
 			BoundProviders: h.collectBoundProviders(name),
 		})
@@ -711,7 +724,83 @@ func (h *Handler) VerifyProxy(c *gin.Context) {
 		Transport: transport,
 		Timeout:   8 * time.Second,
 	}
+	// 1. Resolve exit IP
+	exitIP := ""
+	reqIP, errIP := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, "http://api.ipify.org", nil)
+	if errIP == nil {
+		reqIP.Header.Set("User-Agent", "curl/7.88.1")
+		if respIP, errDoIP := client.Do(reqIP); errDoIP == nil {
+			if b, errRead := io.ReadAll(respIP.Body); errRead == nil {
+				exitIP = strings.TrimSpace(string(b))
+			}
+			_ = respIP.Body.Close()
+		}
+	}
 
+	// 2. Perform AI Gateway verification (OpenCode Zen / SystemOne)
+	probeURL := "https://opencode.ai/zen/v1/systemone"
+	probePayload := []byte(`{"model":"jev-1.13-free","state":"ping","questions":{"q":{"type":"noul","instructions":"ping"}}}`)
+	reqProbe, errProbe := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, probeURL, bytes.NewReader(probePayload))
+	if errProbe == nil {
+		reqProbe.Header.Set("Content-Type", "application/json")
+		reqProbe.Header.Set("User-Agent", "opencode/1.18.35 ai-sdk/provider-utils/4.0.40 runtime/bun/1.3.14")
+		reqProbe.Header.Set("x-opencode-client", "cli")
+		reqProbe.Header.Set("x-opencode-project", "global")
+		reqProbe.Header.Set("x-opencode-session", "ses_test_verify_123456789012")
+		reqProbe.Header.Set("x-opencode-request", "msg_test_verify_123456789012")
+		reqProbe.Header.Set("Authorization", "Bearer public")
+
+		respProbe, errDoProbe := client.Do(reqProbe)
+		latency := time.Since(start).Milliseconds()
+		if errDoProbe == nil {
+			defer respProbe.Body.Close()
+			if respProbe.StatusCode == http.StatusForbidden {
+				if reporter := h.getProxyPoolReporter(); reporter != nil {
+					reporter.RecordEntryFailure(poolName, rawURL)
+				}
+				c.JSON(http.StatusOK, gin.H{
+					"ok":          false,
+					"banned":      true,
+					"status_code": 403,
+					"error":       "Terbanned Cloudflare/OpenCode (403)",
+					"endpoint":    sanitizeProxyURL(rawURL),
+					"exit_ip":     exitIP,
+					"latency_ms":  latency,
+				})
+				return
+			}
+			if respProbe.StatusCode == http.StatusTooManyRequests {
+				if reporter := h.getProxyPoolReporter(); reporter != nil {
+					reporter.RecordEntryFailure(poolName, rawURL)
+				}
+				c.JSON(http.StatusOK, gin.H{
+					"ok":          false,
+					"banned":      true,
+					"status_code": 429,
+					"error":       "Rate Limit Exceeded (429)",
+					"endpoint":    sanitizeProxyURL(rawURL),
+					"exit_ip":     exitIP,
+					"latency_ms":  latency,
+				})
+				return
+			}
+			if respProbe.StatusCode >= 200 && respProbe.StatusCode < 300 {
+				if reporter := h.getProxyPoolReporter(); reporter != nil {
+					reporter.RecordEntrySuccess(poolName, rawURL)
+				}
+				c.JSON(http.StatusOK, gin.H{
+					"ok":          true,
+					"banned":      false,
+					"status_code": respProbe.StatusCode,
+					"endpoint":    sanitizeProxyURL(rawURL),
+					"exit_ip":     exitIP,
+					"latency_ms":  latency,
+				})
+				return
+			}
+		}
+	}
+	// 3. Fallback to connectivity check
 	reqPing, errReq := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, "http://connectivitycheck.gstatic.com/generate_204", nil)
 	if errReq != nil {
 		c.JSON(http.StatusOK, gin.H{"ok": false, "error": errReq.Error()})
@@ -722,20 +811,35 @@ func (h *Handler) VerifyProxy(c *gin.Context) {
 	resp, errDo := client.Do(reqPing)
 	latency := time.Since(start).Milliseconds()
 	if errDo != nil {
+		if reporter := h.getProxyPoolReporter(); reporter != nil {
+			reporter.RecordEntryFailure(poolName, rawURL)
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"ok":         false,
 			"error":      errDo.Error(),
 			"endpoint":   sanitizeProxyURL(rawURL),
+			"exit_ip":    exitIP,
 			"latency_ms": latency,
 		})
 		return
 	}
 	_ = resp.Body.Close()
 
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if reporter := h.getProxyPoolReporter(); reporter != nil {
+			reporter.RecordEntrySuccess(poolName, rawURL)
+		}
+	} else {
+		if reporter := h.getProxyPoolReporter(); reporter != nil {
+			reporter.RecordEntryFailure(poolName, rawURL)
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"ok":          resp.StatusCode >= 200 && resp.StatusCode < 300,
 		"status_code": resp.StatusCode,
 		"endpoint":    sanitizeProxyURL(rawURL),
+		"exit_ip":     exitIP,
 		"latency_ms":  latency,
 	})
 }

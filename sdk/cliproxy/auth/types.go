@@ -127,6 +127,7 @@ type ProxyPoolStatus struct {
 	Cooling      int      `json:"cooling"`
 	FailureCount uint64   `json:"failure_count"`
 	URLs         []string `json:"urls,omitempty"`
+	CoolingURLs  []string `json:"cooling_urls,omitempty"`
 }
 
 const (

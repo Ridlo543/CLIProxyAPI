@@ -229,15 +229,28 @@ func parseDiscoveredModelIDs(payload []byte) []string {
 			ID   string `json:"id"`
 			Name string `json:"name"`
 		} `json:"models"`
+		Result []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"result"`
 	}
-	if err := json.Unmarshal(payload, &root); err == nil && (len(root.Data) > 0 || len(root.Models) > 0) {
-		ids := make([]string, 0, len(root.Data)+len(root.Models))
+	if err := json.Unmarshal(payload, &root); err == nil && (len(root.Data) > 0 || len(root.Models) > 0 || len(root.Result) > 0) {
+		ids := make([]string, 0, len(root.Data)+len(root.Models)+len(root.Result))
 		for _, item := range root.Data {
 			if trimmed := strings.TrimSpace(item.ID); trimmed != "" {
 				ids = append(ids, trimmed)
 			}
 		}
 		for _, item := range root.Models {
+			value := strings.TrimSpace(item.ID)
+			if value == "" {
+				value = strings.TrimSpace(item.Name)
+			}
+			if value != "" {
+				ids = append(ids, value)
+			}
+		}
+		for _, item := range root.Result {
 			value := strings.TrimSpace(item.ID)
 			if value == "" {
 				value = strings.TrimSpace(item.Name)

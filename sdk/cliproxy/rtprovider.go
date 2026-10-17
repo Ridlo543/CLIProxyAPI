@@ -126,6 +126,7 @@ func (p *defaultRoundTripperProvider) ProxyPoolStatuses() []coreauth.ProxyPoolSt
 			status.FailureCount += pool.entries[i].failures
 			if pool.entries[i].cooldownUntil.After(now) {
 				status.Cooling++
+				status.CoolingURLs = append(status.CoolingURLs, redacted)
 			} else {
 				status.Healthy++
 			}
@@ -134,6 +135,62 @@ func (p *defaultRoundTripperProvider) ProxyPoolStatuses() []coreauth.ProxyPoolSt
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
 	return out
+}
+func normalizeProxyEndpointSimple(raw string) string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(raw, "http://")
+	raw = strings.TrimPrefix(raw, "https://")
+	raw = strings.TrimPrefix(raw, "socks5://")
+	raw = strings.TrimPrefix(raw, "socks5h://")
+	if at := strings.LastIndex(raw, "@"); at >= 0 {
+		raw = raw[at+1:]
+	}
+	return strings.TrimRight(raw, "/")
+}
+
+func (p *defaultRoundTripperProvider) RecordEntryFailure(poolName, rawURL string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	poolKey := normalizePoolName(poolName)
+	pool := p.pools[poolKey]
+	if pool == nil {
+		return
+	}
+	rawClean := strings.TrimSpace(rawURL)
+	targetEp := normalizeProxyEndpointSimple(rawClean)
+	cooldownDuration := pool.cooldown
+	if cooldownDuration < 30*time.Minute {
+		cooldownDuration = 30 * time.Minute
+	}
+	for i := range pool.entries {
+		entryClean := strings.TrimSpace(pool.entries[i].url)
+		entryEp := normalizeProxyEndpointSimple(entryClean)
+		if entryClean == rawClean || proxyutil.Redact(entryClean) == rawClean || (targetEp != "" && entryEp == targetEp) {
+			pool.entries[i].failures++
+			pool.entries[i].cooldownUntil = time.Now().Add(cooldownDuration)
+			return
+		}
+	}
+}
+
+func (p *defaultRoundTripperProvider) RecordEntrySuccess(poolName, rawURL string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	poolKey := normalizePoolName(poolName)
+	pool := p.pools[poolKey]
+	if pool == nil {
+		return
+	}
+	rawClean := strings.TrimSpace(rawURL)
+	targetEp := normalizeProxyEndpointSimple(rawClean)
+	for i := range pool.entries {
+		entryClean := strings.TrimSpace(pool.entries[i].url)
+		entryEp := normalizeProxyEndpointSimple(entryClean)
+		if entryClean == rawClean || proxyutil.Redact(entryClean) == rawClean || (targetEp != "" && entryEp == targetEp) {
+			pool.entries[i].cooldownUntil = time.Time{}
+			return
+		}
+	}
 }
 
 func (p *defaultRoundTripperProvider) RoundTripperFor(auth *coreauth.Auth) http.RoundTripper {

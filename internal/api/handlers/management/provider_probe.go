@@ -69,7 +69,13 @@ func (h *Handler) ProbeProvider(c *gin.Context) {
 			baseURL = "https://generativelanguage.googleapis.com"
 		}
 		listURL = baseURL + "/v1beta/models?key=" + url.QueryEscape(apiKey)
+	case "cloudflare", "cloudflare-ai":
+		listURL = strings.Replace(baseURL, "/ai/v1", "/ai/models/search", 1)
+		headers["Authorization"] = "Bearer " + apiKey
 	default: // "openai-compat"
+		if strings.Contains(baseURL, "api.cloudflare.com") {
+			listURL = strings.Replace(baseURL, "/ai/v1", "/ai/models/search", 1)
+		}
 		headers["Authorization"] = "Bearer " + apiKey
 	}
 
