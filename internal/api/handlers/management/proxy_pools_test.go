@@ -21,6 +21,8 @@ type managementPoolReporter struct {
 
 func (p managementPoolReporter) RoundTripperFor(*coreauth.Auth) http.RoundTripper { return p.rt }
 func (p managementPoolReporter) ProxyPoolStatuses() []coreauth.ProxyPoolStatus    { return p.statuses }
+func (managementPoolReporter) RecordEntryFailure(string, string) {}
+func (managementPoolReporter) RecordEntrySuccess(string, string) {}
 
 type managementFailingTransport struct{}
 
@@ -206,5 +208,32 @@ func TestProxyPoolsAssign(t *testing.T) {
 	updated, _ = manager.GetByID("test-auth.json")
 	if updated == nil || updated.ProxyPool != "" {
 		t.Fatalf("updated.ProxyPool = %v, want empty (direct)", updated)
+	}
+}
+
+func TestProxyPoolsResetCooldown(t *testing.T) {
+	cfg := &config.Config{
+		SDKConfig: config.SDKConfig{
+			ProxyPools: []config.ProxyPool{{
+				Name:     "pool-test",
+				Strategy: "round-robin",
+				Entries:  []config.ProxyPoolEntry{{URL: "http://127.0.0.1:9091"}},
+			}},
+		},
+	}
+	mr := managementPoolReporter{statuses: []coreauth.ProxyPoolStatus{}}
+	manager := coreauth.NewManager(nil, nil, nil)
+	manager.SetRoundTripperProvider(mr)
+
+	h := &Handler{cfg: cfg, authManager: manager}
+	router := gin.New()
+	router.POST("/proxy-pools/reset-cooldown", h.ResetProxyPoolCooldown)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/proxy-pools/reset-cooldown", strings.NewReader(`{"pool":"pool-test"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reset-cooldown status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 }

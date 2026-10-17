@@ -778,14 +778,13 @@ func (h *Handler) VerifyProxy(c *gin.Context) {
 				return
 			}
 			if respProbe.StatusCode == http.StatusTooManyRequests {
-				if reporter := h.getProxyPoolReporter(); reporter != nil {
-					reporter.RecordEntryFailure(poolName, rawURL)
-				}
+				// 429 is an upstream AI rate-limit / capacity error, NOT a proxy transport failure.
+				// Do not record failure on the live router reporter to avoid taking down healthy proxies.
 				c.JSON(http.StatusOK, gin.H{
 					"ok":          false,
-					"banned":      true,
+					"banned":      false,
 					"status_code": 429,
-					"error":       "Rate Limit Exceeded (429)",
+					"error":       "Upstream Capacity / Rate Limit (429)",
 					"endpoint":    sanitizeProxyURL(rawURL),
 					"exit_ip":     exitIP,
 					"latency_ms":  latency,
@@ -979,6 +978,38 @@ func (h *Handler) AssignProxyPool(c *gin.Context) {
 		"status":        "ok",
 		"pool":          targetPool,
 		"updated_count": updatedCount,
+	})
+}
+
+// ResetProxyPoolCooldown clears the cooldown timer for all entries in a specified pool, or all pools.
+func (h *Handler) ResetProxyPoolCooldown(c *gin.Context) {
+	var req struct {
+		Pool string `json:"pool"`
+	}
+	_ = bindFlexibleJSON(c, &req)
+	poolName := strings.TrimSpace(req.Pool)
+
+	reporter := h.getProxyPoolReporter()
+	if reporter == nil {
+		c.JSON(http.StatusOK, gin.H{"ok": true, "message": "no reporter available", "cleared": 0})
+		return
+	}
+
+	cleared := 0
+	if h.cfg != nil {
+		for _, p := range h.cfg.ProxyPools {
+			if poolName == "" || strings.EqualFold(strings.TrimSpace(p.Name), poolName) {
+				for _, entry := range p.Entries {
+					reporter.RecordEntrySuccess(p.Name, entry.URL)
+					cleared++
+				}
+			}
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"ok":      true,
+		"cleared": cleared,
+		"message": fmt.Sprintf("Cleared cooldown for %d proxy entries", cleared),
 	})
 }
 
