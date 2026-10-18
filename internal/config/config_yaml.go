@@ -81,6 +81,9 @@ func SaveConfigPreserveComments(configFile string, cfg *Config, migrateV8 ...boo
 	pruneMappingToGeneratedKeys(original.Content[0], generated.Content[0], "oauth-request-scoped-errors")
 	pruneMappingToGeneratedKeys(original.Content[0], generated.Content[0], "oauth-settings")
 	replacePluginConfigsSubtree(original.Content[0], generated.Content[0])
+	if len(persistCfg.ProxyPools) == 0 {
+		removeMapKey(original.Content[0], "proxy-pools")
+	}
 
 	// Merge generated into original in-place, preserving comments/order of existing nodes.
 	mergeMappingPreserve(original.Content[0], generated.Content[0])
@@ -662,7 +665,7 @@ func sequenceElementIdentity(node *yaml.Node) string {
 		return "provider=" + prov + "/model=" + mod
 	}
 
-	identityKeys := []string{"id", "name", "alias", "api-key", "api_key", "apikey", "key", "provider", "model"}
+	identityKeys := []string{"id", "name", "alias", "api-key", "api_key", "apikey", "key", "provider", "model", "url"}
 	for _, k := range identityKeys {
 		if v := mappingScalarValue(node, k); v != "" {
 			return k + "=" + v

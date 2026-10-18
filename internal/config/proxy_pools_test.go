@@ -61,3 +61,34 @@ func TestLoadConfigRejectsInvalidProxyPoolsWithoutLeakingCredentials(t *testing.
 		})
 	}
 }
+
+func TestSaveConfigProxyPoolsRemoval(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := `proxy-pools:
+  - name: pool-1
+    strategy: round-robin
+    entries:
+      - url: direct
+gemini-api-key:
+  - api-key: test
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Remove all proxy pools
+	cfg.ProxyPools = nil
+	if err := SaveConfigPreserveComments(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(saved), "proxy-pools:") {
+		t.Fatalf("expected proxy-pools: to be removed, got:\n%s", string(saved))
+	}
+}
