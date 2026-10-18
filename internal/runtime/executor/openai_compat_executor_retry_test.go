@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -214,6 +215,77 @@ func TestOpenAICompatTransientTransportRetry(t *testing.T) {
 	}
 	if resp.Payload == nil {
 		t.Fatal("expected non-nil response payload")
+	}
+}
+
+func TestOpenAICompatSynthesizesMissingFinishReasonOnDone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		// Stream with tool calls delta but NO finish_reason, followed immediately by [DONE]
+		_, _ = w.Write([]byte("data: {\"id\":\"call_test\",\"model\":\"test-model\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"write\",\"arguments\":\"{}\"}}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	t.Cleanup(server.Close)
+
+	executor := NewOpenAICompatExecutor("openai-compatibility", &config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server.URL + "/v1",
+		"api_key":  "test",
+	}}
+	request := cliproxyexecutor.Request{
+		Model:   "compatible-model",
+		Payload: []byte(`{"model":"compatible-model","messages":[{"role":"user","content":"write file"}],"tools":[{"type":"function","function":{"name":"write"}}]}`),
+	}
+
+	res, err := executor.ExecuteStream(context.Background(), auth, request, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("openai"),
+		Stream:       true,
+	})
+	if err != nil {
+		t.Fatalf("expected ExecuteStream to succeed, got error: %v", err)
+	}
+	if res == nil || res.Chunks == nil {
+		t.Fatal("expected non-nil stream result")
+	}
+
+	var sawFinishReason bool
+	var finishReasonVal string
+	for chunk := range res.Chunks {
+		if chunk.Err != nil {
+			t.Fatalf("unexpected chunk error: %v", chunk.Err)
+		}
+		str := string(chunk.Payload)
+		t.Logf("got chunk: %s", str)
+		if strings.Contains(str, `"finish_reason":"tool_calls"`) {
+			sawFinishReason = true
+			finishReasonVal = "tool_calls"
+		}
+	}
+
+	if !sawFinishReason {
+		t.Fatalf("expected synthesized finish_reason 'tool_calls' on stream termination, got none")
+	}
+	if finishReasonVal != "tool_calls" {
+		t.Fatalf("expected finish_reason 'tool_calls', got %q", finishReasonVal)
+	}
+}
+
+func TestOpenAICompatEnforcesHTTP11(t *testing.T) {
+	executor := NewOpenAICompatExecutor("openai-compatibility", &config.Config{})
+	client := executor.newHTTPClient(context.Background(), nil, 0)
+	if client == nil || client.Transport == nil {
+		t.Fatal("expected non-nil client and transport")
+	}
+	tr, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected *http.Transport, got %T", client.Transport)
+	}
+	if tr.ForceAttemptHTTP2 {
+		t.Error("expected ForceAttemptHTTP2 to be false")
+	}
+	if len(tr.TLSNextProto) != 0 {
+		t.Error("expected TLSNextProto to be empty map")
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	cryptorand "crypto/rand"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,7 +86,7 @@ func (e *OpenAICompatExecutor) HttpRequest(ctx context.Context, auth *cliproxyau
 	if err := e.PrepareRequest(httpReq, auth); err != nil {
 		return nil, err
 	}
-	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
+	httpClient := e.newHTTPClient(ctx, auth, 0)
 	return doWithTransientRetry(httpClient, httpReq)
 }
 
@@ -203,7 +204,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		AuthValue: authValue,
 	})
 
-	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
+	httpClient := e.newHTTPClient(ctx, auth, 0)
 	httpClient = reporter.TrackHTTPClient(httpClient)
 	httpResp, err := doWithTransientRetry(httpClient, httpReq)
 	if err != nil {
@@ -255,6 +256,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	var param any
 	out := sdktranslator.TranslateNonStream(ctx, to, responseFormat, req.Model, helps.ApplyPatchOriginalRequest(req, opts), translated, body, &param)
 	if helps.ApplyPatchTranslationError(param) != nil || len(out) == 0 {
+		return cliproxyexecutor.Response{}, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage}
 	}
 	reporter.Publish(ctx, helps.ParseOpenAIUsage(body))
 	if responseFormat == sdktranslator.FormatOpenAIResponse {
@@ -323,7 +325,7 @@ func (e *OpenAICompatExecutor) executeImages(ctx context.Context, auth *cliproxy
 		AuthValue: authValue,
 	})
 
-	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
+	httpClient := e.newHTTPClient(ctx, auth, 0)
 	httpClient = reporter.TrackHTTPClient(httpClient)
 	httpResp, err := doWithTransientRetry(httpClient, httpReq)
 	if err != nil {
@@ -464,7 +466,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		AuthValue: authValue,
 	})
 
-	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
+	httpClient := e.newHTTPClient(ctx, auth, 0)
 	// Early role/empty frames are only first-packet fallbacks, not effective tokens.
 	httpClient = reporter.TrackHTTPClientRoundTripOnly(httpClient)
 	httpResp, err := doWithTransientRetry(httpClient, httpReq)
@@ -509,6 +511,10 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		var streamAborted bool
 		var upstreamEvent string
 		var frameData [][]byte
+		var sawFinishReasonInStream bool
+		var sawToolCallsInStream bool
+		var lastModelVersion string
+		var lastResponseID string
 		defer streamUsage.Publish(ctx, reporter)
 
 		publishStreamError := func(streamErr statusErr, containsPayload bool) {
@@ -562,12 +568,54 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 					return true
 				}
 			}
+			if !isDone {
+				if id := gjson.GetBytes(dataPayload, "id").String(); id != "" {
+					lastResponseID = id
+				}
+				if model := gjson.GetBytes(dataPayload, "model").String(); model != "" {
+					lastModelVersion = model
+				}
+				for _, choice := range gjson.GetBytes(dataPayload, "choices").Array() {
+					if fr := choice.Get("finish_reason"); fr.Exists() && fr.Type != gjson.Null && fr.String() != "" {
+						sawFinishReasonInStream = true
+					}
+					if tc := choice.Get("delta.tool_calls"); tc.Exists() && tc.IsArray() && len(tc.Array()) > 0 {
+						sawToolCallsInStream = true
+					}
+				}
+			}
 
 			// Observe complete upstream frames before translation or downstream backpressure.
 			if endpoint == responsesEndpoint {
 				helps.ObserveResponsesTokenEvent(reporter, dataPayload)
 			} else {
 				helps.ObserveChatTokenEvent(reporter, dataPayload)
+			}
+			if isDone && !sawFinishReasonInStream && (endpoint == "" || endpoint == chatCompletionsEndpoint) {
+				finishReason := "stop"
+				if sawToolCallsInStream {
+					finishReason = "tool_calls"
+				}
+				modelName := lastModelVersion
+				if modelName == "" {
+					modelName = baseModel
+				}
+				respID := lastResponseID
+				if respID == "" {
+					respID = fmt.Sprintf("chatcmpl_%d", time.Now().UnixNano())
+				}
+				synthChunk := fmt.Sprintf(`{"id":%q,"object":"chat.completion.chunk","created":%d,"model":%q,"choices":[{"index":0,"delta":{},"finish_reason":%q}]}`, respID, time.Now().Unix(), modelName, finishReason)
+				synthLine := append([]byte("data: "), []byte(synthChunk)...)
+				synthChunks := helps.TranslateStreamWithClaudeInputTokens(ctx, to, responseFormat, req.Model, helps.ApplyPatchOriginalRequest(req, opts), translated, synthLine, &param, claudeInputTokens)
+				for i := range synthChunks {
+					select {
+					case out <- cliproxyexecutor.StreamChunk{Payload: synthChunks[i]}:
+					case <-ctx.Done():
+						streamAborted = true
+						return true
+					}
+				}
+				sawFinishReasonInStream = true
 			}
 			streamLine := append([]byte("data: "), dataPayload...)
 			chunks := helps.TranslateStreamWithClaudeInputTokens(ctx, to, responseFormat, req.Model, helps.ApplyPatchOriginalRequest(req, opts), translated, streamLine, &param, claudeInputTokens)
@@ -672,6 +720,31 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 				return
 			}
 
+			if !sawFinishReasonInStream && (endpoint == "" || endpoint == chatCompletionsEndpoint) {
+				finishReason := "stop"
+				if sawToolCallsInStream {
+					finishReason = "tool_calls"
+				}
+				modelName := lastModelVersion
+				if modelName == "" {
+					modelName = baseModel
+				}
+				respID := lastResponseID
+				if respID == "" {
+					respID = fmt.Sprintf("chatcmpl_%d", time.Now().UnixNano())
+				}
+				synthChunk := fmt.Sprintf(`{"id":%q,"object":"chat.completion.chunk","created":%d,"model":%q,"choices":[{"index":0,"delta":{},"finish_reason":%q}]}`, respID, time.Now().Unix(), modelName, finishReason)
+				synthLine := append([]byte("data: "), []byte(synthChunk)...)
+				synthChunks := helps.TranslateStreamWithClaudeInputTokens(ctx, to, responseFormat, req.Model, helps.ApplyPatchOriginalRequest(req, opts), translated, synthLine, &param, claudeInputTokens)
+				for i := range synthChunks {
+					select {
+					case out <- cliproxyexecutor.StreamChunk{Payload: synthChunks[i]}:
+					case <-ctx.Done():
+						return
+					}
+				}
+				sawFinishReasonInStream = true
+			}
 			// Other protocols retain compatibility with providers that omit [DONE].
 			chunks := helps.TranslateStreamWithClaudeInputTokens(ctx, to, responseFormat, req.Model, helps.ApplyPatchOriginalRequest(req, opts), translated, []byte("data: [DONE]"), &param, claudeInputTokens)
 			helps.RecordApplyPatchStreamFailure(ctx, param, reporter, statusErr{code: http.StatusBadGateway, msg: helps.ApplyPatchUpstreamErrorMessage})
@@ -751,7 +824,7 @@ func (e *OpenAICompatExecutor) executeImagesStream(ctx context.Context, auth *cl
 		AuthValue: authValue,
 	})
 
-	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
+	httpClient := e.newHTTPClient(ctx, auth, 0)
 	httpClient = reporter.TrackHTTPClient(httpClient)
 	httpResp, err := doWithTransientRetry(httpClient, httpReq)
 	if err != nil {
@@ -1251,6 +1324,45 @@ func doWithTransientRetry(httpClient *http.Client, httpReq *http.Request) (*http
 		}
 	}
 	return httpResp, err
+}
+
+type unwrappableTransport interface {
+	Unwrap() http.RoundTripper
+	SetBase(http.RoundTripper)
+}
+
+func enforceHTTP11(rt http.RoundTripper) http.RoundTripper {
+	if u, ok := rt.(unwrappableTransport); ok && u != nil {
+		u.SetBase(enforceHTTP11(u.Unwrap()))
+		return rt
+	}
+	if rt == nil {
+		if dt, ok := http.DefaultTransport.(*http.Transport); ok && dt != nil {
+			rt = dt
+		} else {
+			return &http.Transport{
+				ForceAttemptHTTP2: false,
+				TLSNextProto:      make(map[string]func(string, *tls.Conn) http.RoundTripper),
+			}
+		}
+	}
+	if tr, ok := rt.(*http.Transport); ok && tr != nil {
+		clone := tr.Clone()
+		clone.ForceAttemptHTTP2 = false
+		clone.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
+		if clone.TLSClientConfig != nil {
+			clone.TLSClientConfig = clone.TLSClientConfig.Clone()
+			clone.TLSClientConfig.NextProtos = nil
+		}
+		return clone
+	}
+	return rt
+}
+
+func (e *OpenAICompatExecutor) newHTTPClient(ctx context.Context, auth *cliproxyauth.Auth, timeout time.Duration) *http.Client {
+	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, timeout)
+	httpClient.Transport = enforceHTTP11(httpClient.Transport)
+	return httpClient
 }
 
 // openAICompatRetryAfter preserves the provider's standard Retry-After signal.

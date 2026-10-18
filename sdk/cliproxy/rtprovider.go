@@ -384,6 +384,14 @@ func (r *poolRoundTripper) ProxyWebsocketDialConfig() (proxyutil.WebsocketDialCo
 func (r *poolRoundTripper) ReportProxyTransportFailure() {
 	r.recordFailure()
 }
+func (r *poolRoundTripper) Unwrap() http.RoundTripper {
+	return r.base
+}
+
+func (r *poolRoundTripper) SetBase(b http.RoundTripper) {
+	r.base = b
+}
+
 
 func (r *poolRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := r.base.RoundTrip(req)
