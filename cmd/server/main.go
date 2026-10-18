@@ -138,6 +138,7 @@ func main() {
 	var standalone bool
 	var managementBaseURL string
 	var localModel bool
+	var versionFlag bool
 
 	// Define command-line flags for different operation modes.
 	flag.BoolVar(&codexLogin, "codex-login", false, "Login to Codex using OAuth")
@@ -172,6 +173,7 @@ func main() {
 	flag.BoolVar(&standalone, "standalone", false, "In TUI mode, start an embedded local server")
 	flag.StringVar(&managementBaseURL, "management-base-url", "", "Base URL of remote management API for TUI client mode (e.g. https://proxy.example.com)")
 	flag.BoolVar(&localModel, "local-model", false, "Use embedded model catalogs unless models.catalog, models.codex-catalog, or models.devin-catalog explicitly overrides the source")
+	flag.BoolVar(&versionFlag, "version", false, "Print version information and exit")
 
 	flag.CommandLine.Usage = func() {
 		out := flag.CommandLine.Output()
@@ -210,6 +212,9 @@ func main() {
 
 	// Parse the command-line flags.
 	flag.Parse()
+	if versionFlag {
+		os.Exit(0)
+	}
 
 	// Bare `ainyrouter` must work from any directory: fall back to the
 	// per-user install location when ./config.yaml does not exist.
