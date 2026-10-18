@@ -32,24 +32,6 @@ func configETag(data []byte) string {
 	return `"` + hex.EncodeToString(sum[:]) + `"`
 }
 
-// ifMatchSatisfied reports whether an If-Match header permits the write.
-// An absent header keeps the unconditional behaviour every existing client
-// relies on; "*" matches any existing content; otherwise one of the supplied
-// entity tags has to equal the current one.
-func ifMatchSatisfied(header, current string) bool {
-	header = strings.TrimSpace(header)
-	if header == "" || header == "*" {
-		return true
-	}
-	for _, candidate := range strings.Split(header, ",") {
-		candidate = strings.TrimSpace(candidate)
-		candidate = strings.TrimPrefix(candidate, "W/")
-		if candidate == current {
-			return true
-		}
-	}
-	return false
-}
 
 func (h *Handler) GetConfig(c *gin.Context) {
 	if h == nil || h.cfg == nil {
@@ -202,7 +184,7 @@ func (h *Handler) PutConfigYAML(c *gin.Context) {
 		return
 	}
 	currentETag := configETag(current)
-	if !ifMatchSatisfied(c.GetHeader("If-Match"), currentETag) {
+	if !ifMatchSatisfied([]string{c.GetHeader("If-Match")}, currentETag) {
 		// Hand back the live tag so the client can merge and retry without
 		// a separate GET.
 		c.Header("ETag", currentETag)
@@ -403,6 +385,8 @@ func (h *Handler) GetRoutingStrategy(c *gin.Context) {
 	})
 }
 func (h *Handler) PutRoutingStrategy(c *gin.Context) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	var body struct {
 		Value              *string `json:"value"`
 		Strategy           *string `json:"strategy"`
@@ -442,7 +426,7 @@ func (h *Handler) PutRoutingStrategy(c *gin.Context) {
 	if body.SessionAffinityTTL != nil {
 		h.cfg.Routing.SessionAffinityTTL = strings.TrimSpace(*body.SessionAffinityTTL)
 	}
-	h.persist(c)
+	h.persistLocked(c)
 }
 
 // Provider Routing Overrides
@@ -455,6 +439,8 @@ func (h *Handler) GetProviderRouting(c *gin.Context) {
 }
 
 func (h *Handler) PutProviderRouting(c *gin.Context) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	name := strings.ToLower(strings.TrimSpace(c.Param("name")))
 	if name == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "provider name is required"})
@@ -514,14 +500,16 @@ func (h *Handler) PutProviderRouting(c *gin.Context) {
 		h.cfg.Routing.Providers[name] = current
 	}
 
-	h.persist(c)
+	h.persistLocked(c)
 }
 
 func (h *Handler) DeleteProviderRouting(c *gin.Context) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	name := strings.ToLower(strings.TrimSpace(c.Param("name")))
 	if name != "" && h.cfg.Routing.Providers != nil {
 		delete(h.cfg.Routing.Providers, name)
-		h.persist(c)
+		h.persistLocked(c)
 		return
 	}
 	c.JSON(200, gin.H{"status": "ok"})
