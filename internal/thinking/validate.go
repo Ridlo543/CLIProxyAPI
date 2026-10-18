@@ -74,7 +74,7 @@ func ValidateConfig(config ThinkingConfig, modelInfo *registry.ModelInfo, fromFo
 			}
 		}
 	}
-	allowClampUnsupported := toHasLevelSupport && (!isSameProviderFamily(fromFormat, toFormat) || modelFamilyMismatch)
+	allowClampUnsupported := toHasLevelSupport && (!isSameProviderFamily(fromFormat, toFormat) || modelFamilyMismatch || fromSuffix)
 
 	// strictBudget determines whether to enforce strict budget range validation.
 	// This applies when: (1) config comes from request body (not suffix), (2) source format is known,
