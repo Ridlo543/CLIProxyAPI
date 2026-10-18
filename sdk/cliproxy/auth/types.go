@@ -113,6 +113,12 @@ type Auth struct {
 	Success int64 `json:"-"`
 	Failed  int64 `json:"-"`
 
+	// cooldownRecordedSeq is the execution sequence watermark captured when
+	// the current auth-level cooldown was recorded. Successes from executions
+	// stamped at or below it were dispatched before the cooldown existed and
+	// must not clear it. Runtime only: zero after restart so restored
+	// cooldowns can still be cleared by any success.
+	cooldownRecordedSeq uint64 `json:"-"`
 	indexAssigned  bool              `json:"-"`
 	recentRequests recentRequestRing `json:"-"`
 }
@@ -243,6 +249,28 @@ type ModelState struct {
 	Quota QuotaState `json:"quota"`
 	// UpdatedAt tracks the last update timestamp for this model state.
 	UpdatedAt time.Time `json:"updated_at"`
+	// cooldownRecordedSeq is the execution sequence watermark captured when
+	// the current model cooldown was recorded. Successes from executions
+	// stamped at or below it were dispatched before the cooldown existed and
+	// must not clear it. Runtime only: zero after restart so restored
+	// cooldowns can still be cleared by any success.
+	cooldownRecordedSeq uint64 `json:"-"`
+	// credentialQuotaShadow holds this model's independent (own-failure)
+	// cooldown layer while the outer fields present the auth-level
+	// credential quota propagated over it, so quota restoration can drop
+	// only the propagated layer and reinstate precisely what the model's
+	// own failures justify (issue #6690). It is nil when no independent
+	// live block exists beneath an outer credential_quota label. Persisted
+	// via CooldownStateRecord.IndependentState (unexported fields are
+	// invisible to JSON, so the record owns the serialized form).
+	credentialQuotaShadow *ModelState `toml:"credential_quota_shadow,omitempty"`
+	// credentialQuotaPropagated marks that credential-quota propagation has
+	// already wrapped this state, distinguishing "no independent block"
+	// from "not yet propagated" so repeated propagation never mistakes its
+	// own earlier layer for an independent block. Persisted via
+	// CooldownStateRecord.CredentialQuotaPropagated across restarts,
+	// including for shadow-less reporting models.
+	credentialQuotaPropagated bool `toml:"credential_quota_propagated,omitempty"`
 }
 
 func recentRequestBucketID(now time.Time) int64 {
@@ -482,6 +510,28 @@ func (m *ModelState) Clone() *ModelState {
 	}
 	copyState := *m
 	copyState.Quota = m.Quota.Clone()
+	if m.LastError != nil {
+		copyState.LastError = &Error{
+			Code:       m.LastError.Code,
+			Message:    m.LastError.Message,
+			Retryable:  m.LastError.Retryable,
+			HTTPStatus: m.LastError.HTTPStatus,
+		}
+	}
+	if m.credentialQuotaShadow != nil {
+		copyState.credentialQuotaShadow = m.credentialQuotaShadow.cloneShallow()
+	}
+	return &copyState
+}
+
+// cloneShallow copies a shadow state one level deep; shadows never nest.
+func (m *ModelState) cloneShallow() *ModelState {
+	if m == nil {
+		return nil
+	}
+	copyState := *m
+	copyState.Quota = m.Quota.Clone()
+	copyState.credentialQuotaShadow = nil
 	if m.LastError != nil {
 		copyState.LastError = &Error{
 			Code:       m.LastError.Code,
