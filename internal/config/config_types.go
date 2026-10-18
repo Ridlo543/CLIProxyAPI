@@ -207,6 +207,22 @@ type AntigravityConfig struct {
 	// SensitiveWords is a list of words to obfuscate with zero-width characters in system instructions.
 	SensitiveWords []string `yaml:"sensitive-words,omitempty" json:"sensitive-words,omitempty"`
 
+	// SystemInstruction is an extra system instruction injected into requests whose
+	// model matches SystemInstructionModels. Used to apply persona/jailbreak prompts
+	// per model without touching the client payload.
+	SystemInstruction string `yaml:"system-instruction,omitempty" json:"system-instruction,omitempty"`
+
+	// SystemInstructionFile is an alternative to SystemInstruction: a path to a
+	// text file whose contents become the instruction. Useful for long prompts.
+	// The file form wins when both are set.
+	SystemInstructionFile string `yaml:"system-instruction-file,omitempty" json:"system-instruction-file,omitempty"`
+
+	// SystemInstructionModels lists the model names that receive SystemInstruction.
+	// Matching is an exact, case-insensitive comparison against the upstream model
+	// name, so sibling models such as gemini-3.8-flash-high are never affected.
+	// Empty means no model receives the injection.
+	SystemInstructionModels []string `yaml:"system-instruction-models,omitempty" json:"system-instruction-models,omitempty"`
+
 	// ConnectionPool configures upstream HTTP connection pooling behavior for Antigravity.
 	ConnectionPool AntigravityConnectionPoolConfig `yaml:"connection-pool,omitempty" json:"connection-pool,omitempty"`
 }

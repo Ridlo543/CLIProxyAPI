@@ -28,6 +28,10 @@ func DefaultSafetySettings() []map[string]string {
 			"category":  "HARM_CATEGORY_CIVIC_INTEGRITY",
 			"threshold": "BLOCK_NONE",
 		},
+		{
+			"category":  "HARM_CATEGORY_JAILBREAK",
+			"threshold": "BLOCK_NONE",
+		},
 	}
 }
 

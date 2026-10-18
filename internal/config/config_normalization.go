@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"sort"
 	"strings"
 
@@ -150,6 +151,58 @@ func (cfg *Config) SanitizeOAuthModelAlias() {
 		}
 	}
 	cfg.OAuthModelAlias = out
+}
+
+// SanitizeAntigravitySystemInstruction resolves the Antigravity persona/system
+// instruction and its model allow-list.
+//
+// The instruction may be supplied indirectly so a long prompt never has to live
+// in the YAML file:
+//   - system-instruction: "$ANTIGRAVITY_SYSTEM_INSTRUCTION" expands the env var
+//   - system-instruction-file: "/path/to/prompt.txt" reads the file
+//
+// The file form wins when both are present. An empty result disables injection.
+func (cfg *Config) SanitizeAntigravitySystemInstruction() {
+	if cfg == nil {
+		return
+	}
+
+	// The file form takes precedence over the inline/env form.
+	instruction := ""
+	if path := strings.TrimSpace(cfg.Antigravity.SystemInstructionFile); path != "" {
+		raw, errRead := os.ReadFile(path)
+		if errRead != nil {
+			log.Warnf("antigravity: failed to read system-instruction-file %q: %v", path, errRead)
+		} else {
+			instruction = strings.TrimSpace(string(raw))
+		}
+	}
+
+	if instruction == "" {
+		instruction = strings.TrimSpace(cfg.Antigravity.SystemInstruction)
+		if strings.HasPrefix(instruction, "$") {
+			instruction = strings.TrimSpace(os.Getenv(strings.TrimPrefix(instruction, "$")))
+		}
+	}
+	cfg.Antigravity.SystemInstruction = instruction
+
+	if len(cfg.Antigravity.SystemInstructionModels) > 0 {
+		models := make([]string, 0, len(cfg.Antigravity.SystemInstructionModels))
+		seen := make(map[string]struct{}, len(cfg.Antigravity.SystemInstructionModels))
+		for _, model := range cfg.Antigravity.SystemInstructionModels {
+			trimmed := strings.TrimSpace(model)
+			if trimmed == "" {
+				continue
+			}
+			key := strings.ToLower(trimmed)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			models = append(models, trimmed)
+		}
+		cfg.Antigravity.SystemInstructionModels = models
+	}
 }
 
 // SanitizeOAuthSettings normalizes and deduplicates global OAuth model settings.

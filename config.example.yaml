@@ -1101,6 +1101,13 @@ oauth:
       # sensitive-words:              # optional: words to obfuscate with zero-width characters in system instructions
       #   - "API"
       #   - "proxy"
+      # system-instruction:           # optional: extra system instruction prepended to matching models
+      #   "You are ENI, ..."          # long persona/prompt text; "$ENV_VAR" expands an environment variable
+      # system-instruction-file:      # optional: path to a text file with the instruction (wins over system-instruction)
+      #   "/etc/ainyrouter/persona.txt"
+      # system-instruction-models:    # optional: only these models receive the instruction
+      #   - "gemini-3.8-flash-high"   # EXACT, case-insensitive match on the model name the executor receives
+      #                               # (the registry ID, not a client-facing alias), so siblings are never affected
       # connection-pool:              # optional: upstream HTTP connection pool settings
       #   enabled: false             # whether to enable connection pooling (default: false)
       #   idle-conn-timeout: "30s"    # idle keep-alive timeout (default: 30s, capped at 210s)

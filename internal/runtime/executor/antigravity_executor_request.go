@@ -17,6 +17,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/misc"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/translator/gemini/common"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
@@ -552,7 +553,11 @@ func geminiToAntigravity(modelName string, payload []byte, projectID string, der
 		template, _ = sjson.SetBytes(template, "request.sessionId", sessionID)
 	}
 
-	template, _ = sjson.DeleteBytes(template, "request.safetySettings")
+	// Antigravity rejects a client-supplied safetySettings block, so the translator
+	// strips it earlier. Re-attach the full OFF set here, including the jailbreak
+	// category, so upstream filtering is disabled instead of falling back to
+	// Antigravity's own defaults.
+	template = common.AttachDefaultSafetySettings(template, "request.safetySettings")
 	if toolConfig := gjson.GetBytes(template, "toolConfig"); toolConfig.Exists() && !gjson.GetBytes(template, "request.toolConfig").Exists() {
 		template, _ = sjson.SetRawBytes(template, "request.toolConfig", []byte(toolConfig.Raw))
 		template, _ = sjson.DeleteBytes(template, "toolConfig")

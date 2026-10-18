@@ -357,6 +357,9 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	// Normalize global OAuth model settings.
 	cfg.SanitizeOAuthSettings()
 
+	// Resolve the Antigravity persona/system instruction and its model allow-list.
+	cfg.SanitizeAntigravitySystemInstruction()
+
 	// Normalize global OAuth request-scoped error rules.
 	cfg.SanitizeOAuthRequestScopedErrors()
 

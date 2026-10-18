@@ -20,6 +20,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	internalsignature "github.com/router-for-me/CLIProxyAPI/v8/internal/signature"
 	antigravityclaude "github.com/router-for-me/CLIProxyAPI/v8/internal/translator/antigravity/claude"
+	antigravitygemini "github.com/router-for-me/CLIProxyAPI/v8/internal/translator/antigravity/gemini"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
@@ -71,6 +72,17 @@ func (e *AntigravityExecutor) obfuscateSensitiveWords(payload []byte) []byte {
 	}
 	matcher := helps.BuildSensitiveWordMatcher(e.cfg.Antigravity.SensitiveWords)
 	return helps.ObfuscateSensitiveWordsInSystemInstruction(payload, matcher)
+}
+
+// injectSystemInstruction prepends the operator-configured persona/system
+// instruction for models listed in antigravity.system-instruction-models.
+// It runs after sensitive-word obfuscation so the injected text is not
+// itself obfuscated.
+func (e *AntigravityExecutor) injectSystemInstruction(modelName string, payload []byte) []byte {
+	if e == nil || e.cfg == nil {
+		return payload
+	}
+	return antigravitygemini.InjectSystemInstruction(modelName, payload, &e.cfg.Antigravity)
 }
 
 // Each Antigravity credential gets its own HTTP/1.1 connection pool. Sessions routed
