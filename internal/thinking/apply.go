@@ -374,7 +374,8 @@ func applyThinking(body, sourceBody []byte, model string, fromFormat string, toF
 		}
 		return applySummaryConfigForProvider(body, providerFormat, baseModel, providerKey, modelInfo, summaryConfig), nil
 	}
-	if modelInfoResolved && config.Mode == ModeLevel && modelInfo != nil && modelInfo.Thinking != nil && shouldMapConfiguredHighIntent(fromFormat, providerFormat, modelInfo) {
+	if modelInfoResolved && config.Mode == ModeLevel && modelInfo != nil && modelInfo.Thinking != nil &&
+		(shouldMapConfiguredHighIntent(fromFormat, providerFormat, modelInfo) || hasForced || suffixResult.HasSuffix) {
 		config.Level = mapConfiguredHighIntent(config.Level, modelInfo)
 	}
 
@@ -449,9 +450,9 @@ func mapConfiguredHighIntent(level ThinkingLevel, modelInfo *registry.ModelInfo)
 	var candidates []ThinkingLevel
 	switch level {
 	case LevelXHigh:
-		candidates = []ThinkingLevel{LevelXHigh, LevelMax, LevelHigh}
+		candidates = []ThinkingLevel{LevelXHigh, LevelMax, LevelHigh, LevelMedium, LevelLow, LevelMinimal}
 	case LevelMax:
-		candidates = []ThinkingLevel{LevelMax, LevelXHigh, LevelHigh}
+		candidates = []ThinkingLevel{LevelMax, LevelXHigh, LevelHigh, LevelMedium, LevelLow, LevelMinimal}
 	default:
 		return level
 	}

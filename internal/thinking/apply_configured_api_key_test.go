@@ -79,6 +79,23 @@ func TestApplyThinkingWithModelInfoMapsResponsesToCodexHighIntent(t *testing.T) 
 	}
 }
 
+func TestApplyThinkingWithModelInfoForcedMaxCascadesDown(t *testing.T) {
+	modelInfo := &registry.ModelInfo{
+		ID:       "compat-upstream",
+		Type:     "openai-compatibility",
+		Thinking: &registry.ThinkingSupport{Levels: []string{"low", "medium", "high"}},
+	}
+	body := []byte(`{"reasoning_effort":"low"}`)
+	// When suffix/forced policy sets "max", it should cascade down to "high"
+	out, err := thinking.ApplyThinkingWithModelInfo(body, nil, "compat-upstream(max)", "openai", "openai", "jerouter", modelInfo)
+	if err != nil {
+		t.Fatalf("ApplyThinkingWithModelInfo() error = %v", err)
+	}
+	if got := gjson.GetBytes(out, "reasoning_effort").String(); got != "high" {
+		t.Fatalf("reasoning_effort = %q, want high; body=%s", got, out)
+	}
+}
+
 func TestApplyThinkingWithModelInfoKeepsSameFamilyValidationStrict(t *testing.T) {
 	modelInfo := &registry.ModelInfo{
 		ID:       "openai-upstream",
