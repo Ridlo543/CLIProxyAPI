@@ -138,6 +138,85 @@ func TestOpenAICompatExecutorPropagatesRetryAfter(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatTransientTransportRetry(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		if attempts == 1 {
+			// Simulate sudden connection reset by peer on stale/broken socket
+			hj, ok := w.(http.Hijacker)
+			if ok {
+				conn, _, _ := hj.Hijack()
+				_ = conn.Close()
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	t.Cleanup(server.Close)
+
+	executor := NewOpenAICompatExecutor("openai-compatibility", &config.Config{})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server.URL + "/v1",
+		"api_key":  "test",
+	}}
+	request := cliproxyexecutor.Request{
+		Model:   "compatible-model",
+		Payload: []byte(`{"model":"compatible-model","messages":[{"role":"user","content":"hi"}]}`),
+	}
+
+	res, err := executor.ExecuteStream(context.Background(), auth, request, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("openai"),
+		Stream:       true,
+	})
+	if err != nil {
+		t.Fatalf("expected transient retry to succeed, got error: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts (1 failed + 1 retry), got %d", attempts)
+	}
+	if res == nil || res.Chunks == nil {
+		t.Fatal("expected non-nil stream result")
+	}
+
+	// Test non-streaming Execute
+	attempts = 0
+	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		if attempts == 1 {
+			hj, ok := w.(http.Hijacker)
+			if ok {
+				conn, _, _ := hj.Hijack()
+				_ = conn.Close()
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
+	}))
+	t.Cleanup(server2.Close)
+
+	auth2 := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server2.URL + "/v1",
+		"api_key":  "test",
+	}}
+	resp, err2 := executor.Execute(context.Background(), auth2, request, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("openai"),
+	})
+	if err2 != nil {
+		t.Fatalf("expected non-stream transient retry to succeed, got error: %v", err2)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts for non-stream, got %d", attempts)
+	}
+	if resp.Payload == nil {
+		t.Fatal("expected non-nil response payload")
+	}
+}
+
 func durationPointer(value time.Duration) *time.Duration {
 	return &value
 }
