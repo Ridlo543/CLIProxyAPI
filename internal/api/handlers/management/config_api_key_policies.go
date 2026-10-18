@@ -197,6 +197,19 @@ func isFreeModelID(id string) bool {
 	id = strings.ToLower(strings.TrimSpace(id))
 	return strings.HasSuffix(id, "-free") || id == "big-pickle"
 }
+func isDiscoveredImageModel(id string) bool {
+	lower := strings.ToLower(strings.TrimSpace(id))
+	return lower == "ig" || lower == "100%" || strings.Contains(lower, "image-gen") || strings.Contains(lower, "image_gen") || strings.Contains(lower, "dall-e") || strings.Contains(lower, "flux") || strings.Contains(lower, "midjourney") || strings.Contains(lower, "imagen")
+}
+
+func isDiscoveredVisionModel(id string) bool {
+	lower := strings.ToLower(strings.TrimSpace(id))
+	return strings.Contains(lower, "vision") || strings.Contains(lower, "vl") || strings.Contains(lower, "image") ||
+		strings.Contains(lower, "claude") || strings.Contains(lower, "grok") || strings.Contains(lower, "step-3.7") ||
+		strings.Contains(lower, "step-5") || strings.Contains(lower, "glm-5.3") || strings.Contains(lower, "deepseek-v4") ||
+		strings.Contains(lower, "deepseek-unrestricted") || strings.Contains(lower, "big-pickle") || strings.Contains(lower, "mimo-v2") ||
+		strings.Contains(lower, "space-bunny") || strings.Contains(lower, "qwen3.8") || lower == "jerouter" || lower == "ig" || lower == "100%"
+}
 
 func syncDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []byte, freeOnly, prune bool) ([]config.OpenAICompatibilityModel, []string, []string, []string) {
 	discovered := parseDiscoveredModelIDs(payload)
@@ -214,6 +227,12 @@ func syncDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []
 
 	for _, m := range existing {
 		nameKey := strings.ToLower(strings.TrimSpace(m.Name))
+		if isDiscoveredImageModel(m.Name) && !m.Image {
+			m.Image = true
+		}
+		if isDiscoveredVisionModel(m.Name) && len(m.InputModalities) == 0 {
+			m.InputModalities = []string{"text", "image"}
+		}
 		if prune {
 			if _, exists := validUpstream[nameKey]; exists {
 				kept = append(kept, m)
@@ -253,7 +272,14 @@ func syncDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []
 			continue
 		}
 		seenNew[key] = struct{}{}
-		added = append(added, config.OpenAICompatibilityModel{Name: id})
+		newModel := config.OpenAICompatibilityModel{Name: id}
+		if isDiscoveredImageModel(id) {
+			newModel.Image = true
+		}
+		if isDiscoveredVisionModel(id) {
+			newModel.InputModalities = []string{"text", "image"}
+		}
+		added = append(added, newModel)
 		addedNames = append(addedNames, id)
 	}
 	finalList := append(kept, added...)
@@ -265,7 +291,14 @@ func mergeDiscoveredModels(existing []config.OpenAICompatibilityModel, payload [
 	_ = finalList
 	var added []config.OpenAICompatibilityModel
 	for _, name := range addedNames {
-		added = append(added, config.OpenAICompatibilityModel{Name: name})
+		newModel := config.OpenAICompatibilityModel{Name: name}
+		if isDiscoveredImageModel(name) {
+			newModel.Image = true
+		}
+		if isDiscoveredVisionModel(name) {
+			newModel.InputModalities = []string{"text", "image"}
+		}
+		added = append(added, newModel)
 	}
 	return added, skipped
 }
