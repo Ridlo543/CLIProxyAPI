@@ -145,7 +145,7 @@ func TestIfMatchSatisfied(t *testing.T) {
 		{"", true},                     // unconditional writes stay supported
 		{"*", true},                    // any existing content
 		{`"abc"`, true},                // exact match
-		{`W/"abc"`, true},              // weak form of the same tag
+		{`W/"abc"`, false},             // weak form never matches under strong comparison (RFC 9110)
 		{`"zzz", "abc"`, true},         // one of a list
 		{`"zzz"`, false},               // stale
 		{`"abc-but-not-quite"`, false}, // no prefix matching

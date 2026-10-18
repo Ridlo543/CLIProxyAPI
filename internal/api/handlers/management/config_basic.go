@@ -184,7 +184,7 @@ func (h *Handler) PutConfigYAML(c *gin.Context) {
 		return
 	}
 	currentETag := configETag(current)
-	if !ifMatchSatisfied([]string{c.GetHeader("If-Match")}, currentETag) {
+	if !ifMatchSatisfied(c.Request.Header.Values("If-Match"), currentETag) {
 		// Hand back the live tag so the client can merge and retry without
 		// a separate GET.
 		c.Header("ETag", currentETag)

@@ -223,17 +223,30 @@ func configV8ETag(hash string) string {
 // one list. An absent header always passes; a present but blank header
 // carries no tag and fails; the whole field "*" matches any current
 // version; weak and malformed entity tags never match.
-func ifMatchSatisfied(values []string, currentHash string) bool {
-	if len(values) == 0 {
+func ifMatchSatisfied(values any, currentHash string) bool {
+	var valList []string
+	switch v := values.(type) {
+	case []string:
+		valList = v
+	case string:
+		if v == "" {
+			return true
+		}
+		valList = []string{v}
+	default:
 		return true
 	}
-	field := strings.TrimSpace(strings.Join(values, ","))
+	if len(valList) == 0 {
+		return true
+	}
+	field := strings.TrimSpace(strings.Join(valList, ","))
 	if field == "*" {
 		return true
 	}
+	targetHash := strings.Trim(strings.TrimSpace(currentHash), `"`)
 	for _, tag := range splitEntityTagList(field) {
 		tag = strings.TrimSpace(tag)
-		if len(tag) >= 2 && tag[0] == '"' && tag[len(tag)-1] == '"' && !strings.Contains(tag[1:len(tag)-1], `"`) && tag[1:len(tag)-1] == currentHash {
+		if len(tag) >= 2 && tag[0] == '"' && tag[len(tag)-1] == '"' && !strings.Contains(tag[1:len(tag)-1], `"`) && tag[1:len(tag)-1] == targetHash {
 			return true
 		}
 	}
