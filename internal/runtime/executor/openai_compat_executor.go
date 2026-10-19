@@ -165,7 +165,11 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		translated = ensureZenChatGateTools(translated)
 	}
 	if endpoint == chatCompletionsEndpoint {
-		translated = translator.InjectOpenAICompatSystemInstruction(baseModel, translated, e.resolveCompatConfig(auth, req))
+		// Match on the client-requested model (the alias), not the resolved
+		// upstream name: two aliases can point at the same upstream model, and
+		// only the one listed in system-instruction-models may receive the
+		// persona. Matching on baseModel would leak it into every sibling alias.
+		translated = translator.InjectOpenAICompatSystemInstruction(requestedModel, translated, e.resolveCompatConfig(auth, req))
 	}
 	if endpoint == systemOneEndpoint {
 		translated = buildOpenCodeSystemOneRequest(baseModel, translated)
@@ -428,7 +432,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		translated = ensureZenChatGateTools(translated)
 	}
 	if endpoint == chatCompletionsEndpoint {
-		translated = translator.InjectOpenAICompatSystemInstruction(baseModel, translated, e.resolveCompatConfig(auth, req))
+		translated = translator.InjectOpenAICompatSystemInstruction(requestedModel, translated, e.resolveCompatConfig(auth, req))
 	}
 	if endpoint == systemOneEndpoint {
 		translated = buildOpenCodeSystemOneRequest(baseModel, translated)

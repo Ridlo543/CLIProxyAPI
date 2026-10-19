@@ -168,6 +168,30 @@ func TestSanitizeOpenAICompatSystemInstructionExpandsEnv(t *testing.T) {
 	}
 }
 
+func TestInjectOpenAICompatSystemInstructionMatchesProviderPrefixedAlias(t *testing.T) {
+	// The executor passes the client-requested model, which arrives as
+	// "provider/alias". A configured bare alias must still match.
+	payload := []byte(`{"model":"x","messages":[{"role":"user","content":"hi"}]}`)
+
+	out := InjectOpenAICompatSystemInstruction("opencode-free/deepseek-v4.1-flash-jb", payload, compatCfg("deepseek-v4.1-flash-jb"))
+
+	if got := firstRole(out); got != "system" {
+		t.Fatalf("first message role = %q, want system (provider prefix must be stripped)", got)
+	}
+}
+
+func TestInjectOpenAICompatSystemInstructionPrefixedSiblingStaysClean(t *testing.T) {
+	// The plain alias shares the upstream model with the jb alias. Only the jb
+	// alias is listed, so the plain one must not receive the persona.
+	payload := []byte(`{"model":"x","messages":[{"role":"user","content":"hi"}]}`)
+
+	out := InjectOpenAICompatSystemInstruction("opencode-free/deepseek-v4.1-flash-free", payload, compatCfg("deepseek-v4.1-flash-jb"))
+
+	if string(out) != string(payload) {
+		t.Fatalf("sibling alias was modified; persona leaked:\n%s", out)
+	}
+}
+
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o600)
 }
@@ -182,4 +206,3 @@ func roleAt(payload []byte, idx int) string {
 func contentAt(payload []byte, idx int) string {
 	return gjson.GetBytes(payload, "messages."+strconv.Itoa(idx)+".content").String()
 }
-

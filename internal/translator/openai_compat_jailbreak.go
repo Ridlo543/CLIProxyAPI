@@ -71,14 +71,28 @@ func InjectOpenAICompatSystemInstruction(modelName string, rawJSON []byte, cfg *
 
 // openAICompatModelMatchesSystemInstruction reports whether modelName exactly
 // equals one of the configured patterns, ignoring case and surrounding
-// whitespace.
+// whitespace. A provider prefix on the requested model ("provider/model") is
+// stripped so an operator can list either the bare alias or the fully
+// qualified form and both resolve to the same model.
 func openAICompatModelMatchesSystemInstruction(modelName string, patterns []string) bool {
 	needle := strings.ToLower(strings.TrimSpace(modelName))
 	if needle == "" {
 		return false
 	}
+	// Strip a provider prefix so "opencode-free/deepseek-v4.1-flash-jb" matches
+	// a configured "deepseek-v4.1-flash-jb".
+	if idx := strings.LastIndex(needle, "/"); idx >= 0 {
+		needle = needle[idx+1:]
+	}
+	if needle == "" {
+		return false
+	}
 	for _, pattern := range patterns {
-		if strings.ToLower(strings.TrimSpace(pattern)) == needle {
+		p := strings.ToLower(strings.TrimSpace(pattern))
+		if idx := strings.LastIndex(p, "/"); idx >= 0 {
+			p = p[idx+1:]
+		}
+		if p != "" && p == needle {
 			return true
 		}
 	}
