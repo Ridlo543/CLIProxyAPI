@@ -170,6 +170,9 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		// only the one listed in system-instruction-models may receive the
 		// persona. Matching on baseModel would leak it into every sibling alias.
 		translated = translator.InjectOpenAICompatSystemInstruction(requestedModel, translated, e.resolveCompatConfig(auth, req))
+		// The payload still carries the client-facing alias; upstream only knows
+		// the real model name, so restore it after the persona is attached.
+		translated = e.overrideModel(translated, baseModel)
 	}
 	if endpoint == systemOneEndpoint {
 		translated = buildOpenCodeSystemOneRequest(baseModel, translated)
@@ -433,6 +436,8 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	}
 	if endpoint == chatCompletionsEndpoint {
 		translated = translator.InjectOpenAICompatSystemInstruction(requestedModel, translated, e.resolveCompatConfig(auth, req))
+		// Restore the upstream model name; the payload still carries the alias.
+		translated = e.overrideModel(translated, baseModel)
 	}
 	if endpoint == systemOneEndpoint {
 		translated = buildOpenCodeSystemOneRequest(baseModel, translated)
