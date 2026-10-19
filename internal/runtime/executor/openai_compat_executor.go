@@ -165,13 +165,11 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		translated = ensureZenChatGateTools(translated)
 	}
 	if endpoint == chatCompletionsEndpoint {
-		// Match on the client-requested model (the alias), not the resolved
-		// upstream name: two aliases can point at the same upstream model, and
-		// only the one listed in system-instruction-models may receive the
-		// persona. Matching on baseModel would leak it into every sibling alias.
+		// Match on the client-requested model so a persona stays scoped to the
+		// one model listed in system-instruction-models.
 		translated = translator.InjectOpenAICompatSystemInstruction(requestedModel, translated, e.resolveCompatConfig(auth, req))
-		// The payload still carries the client-facing alias; upstream only knows
-		// the real model name, so restore it after the persona is attached.
+		// The payload carries the client-facing alias; upstream only accepts the
+		// real model name, so rewrite it before the request leaves.
 		translated = e.overrideModel(translated, baseModel)
 	}
 	if endpoint == systemOneEndpoint {
@@ -181,12 +179,6 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 
 	url := upstreamURL(baseURL, endpoint)
 	translated = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", translated, originalTranslated, requestedModel, requestPath, opts.Headers)
-	// Chat/completions only: the payload must carry the upstream model name,
-	// never the client-facing alias, or upstream rejects it. Other endpoints
-	// (systemone, responses) build their own model field and must be left alone.
-	if endpoint == chatCompletionsEndpoint {
-		translated = e.overrideModel(translated, baseModel)
-	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(translated))
 	if err != nil {
 		return resp, err
@@ -441,8 +433,11 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		translated = ensureZenChatGateTools(translated)
 	}
 	if endpoint == chatCompletionsEndpoint {
+		// Match on the client-requested model so a persona stays scoped to the
+		// one model listed in system-instruction-models.
 		translated = translator.InjectOpenAICompatSystemInstruction(requestedModel, translated, e.resolveCompatConfig(auth, req))
-		// Restore the upstream model name; the payload still carries the alias.
+		// The payload carries the client-facing alias; upstream only accepts the
+		// real model name, so rewrite it before the request leaves.
 		translated = e.overrideModel(translated, baseModel)
 	}
 	if endpoint == systemOneEndpoint {
@@ -452,12 +447,6 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 
 	url := upstreamURL(baseURL, endpoint)
 	translated = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", translated, originalTranslated, requestedModel, requestPath, opts.Headers)
-	// Chat/completions only: the payload must carry the upstream model name,
-	// never the client-facing alias, or upstream rejects it. Other endpoints
-	// (systemone, responses) build their own model field and must be left alone.
-	if endpoint == chatCompletionsEndpoint {
-		translated = e.overrideModel(translated, baseModel)
-	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(translated))
 	if err != nil {
 		return nil, err
