@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/apikeypolicy"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/tidwall/gjson"
 )
 
 // api-key-policies: []config.APIKeyPolicy
@@ -211,14 +212,141 @@ func isDiscoveredVisionModel(id string) bool {
 		strings.Contains(lower, "space-bunny") || strings.Contains(lower, "qwen3.8") || lower == "jerouter" || lower == "ig" || lower == "100%"
 }
 
+type discoveredModelEntry struct {
+	ID               string
+	ContextLength    int
+	MaxTokens        int
+	InputModalities  []string
+	OutputModalities []string
+	IsImage          bool
+}
+
+func parseModelEntryNode(res gjson.Result) (discoveredModelEntry, bool) {
+	id := strings.TrimSpace(res.Get("id").String())
+	if id == "" {
+		id = strings.TrimSpace(res.Get("name").String())
+	}
+	if id == "" {
+		return discoveredModelEntry{}, false
+	}
+
+	var ctxLen int
+	for _, field := range []string{"context_length", "context_window", "max_context_length", "inputTokenLimit", "max_model_len"} {
+		if val := res.Get(field).Int(); val > 0 {
+			ctxLen = int(val)
+			break
+		}
+	}
+
+	var maxTok int
+	for _, field := range []string{"max_tokens", "max_completion_tokens", "max_output_tokens", "outputTokenLimit"} {
+		if val := res.Get(field).Int(); val > 0 {
+			maxTok = int(val)
+			break
+		}
+	}
+
+	var inputMods []string
+	for _, field := range []string{"architecture.input_modalities", "input_modalities", "modalities"} {
+		if arr := res.Get(field); arr.Exists() && arr.IsArray() {
+			for _, m := range arr.Array() {
+				if s := strings.TrimSpace(m.String()); s != "" {
+					inputMods = append(inputMods, strings.ToLower(s))
+				}
+			}
+			if len(inputMods) > 0 {
+				break
+			}
+		}
+	}
+
+	var outputMods []string
+	for _, field := range []string{"architecture.output_modalities", "output_modalities"} {
+		if arr := res.Get(field); arr.Exists() && arr.IsArray() {
+			for _, m := range arr.Array() {
+				if s := strings.TrimSpace(m.String()); s != "" {
+					outputMods = append(outputMods, strings.ToLower(s))
+				}
+			}
+			if len(outputMods) > 0 {
+				break
+			}
+		}
+	}
+
+	isImage := isDiscoveredImageModel(id)
+	if res.Get("image").Bool() || res.Get("capabilities.image").Bool() {
+		isImage = true
+	}
+
+	if (res.Get("vision").Bool() || res.Get("capabilities.vision").Bool() || isDiscoveredVisionModel(id)) && len(inputMods) == 0 {
+		inputMods = []string{"text", "image"}
+	}
+
+	return discoveredModelEntry{
+		ID:               id,
+		ContextLength:    ctxLen,
+		MaxTokens:        maxTok,
+		InputModalities:  inputMods,
+		OutputModalities: outputMods,
+		IsImage:          isImage,
+	}, true
+}
+
+func parseDiscoveredModelEntries(payload []byte) []discoveredModelEntry {
+	parsed := gjson.ParseBytes(payload)
+	var list gjson.Result
+	if parsed.IsArray() {
+		list = parsed
+	} else if d := parsed.Get("data"); d.IsArray() {
+		list = d
+	} else if m := parsed.Get("models"); m.IsArray() {
+		list = m
+	} else if r := parsed.Get("result"); r.IsArray() {
+		list = r
+	} else if it := parsed.Get("items"); it.IsArray() {
+		list = it
+	}
+
+	var entries []discoveredModelEntry
+	if list.IsArray() {
+		for _, item := range list.Array() {
+			if entry, ok := parseModelEntryNode(item); ok {
+				entries = append(entries, entry)
+			}
+		}
+		return entries
+	}
+
+	var strArr []string
+	if err := json.Unmarshal(payload, &strArr); err == nil && len(strArr) > 0 {
+		for _, s := range strArr {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				entries = append(entries, discoveredModelEntry{ID: s})
+			}
+		}
+	}
+	return entries
+}
+
+func parseDiscoveredModelIDs(payload []byte) []string {
+	entries := parseDiscoveredModelEntries(payload)
+	ids := make([]string, 0, len(entries))
+	for _, e := range entries {
+		ids = append(ids, e.ID)
+	}
+	return ids
+}
+
 func syncDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []byte, freeOnly, prune bool) ([]config.OpenAICompatibilityModel, []string, []string, []string) {
-	discovered := parseDiscoveredModelIDs(payload)
-	validUpstream := make(map[string]struct{}, len(discovered))
-	for _, id := range discovered {
-		if freeOnly && !isFreeModelID(id) {
+	discovered := parseDiscoveredModelEntries(payload)
+	validUpstream := make(map[string]discoveredModelEntry, len(discovered))
+	for _, entry := range discovered {
+		if freeOnly && !isFreeModelID(entry.ID) {
 			continue
 		}
-		validUpstream[strings.ToLower(id)] = struct{}{}
+		validUpstream[strings.ToLower(entry.ID)] = entry
 	}
 
 	var kept []config.OpenAICompatibilityModel
@@ -227,6 +355,20 @@ func syncDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []
 
 	for _, m := range existing {
 		nameKey := strings.ToLower(strings.TrimSpace(m.Name))
+		if upEntry, ok := validUpstream[nameKey]; ok {
+			if upEntry.ContextLength > 0 {
+				m.MaxContextLength = upEntry.ContextLength
+			}
+			if upEntry.IsImage && !m.Image {
+				m.Image = true
+			}
+			if len(upEntry.InputModalities) > 0 && len(m.InputModalities) == 0 {
+				m.InputModalities = upEntry.InputModalities
+			}
+			if len(upEntry.OutputModalities) > 0 && len(m.OutputModalities) == 0 {
+				m.OutputModalities = upEntry.OutputModalities
+			}
+		}
 		if isDiscoveredImageModel(m.Name) && !m.Image {
 			m.Image = true
 		}
@@ -258,29 +400,35 @@ func syncDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []
 	var addedNames []string
 	var skipped []string
 	seenNew := map[string]struct{}{}
-	for _, id := range discovered {
-		if freeOnly && !isFreeModelID(id) {
+	for _, entry := range discovered {
+		if freeOnly && !isFreeModelID(entry.ID) {
 			continue
 		}
-		key := strings.ToLower(id)
+		key := strings.ToLower(entry.ID)
 		if _, exists := known[key]; exists {
-			skipped = append(skipped, id)
+			skipped = append(skipped, entry.ID)
 			continue
 		}
 		if _, exists := seenNew[key]; exists {
-			skipped = append(skipped, id)
+			skipped = append(skipped, entry.ID)
 			continue
 		}
 		seenNew[key] = struct{}{}
-		newModel := config.OpenAICompatibilityModel{Name: id}
-		if isDiscoveredImageModel(id) {
+		newModel := config.OpenAICompatibilityModel{
+			Name:             entry.ID,
+			MaxContextLength: entry.ContextLength,
+			Image:            entry.IsImage,
+			InputModalities:  entry.InputModalities,
+			OutputModalities: entry.OutputModalities,
+		}
+		if isDiscoveredImageModel(entry.ID) {
 			newModel.Image = true
 		}
-		if isDiscoveredVisionModel(id) {
+		if (isDiscoveredVisionModel(entry.ID) || isDiscoveredVisionModel(newModel.Name)) && len(newModel.InputModalities) == 0 {
 			newModel.InputModalities = []string{"text", "image"}
 		}
 		added = append(added, newModel)
-		addedNames = append(addedNames, id)
+		addedNames = append(addedNames, entry.ID)
 	}
 	finalList := append(kept, added...)
 	return finalList, addedNames, pruned, skipped
@@ -290,91 +438,26 @@ func mergeDiscoveredModels(existing []config.OpenAICompatibilityModel, payload [
 	finalList, addedNames, _, skipped := syncDiscoveredModels(existing, payload, freeOnly, false)
 	_ = finalList
 	var added []config.OpenAICompatibilityModel
+	discoveredMap := make(map[string]discoveredModelEntry)
+	for _, e := range parseDiscoveredModelEntries(payload) {
+		discoveredMap[strings.ToLower(e.ID)] = e
+	}
 	for _, name := range addedNames {
-		newModel := config.OpenAICompatibilityModel{Name: name}
+		e := discoveredMap[strings.ToLower(name)]
+		newModel := config.OpenAICompatibilityModel{
+			Name:             name,
+			MaxContextLength: e.ContextLength,
+			Image:            e.IsImage,
+			InputModalities:  e.InputModalities,
+			OutputModalities: e.OutputModalities,
+		}
 		if isDiscoveredImageModel(name) {
 			newModel.Image = true
 		}
-		if isDiscoveredVisionModel(name) {
+		if (isDiscoveredVisionModel(name) || isDiscoveredVisionModel(newModel.Name)) && len(newModel.InputModalities) == 0 {
 			newModel.InputModalities = []string{"text", "image"}
 		}
 		added = append(added, newModel)
 	}
 	return added, skipped
-}
-
-func parseDiscoveredModelIDs(payload []byte) []string {
-	var root struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-		Models []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		} `json:"models"`
-		Result []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(payload, &root); err == nil && (len(root.Data) > 0 || len(root.Models) > 0 || len(root.Result) > 0) {
-		ids := make([]string, 0, len(root.Data)+len(root.Models)+len(root.Result))
-		for _, item := range root.Data {
-			if trimmed := strings.TrimSpace(item.ID); trimmed != "" {
-				ids = append(ids, trimmed)
-			}
-		}
-		for _, item := range root.Models {
-			value := strings.TrimSpace(item.ID)
-			if value == "" {
-				value = strings.TrimSpace(item.Name)
-			}
-			if value != "" {
-				ids = append(ids, value)
-			}
-		}
-		for _, item := range root.Result {
-			value := strings.TrimSpace(item.Name)
-			if value == "" {
-				value = strings.TrimSpace(item.ID)
-			}
-			if value != "" {
-				ids = append(ids, value)
-			}
-		}
-		return ids
-	}
-
-	// Also support top-level array [{"id":"..."}, {"name":"..."}]
-	var arrObj []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal(payload, &arrObj); err == nil && len(arrObj) > 0 {
-		ids := make([]string, 0, len(arrObj))
-		for _, item := range arrObj {
-			val := strings.TrimSpace(item.ID)
-			if val == "" {
-				val = strings.TrimSpace(item.Name)
-			}
-			if val != "" {
-				ids = append(ids, val)
-			}
-		}
-		return ids
-	}
-
-	// Also support string array ["model-1", "model-2"]
-	var arrStr []string
-	if err := json.Unmarshal(payload, &arrStr); err == nil && len(arrStr) > 0 {
-		ids := make([]string, 0, len(arrStr))
-		for _, s := range arrStr {
-			if trimmed := strings.TrimSpace(s); trimmed != "" {
-				ids = append(ids, trimmed)
-			}
-		}
-		return ids
-	}
-
-	return nil
 }

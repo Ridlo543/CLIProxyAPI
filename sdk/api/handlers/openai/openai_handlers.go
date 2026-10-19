@@ -103,6 +103,31 @@ func (h *OpenAIAPIHandler) OpenAIModels(c *gin.Context) {
 			filteredModel["owned_by"] = ownedBy
 		}
 
+		// Propagate context length and token limits so clients (OMP, OpenCode, Codex) recognize native window sizes
+		if ctxLen, exists := model["context_length"]; exists {
+			filteredModel["context_length"] = ctxLen
+			filteredModel["context_window"] = ctxLen
+		} else if ctxWin, exists := model["context_window"]; exists {
+			filteredModel["context_length"] = ctxWin
+			filteredModel["context_window"] = ctxWin
+		}
+		if maxCtx, exists := model["max_context_length"]; exists {
+			filteredModel["max_context_length"] = maxCtx
+			if _, exists := filteredModel["context_length"]; !exists {
+				filteredModel["context_length"] = maxCtx
+				filteredModel["context_window"] = maxCtx
+			}
+		}
+		if maxTok, exists := model["max_tokens"]; exists {
+			filteredModel["max_tokens"] = maxTok
+		}
+		if maxComp, exists := model["max_completion_tokens"]; exists {
+			filteredModel["max_completion_tokens"] = maxComp
+		}
+		if inputMod, exists := model["input_modalities"]; exists {
+			filteredModel["input_modalities"] = inputMod
+		}
+
 		filteredModels[i] = filteredModel
 	}
 

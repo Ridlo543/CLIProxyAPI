@@ -185,3 +185,32 @@ func TestImportModelsUpstreamFailureLeavesConfigUntouched(t *testing.T) {
 		t.Fatal("upstream was not called")
 	}
 }
+
+func TestImportModelsSyncsContextLength(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+			{
+				"id":             "deepseek-v4.1-flash-1017",
+				"context_length": 524288,
+				"context_window": 524288,
+			},
+		}})
+	}))
+	defer upstream.Close()
+
+	initial := "openai-compatibility:\n  - name: jerouter\n    base-url: \"" + upstream.URL + "\"\n    models:\n      - name: deepseek-v4.1-flash-1017\n        max-context-length: 128000\n"
+	h := policiesTestHandler(t, initial)
+
+	resp := performJSON(h, http.MethodPost, "/openai-compatibility/jerouter/import-models", nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	if len(h.cfg.OpenAICompatibility) == 0 || len(h.cfg.OpenAICompatibility[0].Models) == 0 {
+		t.Fatal("expected models in config")
+	}
+	m := h.cfg.OpenAICompatibility[0].Models[0]
+	if m.MaxContextLength != 524288 {
+		t.Fatalf("expected MaxContextLength=524288, got %d", m.MaxContextLength)
+	}
+}
