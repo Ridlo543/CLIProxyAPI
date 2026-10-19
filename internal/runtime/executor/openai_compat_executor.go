@@ -181,6 +181,12 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 
 	url := upstreamURL(baseURL, endpoint)
 	translated = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", translated, originalTranslated, requestedModel, requestPath, opts.Headers)
+	// Chat/completions only: the payload must carry the upstream model name,
+	// never the client-facing alias, or upstream rejects it. Other endpoints
+	// (systemone, responses) build their own model field and must be left alone.
+	if endpoint == chatCompletionsEndpoint {
+		translated = e.overrideModel(translated, baseModel)
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(translated))
 	if err != nil {
 		return resp, err
@@ -446,6 +452,12 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 
 	url := upstreamURL(baseURL, endpoint)
 	translated = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", translated, originalTranslated, requestedModel, requestPath, opts.Headers)
+	// Chat/completions only: the payload must carry the upstream model name,
+	// never the client-facing alias, or upstream rejects it. Other endpoints
+	// (systemone, responses) build their own model field and must be left alone.
+	if endpoint == chatCompletionsEndpoint {
+		translated = e.overrideModel(translated, baseModel)
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(translated))
 	if err != nil {
 		return nil, err
