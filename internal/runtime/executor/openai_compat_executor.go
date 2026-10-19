@@ -9,6 +9,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/translator"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
+	log "github.com/sirupsen/logrus"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -19,17 +31,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"github.com/google/uuid"
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking"
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
-	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
-	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
-	log "github.com/sirupsen/logrus"
-	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 const (
@@ -97,7 +98,6 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	}
 
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
-
 	reporter := helps.NewExecutorUsageReporter(ctx, e, baseModel, auth)
 	defer reporter.TrackFailure(ctx, &err)
 
@@ -163,6 +163,9 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 			}
 		}
 		translated = ensureZenChatGateTools(translated)
+	}
+	if endpoint == chatCompletionsEndpoint {
+		translated = translator.InjectOpenAICompatSystemInstruction(baseModel, translated, e.resolveCompatConfig(auth, req))
 	}
 	if endpoint == systemOneEndpoint {
 		translated = buildOpenCodeSystemOneRequest(baseModel, translated)
@@ -423,6 +426,9 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	}
 	if endpoint == chatCompletionsEndpoint && isZenChatUpstream(baseURL) {
 		translated = ensureZenChatGateTools(translated)
+	}
+	if endpoint == chatCompletionsEndpoint {
+		translated = translator.InjectOpenAICompatSystemInstruction(baseModel, translated, e.resolveCompatConfig(auth, req))
 	}
 	if endpoint == systemOneEndpoint {
 		translated = buildOpenCodeSystemOneRequest(baseModel, translated)

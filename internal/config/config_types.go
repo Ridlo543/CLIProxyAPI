@@ -999,6 +999,21 @@ type OpenAICompatibility struct {
 	// Nil or a negative value means "use the global request-retry". 0 disables additional retry rounds.
 	RequestRetry *int `yaml:"request-retry,omitempty" json:"request-retry,omitempty"`
 
+	// SystemInstruction optionally prepends an operator-configured system message
+	// to requests whose model matches SystemInstructionModels. Used to give a
+	// dedicated model alias its own persona without touching sibling models.
+	SystemInstruction string `yaml:"system-instruction,omitempty" json:"system-instruction,omitempty"`
+
+	// SystemInstructionFile is a path to a file whose contents become
+	// SystemInstruction. Takes precedence over the inline value so large prompts
+	// stay out of the config file.
+	SystemInstructionFile string `yaml:"system-instruction-file,omitempty" json:"system-instruction-file,omitempty"`
+
+	// SystemInstructionModels lists the upstream model names that receive the
+	// system instruction. Matching is exact and case-insensitive; substring
+	// matching would leak the persona into sibling models.
+	SystemInstructionModels []string `yaml:"system-instruction-models,omitempty" json:"system-instruction-models,omitempty"`
+
 	// RequestScopedErrors configures custom classification rules for upstream errors.
 	RequestScopedErrors []RequestScopedErrorRule `yaml:"request-scoped-errors,omitempty" json:"request-scoped-errors,omitempty"`
 }

@@ -205,6 +205,62 @@ func (cfg *Config) SanitizeAntigravitySystemInstruction() {
 	}
 }
 
+// SanitizeOpenAICompatSystemInstruction resolves the per-provider persona/system
+// instruction and its model allow-list for every openai-compatibility entry.
+//
+// The instruction may be supplied indirectly so a long prompt never has to live
+// in the YAML file:
+//   - system-instruction-file: "/path/to/prompt.txt" reads the file
+//   - system-instruction: "$ENV_VAR" expands the env var
+//
+// The file form wins when both are present. An empty result disables injection
+// for that provider.
+func (cfg *Config) SanitizeOpenAICompatSystemInstruction() {
+	if cfg == nil || len(cfg.OpenAICompatibility) == 0 {
+		return
+	}
+
+	for i := range cfg.OpenAICompatibility {
+		compat := &cfg.OpenAICompatibility[i]
+
+		instruction := ""
+		if path := strings.TrimSpace(compat.SystemInstructionFile); path != "" {
+			raw, errRead := os.ReadFile(path)
+			if errRead != nil {
+				log.Warnf("openai-compatibility[%s]: failed to read system-instruction-file %q: %v", compat.Name, path, errRead)
+			} else {
+				instruction = strings.TrimSpace(string(raw))
+			}
+		}
+
+		if instruction == "" {
+			instruction = strings.TrimSpace(compat.SystemInstruction)
+			if strings.HasPrefix(instruction, "$") {
+				instruction = strings.TrimSpace(os.Getenv(strings.TrimPrefix(instruction, "$")))
+			}
+		}
+		compat.SystemInstruction = instruction
+
+		if len(compat.SystemInstructionModels) > 0 {
+			models := make([]string, 0, len(compat.SystemInstructionModels))
+			seen := make(map[string]struct{}, len(compat.SystemInstructionModels))
+			for _, model := range compat.SystemInstructionModels {
+				trimmed := strings.TrimSpace(model)
+				if trimmed == "" {
+					continue
+				}
+				key := strings.ToLower(trimmed)
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				models = append(models, trimmed)
+			}
+			compat.SystemInstructionModels = models
+		}
+	}
+}
+
 // SanitizeOAuthSettings normalizes and deduplicates global OAuth model settings.
 // It trims whitespace, normalizes channel keys to lower-case, drops empty entries,
 // and ensures entries are unique within each channel.

@@ -360,6 +360,9 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	// Resolve the Antigravity persona/system instruction and its model allow-list.
 	cfg.SanitizeAntigravitySystemInstruction()
 
+	// Resolve per-provider openai-compatibility persona/system instructions.
+	cfg.SanitizeOpenAICompatSystemInstruction()
+
 	// Normalize global OAuth request-scoped error rules.
 	cfg.SanitizeOAuthRequestScopedErrors()
 
