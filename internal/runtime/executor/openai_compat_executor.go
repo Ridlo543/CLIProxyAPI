@@ -166,11 +166,9 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	}
 	if endpoint == chatCompletionsEndpoint {
 		// Match on the client-requested model so a persona stays scoped to the
-		// one model listed in system-instruction-models.
+		// one model listed in system-instruction-models. The injector also
+		// rewrites the payload model to the upstream name.
 		translated = translator.InjectOpenAICompatSystemInstruction(requestedModel, translated, e.resolveCompatConfig(auth, req))
-		// The payload carries the client-facing alias; upstream only accepts the
-		// real model name, so rewrite it before the request leaves.
-		translated = e.overrideModel(translated, baseModel)
 	}
 	if endpoint == systemOneEndpoint {
 		translated = buildOpenCodeSystemOneRequest(baseModel, translated)
@@ -434,11 +432,9 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	}
 	if endpoint == chatCompletionsEndpoint {
 		// Match on the client-requested model so a persona stays scoped to the
-		// one model listed in system-instruction-models.
+		// one model listed in system-instruction-models. The injector also
+		// rewrites the payload model to the upstream name.
 		translated = translator.InjectOpenAICompatSystemInstruction(requestedModel, translated, e.resolveCompatConfig(auth, req))
-		// The payload carries the client-facing alias; upstream only accepts the
-		// real model name, so rewrite it before the request leaves.
-		translated = e.overrideModel(translated, baseModel)
 	}
 	if endpoint == systemOneEndpoint {
 		translated = buildOpenCodeSystemOneRequest(baseModel, translated)

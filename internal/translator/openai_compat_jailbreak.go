@@ -33,6 +33,14 @@ func InjectOpenAICompatSystemInstruction(modelName string, rawJSON []byte, cfg *
 		return rawJSON
 	}
 
+	// Upstream only accepts the real model name. When the caller addressed the
+	// model by alias, rewrite the payload's model field to the configured
+	// upstream name so the request is not rejected.
+	if upstream := openAICompatUpstreamModelName(modelName, cfg); upstream != "" {
+		if updated, errSet := sjson.SetBytes(rawJSON, "model", upstream); errSet == nil {
+			rawJSON = updated
+		}
+	}
 	const path = "messages"
 	injected := []byte(`{"role":"system","content":""}`)
 	injected, err := sjson.SetBytes(injected, "content", cfg.SystemInstruction)
@@ -97,4 +105,30 @@ func openAICompatModelMatchesSystemInstruction(modelName string, patterns []stri
 		}
 	}
 	return false
+}
+
+// openAICompatUpstreamModelName returns the configured upstream model name for a
+// client-facing alias, or "" when the name is already the upstream name or no
+// matching entry exists.
+func openAICompatUpstreamModelName(modelName string, cfg *config.OpenAICompatibility) string {
+	needle := strings.ToLower(strings.TrimSpace(modelName))
+	if needle == "" || cfg == nil {
+		return ""
+	}
+	if idx := strings.LastIndex(needle, "/"); idx >= 0 {
+		needle = needle[idx+1:]
+	}
+	for _, m := range cfg.Models {
+		alias := strings.ToLower(strings.TrimSpace(m.Alias))
+		if alias == "" {
+			continue
+		}
+		if idx := strings.LastIndex(alias, "/"); idx >= 0 {
+			alias = alias[idx+1:]
+		}
+		if alias == needle {
+			return strings.TrimSpace(m.Name)
+		}
+	}
+	return ""
 }

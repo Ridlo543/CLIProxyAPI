@@ -192,6 +192,24 @@ func TestInjectOpenAICompatSystemInstructionPrefixedSiblingStaysClean(t *testing
 	}
 }
 
+func TestInjectOpenAICompatSystemInstructionRewritesAliasToUpstreamName(t *testing.T) {
+	// The provider exposes deepseek-v4.1-flash-free under the alias
+	// deepseek-v4.1-flash-jb. Upstream only knows the real name, so the payload
+	// must be rewritten or the request is rejected.
+	payload := []byte(`{"model":"deepseek-v4.1-flash-jb","messages":[{"role":"user","content":"hi"}]}`)
+	cfg := compatCfg("deepseek-v4.1-flash-jb")
+	cfg.Models = []config.OpenAICompatibilityModel{{Name: "deepseek-v4.1-flash-free", Alias: "deepseek-v4.1-flash-jb"}}
+
+	out := InjectOpenAICompatSystemInstruction("opencode-jb/deepseek-v4.1-flash-jb", payload, cfg)
+
+	if got := gjson.GetBytes(out, "model").String(); got != "deepseek-v4.1-flash-free" {
+		t.Fatalf("payload model = %q, want upstream name deepseek-v4.1-flash-free", got)
+	}
+	if got := firstRole(out); got != "system" {
+		t.Fatalf("first message role = %q, want system (persona still attached)", got)
+	}
+}
+
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o600)
 }
