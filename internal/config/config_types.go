@@ -450,6 +450,11 @@ type RoutingConfig struct {
 	// Default: 1h. Accepts duration strings like "30m", "1h", "2h30m".
 	SessionAffinityTTL string `yaml:"session-affinity-ttl,omitempty" json:"session-affinity-ttl,omitempty"`
 
+	// FirstTokenTimeout bounds the duration to wait for the first streaming chunk from a selected credential.
+	// If the upstream credential does not yield any payload within this ceiling, it is canceled and fails over
+	// to the next available credential. Accepts duration strings like "45s", "60s". Default: empty/disabled (0).
+	FirstTokenTimeout string `yaml:"first-token-timeout,omitempty" json:"first-token-timeout,omitempty"`
+
 	// SessionAffinitySubagents controls whether subagents (child sessions with parent references)
 	// inherit and bind to the parent's upstream credential across all providers (Claude, Codex,
 	// Antigravity, Gemini), maximizing prompt and KV cache reuse.
@@ -482,6 +487,8 @@ type ProviderRoutingConfig struct {
 	SessionAffinity *bool `yaml:"session-affinity,omitempty" json:"session-affinity,omitempty"`
 	// SessionAffinityTTL: duration string or empty to inherit global
 	SessionAffinityTTL string `yaml:"session-affinity-ttl,omitempty" json:"session-affinity-ttl,omitempty"`
+	// FirstTokenTimeout: duration string or empty to inherit global
+	FirstTokenTimeout string `yaml:"first-token-timeout,omitempty" json:"first-token-timeout,omitempty"`
 }
 
 // OAuthModelAlias defines a model ID alias for a specific channel.

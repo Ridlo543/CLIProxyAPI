@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -45,6 +46,31 @@ func newStreamBootstrapError(err error, headers http.Header) error {
 		return markUpstreamExecutionAttempt(bootstrapErr)
 	}
 	return bootstrapErr
+}
+
+func (m *Manager) firstTokenTimeoutDuration(provider string) time.Duration {
+	if m == nil {
+		return 0
+	}
+	cfg := m.runtimeConfigSnapshot()
+	if cfg == nil {
+		return 0
+	}
+	// Provider-specific override takes precedence
+	if pCfg, ok := cfg.Routing.Providers[strings.ToLower(strings.TrimSpace(provider))]; ok {
+		if raw := strings.TrimSpace(pCfg.FirstTokenTimeout); raw != "" {
+			if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+				return d
+			}
+		}
+	}
+	// Global routing fallback
+	if raw := strings.TrimSpace(cfg.Routing.FirstTokenTimeout); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 0
 }
 
 func (e *streamBootstrapError) Error() string {
@@ -382,7 +408,23 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			continue
 		}
 
-		buffered, closed, bootstrapErr := readStreamBootstrap(ctx, streamResult.Chunks)
+		bootstrapCtx := ctx
+		var cancelBootstrap context.CancelFunc
+		if ftTimeout := m.firstTokenTimeoutDuration(provider); ftTimeout > 0 && ctx != nil {
+			bootstrapCtx, cancelBootstrap = context.WithTimeout(ctx, ftTimeout)
+		}
+		buffered, closed, bootstrapErr := readStreamBootstrap(bootstrapCtx, streamResult.Chunks)
+		if cancelBootstrap != nil {
+			cancelBootstrap()
+		}
+		if bootstrapErr != nil && errors.Is(bootstrapErr, context.DeadlineExceeded) && (ctx == nil || ctx.Err() == nil) {
+			bootstrapErr = &Error{
+				Code:       ErrorCodeFirstTokenTimeout,
+				Message:    "first-token timeout: upstream credential did not produce initial token within configured limit",
+				Retryable:  true,
+				HTTPStatus: http.StatusGatewayTimeout,
+			}
+		}
 		bootstrapErr = markUpstreamExecutionAttemptFromContext(ctx, bootstrapErr)
 		if hasUpstreamExecutionAttempt(bootstrapErr) {
 			upstreamErr = newStreamBootstrapError(bootstrapErr, streamResult.Headers)
@@ -423,7 +465,23 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 						streamResult = &cliproxyexecutor.StreamResult{}
 					} else {
 						streamResult = retryStream
-						buffered, closed, bootstrapErr = readStreamBootstrap(ctx, streamResult.Chunks)
+						retryBootstrapCtx := ctx
+						var cancelRetryBootstrap context.CancelFunc
+						if ftTimeout := m.firstTokenTimeoutDuration(provider); ftTimeout > 0 && ctx != nil {
+							retryBootstrapCtx, cancelRetryBootstrap = context.WithTimeout(ctx, ftTimeout)
+						}
+						buffered, closed, bootstrapErr = readStreamBootstrap(retryBootstrapCtx, streamResult.Chunks)
+						if cancelRetryBootstrap != nil {
+							cancelRetryBootstrap()
+						}
+						if bootstrapErr != nil && errors.Is(bootstrapErr, context.DeadlineExceeded) && (ctx == nil || ctx.Err() == nil) {
+							bootstrapErr = &Error{
+								Code:       ErrorCodeFirstTokenTimeout,
+								Message:    "first-token timeout: upstream credential did not produce initial token within configured limit",
+								Retryable:  true,
+								HTTPStatus: http.StatusGatewayTimeout,
+							}
+						}
 						bootstrapErr = markUpstreamExecutionAttemptFromContext(ctx, bootstrapErr)
 						if bootstrapErr != nil {
 							warnLogUpstreamFailure(ctx, entry, provider, execModel, auth, time.Since(startRetry), bootstrapErr)

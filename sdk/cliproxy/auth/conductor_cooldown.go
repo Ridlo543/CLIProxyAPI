@@ -1962,6 +1962,12 @@ func resultErrorFromError(err error) *Error {
 		if resultErr.Code == "" {
 			resultErr.Code = ErrorCodeVerificationRequired
 		}
+	case resultErr.Code == ErrorCodeFirstTokenTimeout || (err != nil && strings.Contains(err.Error(), ErrorCodeFirstTokenTimeout)):
+		resultErr.Code = ErrorCodeFirstTokenTimeout
+		if resultErr.HTTPStatus == 0 {
+			resultErr.HTTPStatus = http.StatusGatewayTimeout
+		}
+		resultErr.Retryable = true
 	}
 	return resultErr
 }

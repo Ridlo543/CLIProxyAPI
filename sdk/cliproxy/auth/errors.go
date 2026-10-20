@@ -37,6 +37,9 @@ const ErrorCodeForceCooldown = "force_cooldown"
 // quota, which would mislabel a healthy credential and start the quota ladder.
 const ErrorCodeUpstreamRateLimit = "upstream_rate_limit"
 
+// ErrorCodeFirstTokenTimeout marks a credential that stalled before delivering its first payload chunk.
+const ErrorCodeFirstTokenTimeout = "first_token_timeout"
+
 // ErrorCodeVerificationRequired marks a failure where the provider requires user
 // interactive verification (such as Google Antigravity 403 VALIDATION_REQUIRED).
 const ErrorCodeVerificationRequired = "verification_required"
