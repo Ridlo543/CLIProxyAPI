@@ -18,25 +18,60 @@ func TestEffectiveFirstTokenTimeout_ScalesWithPromptSize(t *testing.T) {
 		Routing: internalconfig.RoutingConfig{FirstTokenTimeout: "45s"},
 	})
 
-	if got := m.effectiveFirstTokenTimeout("codex", nil); got != 45*time.Second {
+	if got := m.effectiveFirstTokenTimeout("codex", "gpt-5.6-terra", nil); got != 45*time.Second {
 		t.Fatalf("empty payload timeout = %v, want 45s (base must never shrink)", got)
 	}
 
 	small := []byte(`{"messages":[{"role":"user","content":"hello"}]}`)
-	if got := m.effectiveFirstTokenTimeout("codex", small); got != 45*time.Second {
+	if got := m.effectiveFirstTokenTimeout("codex", "gpt-5.6-terra", small); got != 45*time.Second {
 		t.Fatalf("small payload timeout = %v, want 45s", got)
 	}
 
 	// 300k characters at the conservative 3 bytes/token ratio = 100k tokens = +10s.
 	large := []byte(`{"messages":[{"role":"user","content":"` + strings.Repeat("a", 300000) + `"}]}`)
-	if got := m.effectiveFirstTokenTimeout("codex", large); got != 55*time.Second {
+	if got := m.effectiveFirstTokenTimeout("codex", "gpt-5.6-terra", large); got != 55*time.Second {
 		t.Fatalf("large payload timeout = %v, want 55s", got)
 	}
 
 	// The widening is capped so a huge prompt cannot hide a dead credential forever.
 	huge := []byte(`{"messages":[{"role":"user","content":"` + strings.Repeat("a", 30000000) + `"}]}`)
-	if got := m.effectiveFirstTokenTimeout("codex", huge); got != 165*time.Second {
+	if got := m.effectiveFirstTokenTimeout("codex", "gpt-5.6-terra", huge); got != 165*time.Second {
 		t.Fatalf("huge payload timeout = %v, want 165s (45s base + 120s cap)", got)
+	}
+}
+
+func TestEffectiveFirstTokenTimeout_WidensForReasoningModels(t *testing.T) {
+	m := NewManager(nil, nil, nil)
+	m.SetConfig(&internalconfig.Config{
+		Routing: internalconfig.RoutingConfig{FirstTokenTimeout: "45s"},
+	})
+
+	cases := []struct {
+		model   string
+		payload string
+		want    time.Duration
+	}{
+		{"gemini-3.8-flash", "", 45 * time.Second},
+		{"gemini-3.8-flash-high", "", 67500 * time.Millisecond},
+		{"claude-opus-4-6-thinking", "", 67500 * time.Millisecond},
+		{"deepseek-v4-pro", "", 67500 * time.Millisecond},
+		{"gemini-3.8-flash-medium", "", 56250 * time.Millisecond},
+		{"gemini-3.8-flash", `{"reasoning_effort":"high"}`, 67500 * time.Millisecond},
+		{"gemini-3.8-flash", `{"reasoning_effort":"medium"}`, 56250 * time.Millisecond},
+		{"gemini-3.8-flash", `{"reasoning_effort":"low"}`, 45 * time.Second},
+	}
+	for _, tc := range cases {
+		got := m.effectiveFirstTokenTimeout("antigravity", tc.model, []byte(tc.payload))
+		if got != tc.want {
+			t.Errorf("model %q effort %q timeout = %v, want %v", tc.model, tc.payload, got, tc.want)
+		}
+	}
+
+	// The multiplier must never shrink the configured base, whatever the model name.
+	for _, model := range []string{"gpt-5.6-terra", "gemini-3.8-flash-low", "unknown-model"} {
+		if got := m.effectiveFirstTokenTimeout("antigravity", model, nil); got < 45*time.Second {
+			t.Errorf("model %q timeout = %v, must never fall below the configured base", model, got)
+		}
 	}
 }
 

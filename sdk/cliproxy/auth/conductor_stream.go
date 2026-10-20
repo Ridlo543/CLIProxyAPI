@@ -92,19 +92,50 @@ const (
 	defaultStreamIdleTimeout = 180 * time.Second
 )
 
-// effectiveFirstTokenTimeout scales the configured base ceiling with prompt size.
+// effectiveFirstTokenTimeout scales the configured base ceiling with the reasoning
+// level of the requested model and with prompt size.
+//
 // Scaling only ever raises the ceiling: the result is never below the configured base,
-// so it cannot introduce new failovers that the base value would not already produce.
-func (m *Manager) effectiveFirstTokenTimeout(provider string, payload []byte) time.Duration {
+// so it cannot introduce failovers that the base value would not already produce.
+// Reasoning models and long prompts legitimately need more time before the first
+// chunk; cutting them off would burn a healthy credential and still return nothing.
+func (m *Manager) effectiveFirstTokenTimeout(provider, model string, payload []byte) time.Duration {
 	base := m.firstTokenTimeoutDuration(provider)
 	if base <= 0 {
 		return 0
 	}
+	scaled := time.Duration(float64(base) * firstTokenReasoningMultiplier(model, payload))
 	extra := time.Duration(estimatePromptTokens(payload)/1000) * firstTokenPer1kPromptTokens
 	if extra > firstTokenMaxExtraBudget {
 		extra = firstTokenMaxExtraBudget
 	}
-	return base + extra
+	return scaled + extra
+}
+
+// firstTokenReasoningMultiplier widens the deadline for models that think before they
+// answer. Detection is deliberately conservative: an unrecognised model keeps the base
+// budget, and every recognised level only adds time.
+func firstTokenReasoningMultiplier(model string, payload []byte) float64 {
+	name := strings.ToLower(strings.TrimSpace(model))
+	for _, token := range []string{"-max", "-xhigh", "-high", "-thinking", "-tiered", "-pro"} {
+		if strings.Contains(name, token) {
+			return 1.5
+		}
+	}
+	effort := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "reasoning_effort").String()))
+	if effort == "" {
+		effort = strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "reasoning.effort").String()))
+	}
+	switch effort {
+	case "high", "xhigh", "max":
+		return 1.5
+	case "medium":
+		return 1.25
+	}
+	if strings.Contains(name, "-medium") {
+		return 1.25
+	}
+	return 1
 }
 
 // estimatePromptTokens returns a deliberately generous token estimate for a request body.
@@ -490,10 +521,14 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 		executionSeq := m.nextExecutionSeq()
 		startStream := time.Now()
 		attemptCtx, cancelAttempt := context.WithCancel(ctx)
+		// The attempt context must outlive this call while a stream is running, so it is
+		// released when the request context ends rather than at return. Cancelling twice
+		// (timer plus request end) is safe.
+		context.AfterFunc(ctx, cancelAttempt)
 		var timedOut atomic.Bool
 		var timer *time.Timer
 		failoverAvailable := m.hasFailoverCandidate(auth, provider, routeModel)
-		firstTokenDeadline := m.effectiveFirstTokenTimeout(provider, payload)
+		firstTokenDeadline := m.effectiveFirstTokenTimeout(provider, routeModel, payload)
 		if firstTokenDeadline > 0 && failoverAvailable && ctx != nil {
 			timer = time.AfterFunc(firstTokenDeadline, func() {
 				timedOut.Store(true)
@@ -666,6 +701,7 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 					executionSeq = m.nextExecutionSeq()
 					startRetry := time.Now()
 					retryAttemptCtx, cancelRetryAttempt := context.WithCancel(ctx)
+					context.AfterFunc(ctx, cancelRetryAttempt)
 					var retryTimedOut atomic.Bool
 					var retryTimer *time.Timer
 					if firstTokenDeadline > 0 && failoverAvailable && ctx != nil {
