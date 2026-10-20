@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sync"
 	"testing"
+	"time"
 
 	internalconfig "github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
@@ -163,5 +164,65 @@ func TestExecuteStream_ExecuteStreamHangs_FailsOverToNextCredential(t *testing.T
 	}
 	if len(payloads) == 0 {
 		t.Fatal("expected payload chunks from second credential")
+	}
+}
+
+// A provider with a single credential has nowhere to fail over to. The
+// first-token deadline must not cancel that attempt: a slow upstream would
+// otherwise turn into a hard 504 even though it eventually answers.
+func TestExecuteStream_SingleCredential_SlowFirstTokenIsNotCancelled(t *testing.T) {
+	previous := quotaCooldownDisabled.Load()
+	quotaCooldownDisabled.Store(false)
+	t.Cleanup(func() { quotaCooldownDisabled.Store(previous) })
+
+	m := NewManager(nil, nil, nil)
+	m.SetRetryConfig(3, 0, 3)
+	cfg := &internalconfig.Config{
+		Routing: internalconfig.RoutingConfig{
+			FirstTokenTimeout: "50ms",
+		},
+	}
+	m.SetConfig(cfg)
+
+	ids := registerOverloadAuths(t, m, 1)
+
+	m.RegisterExecutor(&customStreamMockExecutor{
+		identifier: "codex",
+		streamFn: func(ctx context.Context, _ *Auth, _ cliproxyexecutor.Request, _ cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
+			// Slower than the configured first-token deadline, but still successful.
+			select {
+			case <-time.After(150 * time.Millisecond):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			ch := make(chan cliproxyexecutor.StreamChunk, 2)
+			ch <- cliproxyexecutor.StreamChunk{Payload: []byte("data: slow but valid answer\n\n")}
+			close(ch)
+			return &cliproxyexecutor.StreamResult{
+				Headers: http.Header{"Content-Type": []string{"text/event-stream"}},
+				Chunks:  ch,
+			}, nil
+		},
+	})
+
+	result, err := m.ExecuteStream(context.Background(), []string{"codex"},
+		cliproxyexecutor.Request{Model: "gpt-5.6-terra"}, cliproxyexecutor.Options{})
+	if err != nil {
+		t.Fatalf("single credential must not be cancelled by the first-token deadline, got error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected stream result from the only credential")
+	}
+	var payloads [][]byte
+	for chunk := range result.Chunks {
+		if chunk.Err != nil {
+			t.Fatalf("unexpected chunk error: %v", chunk.Err)
+		}
+		if len(chunk.Payload) > 0 {
+			payloads = append(payloads, chunk.Payload)
+		}
+	}
+	if len(payloads) == 0 {
+		t.Fatalf("expected payload chunks from %s", ids[0])
 	}
 }

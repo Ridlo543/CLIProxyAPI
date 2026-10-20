@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 )
 
@@ -71,6 +72,51 @@ func (m *Manager) firstTokenTimeoutDuration(provider string) time.Duration {
 		}
 	}
 	return 0
+}
+
+// hasFailoverCandidate reports whether a stalled attempt on auth can be replaced
+// by another usable credential for the same route model.
+//
+// The first-token timeout is only a failover trigger. When it fires and no
+// alternative credential exists, cancelling the attempt would convert a slow but
+// valid upstream response into a hard 504, so callers must skip enforcement in
+// that case and let the upstream finish.
+func (m *Manager) hasFailoverCandidate(auth *Auth, provider, routeModel string) bool {
+	if m == nil || auth == nil {
+		return false
+	}
+	providerKey := executorKeyFromAuth(auth)
+	if providerKey == "" {
+		providerKey = canonicalSchedulingProvider(provider)
+	}
+	m.mu.RLock()
+	candidates := make([]*Auth, 0, len(m.auths))
+	for _, candidate := range m.auths {
+		if candidate == nil || candidate.Disabled || candidate.ID == auth.ID {
+			continue
+		}
+		if executorKeyFromAuth(candidate) != providerKey {
+			continue
+		}
+		candidates = append(candidates, candidate)
+	}
+	m.mu.RUnlock()
+	if len(candidates) == 0 {
+		return false
+	}
+	registryRef := registry.GetGlobalRegistry()
+	now := time.Now()
+	for _, candidate := range candidates {
+		if routeModel != "" && !m.authSupportsRouteModel(registryRef, candidate, routeModel) {
+			continue
+		}
+		checkModel := m.selectionModelForAuth(candidate, routeModel)
+		if blocked, _, _ := isAuthBlockedForModel(candidate, checkModel, now); blocked {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func (e *streamBootstrapError) Error() string {
@@ -292,7 +338,8 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 		attemptCtx, cancelAttempt := context.WithCancel(ctx)
 		var timedOut atomic.Bool
 		var timer *time.Timer
-		if ftTimeout := m.firstTokenTimeoutDuration(provider); ftTimeout > 0 && ctx != nil {
+		failoverAvailable := m.hasFailoverCandidate(auth, provider, routeModel)
+		if ftTimeout := m.firstTokenTimeoutDuration(provider); ftTimeout > 0 && failoverAvailable && ctx != nil {
 			timer = time.AfterFunc(ftTimeout, func() {
 				timedOut.Store(true)
 				cancelAttempt()
@@ -312,7 +359,7 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 				HTTPStatus: http.StatusGatewayTimeout,
 			}
 		}
-		if errStream != nil && strings.TrimSpace(auth.ProxyPool) != "" && m.rtProvider != nil {
+		if errStream != nil && !timedOut.Load() && strings.TrimSpace(auth.ProxyPool) != "" && m.rtProvider != nil {
 			proxyLimit := 1
 			if lp, ok := m.rtProvider.(interface{ ProxyPoolAttemptLimit(*Auth) int }); ok {
 				proxyLimit = lp.ProxyPoolAttemptLimit(auth)
@@ -466,7 +513,7 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 					retryAttemptCtx, cancelRetryAttempt := context.WithCancel(ctx)
 					var retryTimedOut atomic.Bool
 					var retryTimer *time.Timer
-					if ftTimeout := m.firstTokenTimeoutDuration(provider); ftTimeout > 0 && ctx != nil {
+					if ftTimeout := m.firstTokenTimeoutDuration(provider); ftTimeout > 0 && failoverAvailable && ctx != nil {
 						retryTimer = time.AfterFunc(ftTimeout, func() {
 							retryTimedOut.Store(true)
 							cancelRetryAttempt()

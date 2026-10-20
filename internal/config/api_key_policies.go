@@ -21,11 +21,11 @@ type APIKeyTokenLimit struct {
 
 // APIKeyPolicy attaches additive restrictions to one exact client key.
 type APIKeyPolicy struct {
-	Key       string            `yaml:"key,omitempty" json:"key,omitempty"`
-	APIKey    string            `yaml:"api-key,omitempty" json:"api-key,omitempty"`
-	Name      string            `yaml:"name,omitempty" json:"name,omitempty"`
-	Models    []string          `yaml:"models,omitempty" json:"models,omitempty"`
-	Providers []string          `yaml:"providers,omitempty" json:"providers,omitempty"`
+	Key         string            `yaml:"key,omitempty" json:"key,omitempty"`
+	APIKey      string            `yaml:"api-key,omitempty" json:"api-key,omitempty"`
+	Name        string            `yaml:"name,omitempty" json:"name,omitempty"`
+	Models      []string          `yaml:"models,omitempty" json:"models,omitempty"`
+	Providers   []string          `yaml:"providers,omitempty" json:"providers,omitempty"`
 	Limit       *APIKeyTokenLimit `yaml:"token-limit,omitempty" json:"token-limit,omitempty"`
 	TokenWindow string            `yaml:"token-window,omitempty" json:"token-window,omitempty"`
 	RPM         int               `yaml:"rpm,omitempty" json:"rpm,omitempty"`

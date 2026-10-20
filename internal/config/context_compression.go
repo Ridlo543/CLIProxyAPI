@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 )
+
 const (
 	ContextCompressionOff         = "off"
 	ContextCompressionRTK         = "rtk"
@@ -58,6 +59,7 @@ func (c *ContextCompressionConfig) applyDefaults() {
 		c.RawCapBytes = 10 * 1024 * 1024
 	}
 }
+
 // Validate ensures engine and size bounds are safe and valid.
 func (c ContextCompressionConfig) Validate() error {
 	switch c.Engine {
