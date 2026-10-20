@@ -40,6 +40,11 @@ const ErrorCodeUpstreamRateLimit = "upstream_rate_limit"
 // ErrorCodeFirstTokenTimeout marks a credential that stalled before delivering its first payload chunk.
 const ErrorCodeFirstTokenTimeout = "first_token_timeout"
 
+// ErrorCodeStreamIdleTimeout marks a stream that went silent after delivering at least one
+// payload chunk. It is reported to the client as a stream error and never retried, because
+// bytes already reached the downstream.
+const ErrorCodeStreamIdleTimeout = "stream_idle_timeout"
+
 // ErrorCodeVerificationRequired marks a failure where the provider requires user
 // interactive verification (such as Google Antigravity 403 VALIDATION_REQUIRED).
 const ErrorCodeVerificationRequired = "verification_required"

@@ -2,12 +2,14 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+	"github.com/tidwall/gjson"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 )
 
@@ -72,6 +74,111 @@ func (m *Manager) firstTokenTimeoutDuration(provider string) time.Duration {
 		}
 	}
 	return 0
+}
+
+const (
+	// firstTokenPer1kPromptTokens widens the first-token ceiling for large prompts.
+	// Long-context reasoning legitimately needs well over the base budget before the
+	// first chunk arrives; failing such a request over burns a healthy credential and
+	// still returns nothing.
+	firstTokenPer1kPromptTokens = 100 * time.Millisecond
+	// firstTokenMaxExtraBudget caps the widening so a huge prompt cannot hide a
+	// genuinely dead credential indefinitely.
+	firstTokenMaxExtraBudget = 120 * time.Second
+	// estimatedBytesPerToken is a conservative (overestimating) text ratio.
+	estimatedBytesPerToken = 3
+	// defaultStreamIdleTimeout aborts a stream that stops producing chunks mid-flight.
+	// It is deliberately generous: only a true hang should be cut, never a slow model.
+	defaultStreamIdleTimeout = 180 * time.Second
+)
+
+// effectiveFirstTokenTimeout scales the configured base ceiling with prompt size.
+// Scaling only ever raises the ceiling: the result is never below the configured base,
+// so it cannot introduce new failovers that the base value would not already produce.
+func (m *Manager) effectiveFirstTokenTimeout(provider string, payload []byte) time.Duration {
+	base := m.firstTokenTimeoutDuration(provider)
+	if base <= 0 {
+		return 0
+	}
+	extra := time.Duration(estimatePromptTokens(payload)/1000) * firstTokenPer1kPromptTokens
+	if extra > firstTokenMaxExtraBudget {
+		extra = firstTokenMaxExtraBudget
+	}
+	return base + extra
+}
+
+// estimatePromptTokens returns a deliberately generous token estimate for a request body.
+// Overestimating only widens the deadline; underestimating would reintroduce false
+// first-token failovers, so text parts are counted with a low bytes-per-token ratio.
+func estimatePromptTokens(payload []byte) int {
+	if len(payload) == 0 {
+		return 0
+	}
+	var chars int64
+	addText := func(v gjson.Result) {
+		if v.Type == gjson.String {
+			chars += int64(len(v.Str))
+		}
+	}
+	for _, key := range []string{"messages", "input", "contents"} {
+		root := gjson.GetBytes(payload, key)
+		if !root.IsArray() {
+			continue
+		}
+		root.ForEach(func(_, item gjson.Result) bool {
+			if !item.IsObject() {
+				return true
+			}
+			item.ForEach(func(field, value gjson.Result) bool {
+				switch field.Str {
+				case "content", "parts", "text":
+					if value.IsArray() {
+						value.ForEach(func(_, part gjson.Result) bool {
+							if part.IsObject() {
+								addText(part.Get("text"))
+							} else {
+								addText(part)
+							}
+							return true
+						})
+						return true
+					}
+					addText(value)
+				}
+				return true
+			})
+			return true
+		})
+	}
+	addText(gjson.GetBytes(payload, "system"))
+	addText(gjson.GetBytes(payload, "instructions"))
+	chars += int64(len(gjson.GetBytes(payload, "tools").Raw))
+	return int(chars / estimatedBytesPerToken)
+}
+
+// streamIdleTimeout resolves the post-first-chunk silence ceiling. An explicit "0s"
+// disables the watchdog; an unparsable value falls back to the default instead of
+// silently disabling protection.
+func (m *Manager) streamIdleTimeout() time.Duration {
+	if m == nil {
+		return defaultStreamIdleTimeout
+	}
+	cfg := m.runtimeConfigSnapshot()
+	if cfg == nil {
+		return defaultStreamIdleTimeout
+	}
+	raw := strings.TrimSpace(cfg.Routing.StreamIdleTimeout)
+	if raw == "" {
+		return defaultStreamIdleTimeout
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil {
+		return defaultStreamIdleTimeout
+	}
+	if parsed <= 0 {
+		return 0
+	}
+	return parsed
 }
 
 // hasFailoverCandidate reports whether a stalled attempt on auth can be replaced
@@ -214,7 +321,7 @@ func (m *Manager) recordCanceledUpstreamCooldown(ctx context.Context, auth *Auth
 	m.recordExecutionResult(context.WithoutCancel(ctx), result, auth, ephemeral)
 }
 
-func (m *Manager) wrapStreamResult(ctx context.Context, auth *Auth, provider, resultModel, routeModel string, headers http.Header, buffered []cliproxyexecutor.StreamChunk, remaining <-chan cliproxyexecutor.StreamChunk, aliasResult OAuthModelAliasResult, ephemeralResult bool, opts cliproxyexecutor.Options, executionSeq uint64) *cliproxyexecutor.StreamResult {
+func (m *Manager) wrapStreamResult(ctx context.Context, auth *Auth, provider, resultModel, routeModel string, headers http.Header, buffered []cliproxyexecutor.StreamChunk, remaining <-chan cliproxyexecutor.StreamChunk, aliasResult OAuthModelAliasResult, ephemeralResult bool, opts cliproxyexecutor.Options, executionSeq uint64, abort func()) *cliproxyexecutor.StreamResult {
 	out := make(chan cliproxyexecutor.StreamChunk)
 	streamStart := time.Now()
 	go func() {
@@ -280,11 +387,9 @@ func (m *Manager) wrapStreamResult(ctx context.Context, auth *Auth, provider, re
 				return
 			}
 		}
-		for chunk := range remaining {
-			if ok := emit(chunk); !ok {
-				discardStreamChunks(remaining)
-				return
-			}
+		if !drainRemaining(remaining, m.streamIdleTimeout(), abort, emit) {
+			discardStreamChunks(remaining)
+			return
 		}
 		if tail := finishForceMappedStreamChunks(rewriter); len(tail) > 0 {
 			tailChunk := cliproxyexecutor.StreamChunk{Payload: tail}
@@ -297,6 +402,55 @@ func (m *Manager) wrapStreamResult(ctx context.Context, auth *Auth, provider, re
 		}
 	}()
 	return &cliproxyexecutor.StreamResult{Headers: headers, Chunks: out}
+}
+
+// drainRemaining forwards upstream chunks until the channel closes, aborting a
+// stream that stays silent longer than idle.
+//
+// A silent upstream would otherwise leave the client waiting until its own
+// timeout while the credential keeps a live connection. The abort is surfaced as
+// a stream error and never retried, because payload bytes already reached the
+// downstream. It returns false when the downstream disappeared, which tells the
+// caller to stop forwarding.
+func drainRemaining(remaining <-chan cliproxyexecutor.StreamChunk, idle time.Duration, abort func(), emit func(cliproxyexecutor.StreamChunk) bool) bool {
+	if idle <= 0 {
+		for chunk := range remaining {
+			if !emit(chunk) {
+				return false
+			}
+		}
+		return true
+	}
+	timer := time.NewTimer(idle)
+	defer timer.Stop()
+	for {
+		select {
+		case chunk, ok := <-remaining:
+			if !ok {
+				return true
+			}
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(idle)
+			if !emit(chunk) {
+				return false
+			}
+		case <-timer.C:
+			if abort != nil {
+				abort()
+			}
+			emit(cliproxyexecutor.StreamChunk{Err: &Error{
+				Code:       ErrorCodeStreamIdleTimeout,
+				Message:    fmt.Sprintf("stream idle timeout: no upstream data for %s", idle),
+				HTTPStatus: http.StatusGatewayTimeout,
+			}})
+			return false
+		}
+	}
 }
 
 func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor ProviderExecutor, auth *Auth, provider string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, routeModel, executionModel string, execModels []string, pooled bool, aliasResult OAuthModelAliasResult, routing *apiKeyModelRoutingSnapshot, allowRetry bool, ephemeralResult bool) (*cliproxyexecutor.StreamResult, error) {
@@ -339,8 +493,9 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 		var timedOut atomic.Bool
 		var timer *time.Timer
 		failoverAvailable := m.hasFailoverCandidate(auth, provider, routeModel)
-		if ftTimeout := m.firstTokenTimeoutDuration(provider); ftTimeout > 0 && failoverAvailable && ctx != nil {
-			timer = time.AfterFunc(ftTimeout, func() {
+		firstTokenDeadline := m.effectiveFirstTokenTimeout(provider, payload)
+		if firstTokenDeadline > 0 && failoverAvailable && ctx != nil {
+			timer = time.AfterFunc(firstTokenDeadline, func() {
 				timedOut.Store(true)
 				cancelAttempt()
 			})
@@ -513,8 +668,8 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 					retryAttemptCtx, cancelRetryAttempt := context.WithCancel(ctx)
 					var retryTimedOut atomic.Bool
 					var retryTimer *time.Timer
-					if ftTimeout := m.firstTokenTimeoutDuration(provider); ftTimeout > 0 && failoverAvailable && ctx != nil {
-						retryTimer = time.AfterFunc(ftTimeout, func() {
+					if firstTokenDeadline > 0 && failoverAvailable && ctx != nil {
+						retryTimer = time.AfterFunc(firstTokenDeadline, func() {
 							retryTimedOut.Store(true)
 							cancelRetryAttempt()
 						})
@@ -661,7 +816,7 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			remaining = closedCh
 		}
 		attemptAliasResult := resolveAttemptAliasResult(routing, auth, routeModel, execModel, aliasResult)
-		return m.wrapStreamResult(ctx, auth.Clone(), provider, resultModel, routeModel, streamResult.Headers, buffered, remaining, attemptAliasResult, ephemeralResult, execOpts, executionSeq), nil
+		return m.wrapStreamResult(ctx, auth.Clone(), provider, resultModel, routeModel, streamResult.Headers, buffered, remaining, attemptAliasResult, ephemeralResult, execOpts, executionSeq, cancelAttempt), nil
 	}
 	if lastErr == nil {
 		lastErr = &Error{Code: "auth_not_found", Message: "no upstream model available"}

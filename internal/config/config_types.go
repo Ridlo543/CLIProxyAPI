@@ -455,6 +455,12 @@ type RoutingConfig struct {
 	// to the next available credential. Accepts duration strings like "45s", "60s". Default: empty/disabled (0).
 	FirstTokenTimeout string `yaml:"first-token-timeout,omitempty" json:"first-token-timeout,omitempty"`
 
+	// StreamIdleTimeout bounds how long a stream may stay silent after the first chunk.
+	// A silent upstream is aborted with a stream error so clients do not hang; bytes already
+	// delivered are never retried. Accepts duration strings like "180s". Default: 180s when
+	// empty; "0s" disables the watchdog.
+	StreamIdleTimeout string `yaml:"stream-idle-timeout,omitempty" json:"stream-idle-timeout,omitempty"`
+
 	// SessionAffinitySubagents controls whether subagents (child sessions with parent references)
 	// inherit and bind to the parent's upstream credential across all providers (Claude, Codex,
 	// Antigravity, Gemini), maximizing prompt and KV cache reuse.
