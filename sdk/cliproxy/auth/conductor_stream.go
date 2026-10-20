@@ -2,9 +2,9 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
@@ -289,12 +289,29 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 		ctx = syncMetadataSessionToContext(ctx, execOpts.Metadata)
 		executionSeq := m.nextExecutionSeq()
 		startStream := time.Now()
-		streamResult, errStream := executor.ExecuteStream(ctx, auth, execReq, execOpts)
+		attemptCtx, cancelAttempt := context.WithCancel(ctx)
+		var timedOut atomic.Bool
+		var timer *time.Timer
+		if ftTimeout := m.firstTokenTimeoutDuration(provider); ftTimeout > 0 && ctx != nil {
+			timer = time.AfterFunc(ftTimeout, func() {
+				timedOut.Store(true)
+				cancelAttempt()
+			})
+		}
+		streamResult, errStream := executor.ExecuteStream(attemptCtx, auth, execReq, execOpts)
 		errStream = markUpstreamExecutionAttemptFromContext(ctx, errStream)
 		if hasUpstreamExecutionAttempt(errStream) {
 			upstreamErr = errStream
 		}
 		durationStream := time.Since(startStream)
+		if errStream != nil && timedOut.Load() && (ctx == nil || ctx.Err() == nil) {
+			errStream = &Error{
+				Code:       ErrorCodeFirstTokenTimeout,
+				Message:    "first-token timeout: upstream did not respond within configured limit",
+				Retryable:  true,
+				HTTPStatus: http.StatusGatewayTimeout,
+			}
+		}
 		if errStream != nil && strings.TrimSpace(auth.ProxyPool) != "" && m.rtProvider != nil {
 			proxyLimit := 1
 			if lp, ok := m.rtProvider.(interface{ ProxyPoolAttemptLimit(*Auth) int }); ok {
@@ -315,11 +332,11 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 					break
 				}
 				if rt := m.roundTripperFor(auth); rt != nil {
-					ctx = context.WithValue(ctx, roundTripperContextKey{}, rt)
-					ctx = context.WithValue(ctx, "cliproxy.roundtripper", rt)
+					attemptCtx = context.WithValue(attemptCtx, roundTripperContextKey{}, rt)
+					attemptCtx = context.WithValue(attemptCtx, "cliproxy.roundtripper", rt)
 				}
 				startRetry := time.Now()
-				streamResult, errStream = executor.ExecuteStream(ctx, auth, execReq, execOpts)
+				streamResult, errStream = executor.ExecuteStream(attemptCtx, auth, execReq, execOpts)
 				errStream = markUpstreamExecutionAttemptFromContext(ctx, errStream)
 				if hasUpstreamExecutionAttempt(errStream) {
 					upstreamErr = errStream
@@ -408,16 +425,11 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			continue
 		}
 
-		bootstrapCtx := ctx
-		var cancelBootstrap context.CancelFunc
-		if ftTimeout := m.firstTokenTimeoutDuration(provider); ftTimeout > 0 && ctx != nil {
-			bootstrapCtx, cancelBootstrap = context.WithTimeout(ctx, ftTimeout)
+		buffered, closed, bootstrapErr := readStreamBootstrap(attemptCtx, streamResult.Chunks)
+		if timer != nil {
+			timer.Stop()
 		}
-		buffered, closed, bootstrapErr := readStreamBootstrap(bootstrapCtx, streamResult.Chunks)
-		if cancelBootstrap != nil {
-			cancelBootstrap()
-		}
-		if bootstrapErr != nil && errors.Is(bootstrapErr, context.DeadlineExceeded) && (ctx == nil || ctx.Err() == nil) {
+		if bootstrapErr != nil && timedOut.Load() && (ctx == nil || ctx.Err() == nil) {
 			bootstrapErr = &Error{
 				Code:       ErrorCodeFirstTokenTimeout,
 				Message:    "first-token timeout: upstream credential did not produce initial token within configured limit",
@@ -451,11 +463,31 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 					ctx = newUpstreamAttemptContext(ctx)
 					executionSeq = m.nextExecutionSeq()
 					startRetry := time.Now()
-					retryStream, retryErr := executor.ExecuteStream(ctx, auth, execReq, execOpts)
+					retryAttemptCtx, cancelRetryAttempt := context.WithCancel(ctx)
+					var retryTimedOut atomic.Bool
+					var retryTimer *time.Timer
+					if ftTimeout := m.firstTokenTimeoutDuration(provider); ftTimeout > 0 && ctx != nil {
+						retryTimer = time.AfterFunc(ftTimeout, func() {
+							retryTimedOut.Store(true)
+							cancelRetryAttempt()
+						})
+					}
+					retryStream, retryErr := executor.ExecuteStream(retryAttemptCtx, auth, execReq, execOpts)
 					retryErr = markUpstreamExecutionAttemptFromContext(ctx, retryErr)
+					if retryErr != nil && retryTimedOut.Load() && (ctx == nil || ctx.Err() == nil) {
+						retryErr = &Error{
+							Code:       ErrorCodeFirstTokenTimeout,
+							Message:    "first-token timeout: upstream did not respond within configured limit",
+							Retryable:  true,
+							HTTPStatus: http.StatusGatewayTimeout,
+						}
+					}
 					retryStream, retryErr = validateStreamResult(retryStream, retryErr)
 					retryErr = markUpstreamExecutionAttemptFromContext(ctx, retryErr)
 					if retryErr != nil {
+						if retryTimer != nil {
+							retryTimer.Stop()
+						}
 						if errCtx := ctx.Err(); errCtx != nil {
 							m.recordCanceledUpstreamCooldown(ctx, auth, provider, resultModel, routeModel, execOpts, retryErr, ephemeralResult, executionSeq)
 							return nil, errCtx
@@ -465,16 +497,11 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 						streamResult = &cliproxyexecutor.StreamResult{}
 					} else {
 						streamResult = retryStream
-						retryBootstrapCtx := ctx
-						var cancelRetryBootstrap context.CancelFunc
-						if ftTimeout := m.firstTokenTimeoutDuration(provider); ftTimeout > 0 && ctx != nil {
-							retryBootstrapCtx, cancelRetryBootstrap = context.WithTimeout(ctx, ftTimeout)
+						buffered, closed, bootstrapErr = readStreamBootstrap(retryAttemptCtx, streamResult.Chunks)
+						if retryTimer != nil {
+							retryTimer.Stop()
 						}
-						buffered, closed, bootstrapErr = readStreamBootstrap(retryBootstrapCtx, streamResult.Chunks)
-						if cancelRetryBootstrap != nil {
-							cancelRetryBootstrap()
-						}
-						if bootstrapErr != nil && errors.Is(bootstrapErr, context.DeadlineExceeded) && (ctx == nil || ctx.Err() == nil) {
+						if bootstrapErr != nil && retryTimedOut.Load() && (ctx == nil || ctx.Err() == nil) {
 							bootstrapErr = &Error{
 								Code:       ErrorCodeFirstTokenTimeout,
 								Message:    "first-token timeout: upstream credential did not produce initial token within configured limit",
