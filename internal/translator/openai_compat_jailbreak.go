@@ -83,52 +83,74 @@ func InjectOpenAICompatSystemInstruction(modelName string, rawJSON []byte, cfg *
 // stripped so an operator can list either the bare alias or the fully
 // qualified form and both resolve to the same model.
 func openAICompatModelMatchesSystemInstruction(modelName string, patterns []string) bool {
-	needle := strings.ToLower(strings.TrimSpace(modelName))
-	if needle == "" {
-		return false
-	}
-	// Strip a provider prefix so "opencode-free/deepseek-v4.1-flash-jb" matches
-	// a configured "deepseek-v4.1-flash-jb".
-	if idx := strings.LastIndex(needle, "/"); idx >= 0 {
-		needle = needle[idx+1:]
-	}
+	needle := normalizeCompatModelName(modelName)
 	if needle == "" {
 		return false
 	}
 	for _, pattern := range patterns {
-		p := strings.ToLower(strings.TrimSpace(pattern))
-		if idx := strings.LastIndex(p, "/"); idx >= 0 {
-			p = p[idx+1:]
-		}
-		if p != "" && p == needle {
+		if p := normalizeCompatModelName(pattern); p != "" && p == needle {
 			return true
 		}
 	}
 	return false
 }
 
-// openAICompatUpstreamModelName returns the configured upstream model name for a
-// client-facing alias, or "" when the name is already the upstream name or no
-// matching entry exists.
-func openAICompatUpstreamModelName(modelName string, cfg *config.OpenAICompatibility) string {
-	needle := strings.ToLower(strings.TrimSpace(modelName))
-	if needle == "" || cfg == nil {
-		return ""
-	}
+// normalizeCompatModelName lowercases a model name, strips surrounding
+// whitespace, and drops any provider prefix so "opencode-jb/deepseek-v4.1-flash-jb"
+// and "deepseek-v4.1-flash-jb" normalize to the same value.
+func normalizeCompatModelName(name string) string {
+	needle := strings.ToLower(strings.TrimSpace(name))
 	if idx := strings.LastIndex(needle, "/"); idx >= 0 {
 		needle = needle[idx+1:]
 	}
+	return strings.TrimSpace(needle)
+}
+
+// openAICompatModelMatchesSystemInstructionOrUpstream reports whether the
+// requested model matches a configured pattern either directly or through its
+// configured upstream name. The direct match is checked first because it is the
+// common case; the upstream lookup only runs when the direct match fails.
+//
+// This matters for callers that address a model by its upstream name rather
+// openAICompatModelMatchesSystemInstructionOrUpstream reports whether the
+// requested model matches a configured pattern either directly or through its
+// configured alias.
+//
+// The alias lookup is deliberately one-directional: a request addressed by
+// alias resolves through openAICompatUpstreamModelName to check whether the
+// alias is listed. A request addressed by upstream name is NOT resolved back to
+// an alias, because two aliases can share one upstream name — exactly the
+// situation on a provider that serves both a plain and a jailbroken variant of
+// the same model. Resolving in that direction would frame the plain variant
+// too, which is the persona leak this whole design exists to prevent.
+func openAICompatModelMatchesSystemInstructionOrUpstream(modelName string, cfg *config.OpenAICompatibility) bool {
+	if cfg == nil {
+		return false
+	}
+	if openAICompatModelMatchesSystemInstruction(modelName, cfg.SystemInstructionModels) {
+		return true
+	}
+	// Only resolve when the requested name is itself a configured alias, so a
+	// plain upstream name never inherits a sibling alias's configuration.
+	if openAICompatUpstreamModelName(modelName, cfg) == "" {
+		return false
+	}
+	return openAICompatModelMatchesSystemInstruction(modelName, cfg.SystemInstructionModels)
+}
+
+// openAICompatUpstreamModelName returns the configured upstream model name for
+// a client-facing alias, or "" when the name is already the upstream name or no
+// matching entry exists.
+func openAICompatUpstreamModelName(modelName string, cfg *config.OpenAICompatibility) string {
+	needle := normalizeCompatModelName(modelName)
+	if needle == "" || cfg == nil {
+		return ""
+	}
 	for _, m := range cfg.Models {
-		alias := strings.ToLower(strings.TrimSpace(m.Alias))
-		if alias == "" {
-			continue
-		}
-		if idx := strings.LastIndex(alias, "/"); idx >= 0 {
-			alias = alias[idx+1:]
-		}
-		if alias == needle {
+		if alias := normalizeCompatModelName(m.Alias); alias != "" && alias == needle {
 			return strings.TrimSpace(m.Name)
 		}
 	}
 	return ""
 }
+

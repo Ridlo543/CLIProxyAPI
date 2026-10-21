@@ -170,6 +170,10 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		// one model listed in system-instruction-models. The injector also
 		// rewrites the payload model to the upstream name.
 		translated = translator.InjectOpenAICompatSystemInstruction(requestedModel, translated, e.resolveCompatConfig(auth, req))
+		// Frame sensitive requests so the model produces working code without
+		// the user having to wrap his own prompts. Scoped to the same model
+		// list as the persona, so plain models are never framed.
+		translated = translator.InjectSensitiveRequestFrame(requestedModel, translated, e.resolveCompatConfig(auth, req))
 	}
 	if endpoint == systemOneEndpoint {
 		translated = buildOpenCodeSystemOneRequest(baseModel, translated)
@@ -465,6 +469,10 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		// one model listed in system-instruction-models. The injector also
 		// rewrites the payload model to the upstream name.
 		translated = translator.InjectOpenAICompatSystemInstruction(requestedModel, translated, e.resolveCompatConfig(auth, req))
+		// Frame sensitive requests so the model produces working code without
+		// the user having to wrap his own prompts. Scoped to the same model
+		// list as the persona, so plain models are never framed.
+		translated = translator.InjectSensitiveRequestFrame(requestedModel, translated, e.resolveCompatConfig(auth, req))
 	}
 	if endpoint == systemOneEndpoint {
 		translated = buildOpenCodeSystemOneRequest(baseModel, translated)
