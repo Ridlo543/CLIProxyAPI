@@ -392,7 +392,6 @@ func (r *poolRoundTripper) SetBase(b http.RoundTripper) {
 	r.base = b
 }
 
-
 func (r *poolRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := r.base.RoundTrip(req)
 	if err != nil {

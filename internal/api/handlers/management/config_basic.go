@@ -32,7 +32,6 @@ func configETag(data []byte) string {
 	return `"` + hex.EncodeToString(sum[:]) + `"`
 }
 
-
 func (h *Handler) GetConfig(c *gin.Context) {
 	if h == nil || h.cfg == nil {
 		c.JSON(200, gin.H{})
