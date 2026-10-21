@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -50,14 +51,35 @@ func sanitizeProxyURL(raw string) string {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Host == "" {
 		if !strings.Contains(raw, "://") && strings.Contains(raw, ":") {
-			return "http://" + normalizeProxyEndpoint(raw)
+			return normalizeProxyEndpointStrict(raw)
 		}
 		return "invalid"
 	}
 	if parsed.Scheme == "" {
-		return "http://" + parsed.Host
+		return normalizeProxyEndpointStrict(parsed.Host)
 	}
 	return parsed.Scheme + "://" + parsed.Host
+}
+
+// normalizeProxyEndpointStrict returns "http://host:port" only when the endpoint
+// parses as a real host:port after dropping any credentials and path. Anything
+// else is rejected instead of being echoed back with a scheme bolted on, which
+// would leak the raw input (and secrets inside it) into the panel and logs.
+func normalizeProxyEndpointStrict(raw string) string {
+	candidate := normalizeProxyEndpoint(raw)
+	if candidate == "" || strings.ContainsAny(candidate, " \t") {
+		return "invalid"
+	}
+	parsed, err := url.Parse("http://" + candidate)
+	if err != nil || parsed.Host == "" || parsed.Hostname() == "" {
+		return "invalid"
+	}
+	if port := parsed.Port(); port != "" {
+		if n, convErr := strconv.Atoi(port); convErr != nil || n <= 0 || n > 65535 {
+			return "invalid"
+		}
+	}
+	return "http://" + candidate
 }
 func bindFlexibleJSON(c *gin.Context, obj any) error {
 	if c == nil || c.Request == nil || c.Request.Body == nil {

@@ -1,6 +1,8 @@
 package openai
 
 import (
+	"strings"
+
 	codexmodels "github.com/router-for-me/CLIProxyAPI/v8/internal/client/codex/models"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	responsesclaude "github.com/router-for-me/CLIProxyAPI/v8/internal/translator/claude/openai/responses"
@@ -26,7 +28,24 @@ func (h *OpenAIAPIHandler) codexClientModelsResponse(clientVersion ...string) ma
 		toolSearchCapabilityForModel = h.SupportsNativeToolSearchModel
 	}
 	modelRegistry := registry.GetGlobalRegistry()
-	return codexmodels.BuildResponseForClientWithToolCapabilities(h.Models(), modelRegistry.GetModelProviders, modelRegistry.GetResponsesWebSearchCapability, applyPatchCapabilityForModel, toolSearchCapabilityForModel, optimizeMultiAgentV2, version)
+	return codexmodels.BuildResponseForClientWithToolCapabilities(codexCatalogModels(h.Models()), modelRegistry.GetModelProviders, modelRegistry.GetResponsesWebSearchCapability, applyPatchCapabilityForModel, toolSearchCapabilityForModel, optimizeMultiAgentV2, version)
+}
+
+// codexCatalogModels drops AinyRouter model groups from the Codex client
+// catalog. Groups are a router-side alias; the Codex client schema expects real
+// models only, and advertising a group makes the client select a slug it cannot
+// resolve.
+func codexCatalogModels(models []map[string]any) []map[string]any {
+	out := make([]map[string]any, 0, len(models))
+	for _, model := range models {
+		owner, _ := model["owned_by"].(string)
+		kind, _ := model["type"].(string)
+		if strings.EqualFold(owner, "ainyrouter/model-group") || strings.EqualFold(kind, "model-group") {
+			continue
+		}
+		out = append(out, model)
+	}
+	return out
 }
 
 // CodexClientModelsResponse builds a Codex client model response.

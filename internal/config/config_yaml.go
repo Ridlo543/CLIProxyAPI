@@ -203,12 +203,33 @@ func updateNestedScalarYAML(data []byte, path []string, value string) ([]byte, e
 func NormalizeCommentIndentation(data []byte) []byte {
 	lines := bytes.Split(data, []byte("\n"))
 	changed := false
+	// Block scalar content (| and >) is data, not comments. A line starting with
+	// '#' inside such a block must keep its indentation, otherwise the value
+	// terminates early and the document stops parsing.
+	blockParentIndent := -1
 	for i, line := range lines {
 		trimmed := bytes.TrimLeft(line, " \t")
+		indent := len(line) - len(trimmed)
+
+		if blockParentIndent >= 0 {
+			if len(trimmed) == 0 {
+				continue // blank line: still inside the block
+			}
+			if indent <= blockParentIndent {
+				blockParentIndent = -1 // dedented: block ended
+			} else {
+				continue // block content, never re-indent
+			}
+		}
+
+		if opensBlockScalar(trimmed) {
+			blockParentIndent = indent
+			continue
+		}
 		if len(trimmed) == 0 || trimmed[0] != '#' {
 			continue
 		}
-		if len(trimmed) == len(line) {
+		if indent == 0 {
 			continue
 		}
 		lines[i] = append([]byte(nil), trimmed...)
@@ -218,6 +239,32 @@ func NormalizeCommentIndentation(data []byte) []byte {
 		return data
 	}
 	return bytes.Join(lines, []byte("\n"))
+}
+
+// opensBlockScalar reports whether a line opens a literal or folded block scalar,
+// e.g. "prompt: |-", "text: >-", "- |", or "key: |2+  # comment".
+func opensBlockScalar(trimmed []byte) bool {
+	// Drop a trailing comment (" # ..."), which is not part of the indicator.
+	if idx := bytes.Index(trimmed, []byte(" #")); idx >= 0 {
+		trimmed = bytes.TrimRight(trimmed[:idx], " \t")
+	}
+	if len(trimmed) == 0 || trimmed[len(trimmed)-1] == '#' {
+		return false
+	}
+	i := len(trimmed) - 1
+	// Optional chomping/indentation indicators directly after the indicator.
+	for i > 0 && (trimmed[i] == '+' || trimmed[i] == '-' || (trimmed[i] >= '0' && trimmed[i] <= '9')) {
+		i--
+	}
+	if trimmed[i] != '|' && trimmed[i] != '>' {
+		return false
+	}
+	if i == 0 {
+		return false
+	}
+	prev := trimmed[i-1]
+	// The indicator must follow a mapping colon or a sequence dash as a value.
+	return prev == ' ' || prev == ':' || prev == '-'
 }
 
 // getOrCreateMapValue finds the value node for a given key in a mapping node.

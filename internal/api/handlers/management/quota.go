@@ -45,7 +45,7 @@ func (h *Handler) ResetQuota(c *gin.Context) {
 		return
 	}
 
-	auth := h.authByIndex(authIndex)
+	auth := h.authByIndexStrict(authIndex)
 	if auth == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "auth not found"})
 		return

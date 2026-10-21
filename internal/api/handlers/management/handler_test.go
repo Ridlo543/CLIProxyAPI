@@ -11,33 +11,67 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginhost"
 )
 
-func TestAuthenticateManagementKey_LocalhostIPBan_BlocksCorrectKeyDuringBan(t *testing.T) {
-	h := &Handler{
-		cfg:            &config.Config{},
-		failedAttempts: make(map[string]*attemptInfo),
-		envSecret:      "test-secret",
+// The failed-attempt ban protects publicly reachable management endpoints. The
+// operator's own loopback/private address is intentionally exempt: a few typos
+// on the local panel must never lock the operator out of their own router
+// (30-minute self-ban incident). Both halves are asserted so the exemption cannot
+// silently disable the ban for real remote clients.
+func TestAuthenticateManagementKey_IPBanPolicy(t *testing.T) {
+	newHandler := func() *Handler {
+		return &Handler{
+			cfg:                 &config.Config{},
+			failedAttempts:      make(map[string]*attemptInfo),
+			envSecret:           "test-secret",
+			allowRemoteOverride: true,
+		}
 	}
 
-	for i := 0; i < 5; i++ {
-		allowed, statusCode, errMsg := h.AuthenticateManagementKey("127.0.0.1", true, "wrong-secret")
+	t.Run("loopback is exempt from the ban", func(t *testing.T) {
+		h := newHandler()
+		for i := 0; i < 5; i++ {
+			allowed, statusCode, errMsg := h.AuthenticateManagementKey("127.0.0.1", true, "wrong-secret")
+			if allowed {
+				t.Fatalf("wrong key accepted at attempt %d", i+1)
+			}
+			if statusCode != http.StatusUnauthorized || errMsg != "invalid management key" {
+				t.Fatalf("unexpected auth failure at attempt %d: status=%d msg=%q", i+1, statusCode, errMsg)
+			}
+		}
+		allowed, statusCode, errMsg := h.AuthenticateManagementKey("127.0.0.1", true, "test-secret")
+		if !allowed {
+			t.Fatalf("loopback must stay usable after failed attempts: status=%d msg=%q", statusCode, errMsg)
+		}
+	})
+
+	t.Run("public client is banned even with the correct key", func(t *testing.T) {
+		h := newHandler()
+		const remoteIP = "203.0.113.9"
+		for i := 0; i < 5; i++ {
+			if allowed, _, _ := h.AuthenticateManagementKey(remoteIP, false, "wrong-secret"); allowed {
+				t.Fatalf("wrong key accepted at attempt %d", i+1)
+			}
+		}
+		allowed, statusCode, errMsg := h.AuthenticateManagementKey(remoteIP, false, "test-secret")
 		if allowed {
-			t.Fatalf("expected auth to be denied at attempt %d", i+1)
+			t.Fatal("expected correct key to be denied while banned")
 		}
-		if statusCode != http.StatusUnauthorized || errMsg != "invalid management key" {
-			t.Fatalf("unexpected auth failure at attempt %d: status=%d msg=%q", i+1, statusCode, errMsg)
+		if statusCode != http.StatusForbidden {
+			t.Fatalf("expected forbidden status while banned, got %d", statusCode)
 		}
-	}
+		if !strings.HasPrefix(errMsg, "IP banned due to too many failed attempts. Try again in") {
+			t.Fatalf("unexpected banned message: %q", errMsg)
+		}
+	})
 
-	allowed, statusCode, errMsg := h.AuthenticateManagementKey("127.0.0.1", true, "test-secret")
-	if allowed {
-		t.Fatalf("expected correct key to be denied while banned")
-	}
-	if statusCode != http.StatusForbidden {
-		t.Fatalf("expected forbidden status while banned, got %d", statusCode)
-	}
-	if !strings.HasPrefix(errMsg, "IP banned due to too many failed attempts. Try again in") {
-		t.Fatalf("unexpected banned message: %q", errMsg)
-	}
+	t.Run("unknown client IP is not treated as local", func(t *testing.T) {
+		h := newHandler()
+		for i := 0; i < 5; i++ {
+			h.AuthenticateManagementKey("", false, "wrong-secret")
+		}
+		if allowed, statusCode, _ := h.AuthenticateManagementKey("", false, "test-secret"); allowed || statusCode != http.StatusForbidden {
+			t.Fatalf("empty client IP must be bannable: allowed=%v status=%d", allowed, statusCode)
+		}
+	})
 }
 
 func TestMiddlewareSetsSupportPluginHeader(t *testing.T) {

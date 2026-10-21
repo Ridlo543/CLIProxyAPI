@@ -498,7 +498,12 @@ func (h *Handler) updateStringField(c *gin.Context, set func(string)) {
 
 func isLoopbackOrLocalIP(ipStr string) bool {
 	trimmed := strings.TrimSpace(ipStr)
-	if trimmed == "" || trimmed == "127.0.0.1" || trimmed == "::1" || trimmed == "localhost" {
+	if trimmed == "" {
+		// An unknown client IP must never be treated as local: it would bypass
+		// both remote-management gating and the failed-attempt ban.
+		return false
+	}
+	if trimmed == "127.0.0.1" || trimmed == "::1" || strings.EqualFold(trimmed, "localhost") {
 		return true
 	}
 	ip := net.ParseIP(trimmed)

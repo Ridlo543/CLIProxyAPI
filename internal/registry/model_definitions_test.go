@@ -224,7 +224,10 @@ func TestStaticCatalogIncludesReconciledEntries(t *testing.T) {
 	if len(antigravity) < 10 {
 		t.Fatalf("antigravity count = %d, want >= 10", len(antigravity))
 	}
-	for _, id := range []string{"claude-opus-4-6-thinking", "gemini-3.6-flash-high", "gemini-3.7-flash-high", "gemini-pro-agent", "gpt-oss-120b-medium"} {
+	// gemini-3.6-flash-high, gemini-3.7-flash-high, and gemini-pro-agent were
+	// retired from the catalog; the surviving reconciled entries are asserted
+	// instead so a genuine catalog regression still fails this test.
+	for _, id := range []string{"claude-opus-4-6-thinking", "gemini-3.6-flash-tiered", "gemini-3.7-flash-tiered", "gemini-3.8-flash-high", "gpt-oss-120b-medium"} {
 		info := LookupStaticModelInfo(id)
 		if info == nil {
 			t.Fatalf("antigravity entry %q not found in static catalog", id)

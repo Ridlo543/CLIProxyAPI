@@ -8,9 +8,11 @@ package combos
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/tidwall/gjson"
@@ -41,6 +43,32 @@ func SyncFromConfig(cfg *config.Config) {
 	snapshot = list
 	capacityAdapter = adapter.Clone()
 	mu.Unlock()
+
+	// Providers that opted out of cooling keep their legacy always-try behaviour.
+	policy := DefaultPolicy()
+	policy.Disabled = cfg.DisableCooling
+	var fp strings.Builder
+	if cfg.DisableCooling {
+		fp.WriteString("global-disable;")
+	}
+	for _, compat := range cfg.OpenAICompatibility {
+		if compat.DisableCooling != nil && *compat.DisableCooling {
+			if policy.DisabledProviders == nil {
+				policy.DisabledProviders = map[string]struct{}{}
+			}
+			name := strings.ToLower(strings.TrimSpace(compat.Name))
+			policy.DisabledProviders[name] = struct{}{}
+			fp.WriteString("off:" + name + ";")
+		}
+	}
+	for _, c := range list {
+		fp.WriteString(strings.ToLower(c.Name))
+		for _, m := range c.Models {
+			fp.WriteString("|" + MemberKey(m.Provider, m.Model))
+		}
+		fp.WriteString(";")
+	}
+	SyncHealthPolicy(policy, fp.String())
 }
 
 func SnapshotCapacityAdapter() config.CapacityAdapterConfig {
@@ -215,10 +243,33 @@ func Order(c config.ComboConfig) []config.ComboModelRef {
 	if len(members) < 2 || c.Strategy != config.ComboStrategyRoundRobin {
 		return members
 	}
+	sticky := c.Sticky
+	if sticky <= 0 {
+		sticky = 1
+	}
 	key := strings.ToLower(c.Name)
-	rawIdx, _ := rrIndex.LoadOrStore(key, new(atomic.Uint64))
-	head := int(rawIdx.(*atomic.Uint64).Add(1)-1) % len(members)
-	return append(append([]config.ComboModelRef(nil), members[head:]...), members[:head]...)
+	rawState, _ := rrIndex.LoadOrStore(key, &rotationState{})
+	state := rawState.(*rotationState)
+
+	state.mu.Lock()
+	head := state.index % len(members)
+	rotated := append(append([]config.ComboModelRef(nil), members[head:]...), members[:head]...)
+	state.used++
+	if state.used >= sticky {
+		state.index = (head + 1) % len(members)
+		state.used = 0
+	}
+	state.mu.Unlock()
+	return rotated
+}
+
+// rotationState is the per-combo round-robin cursor. Sticky counts consecutive
+// requests served by one member before the cursor advances, which keeps
+// provider-side prefix caches warm.
+type rotationState struct {
+	mu    sync.Mutex
+	index int
+	used  int
 }
 
 // ShouldFallbackStatus mirrors AinyRouter's accountFallback rules: transient,
@@ -242,39 +293,217 @@ func ShouldFallbackStatus(status int) bool {
 	}
 }
 
+// contextExceededMarkers identify upstream rejections caused by a prompt that is
+// larger than the member's context window. They must fall through to a member
+// with a larger window instead of being returned to the client.
+var contextExceededMarkers = []string{
+	"context_length_exceeded",
+	"maximum context length",
+	"context length exceeded",
+	"exceeds the maximum",
+	"prompt is too long",
+	"input is too long",
+	"too many tokens",
+	"max_tokens_exceeded",
+}
+
+var verificationMarkers = []string{
+	"verify your account",
+	"verification required",
+	"verification_required",
+	"account verification",
+}
+
+var modelMissingMarkers = []string{
+	"model_not_found",
+	"model not found",
+	"invalid model",
+	"unknown model",
+	"does not exist",
+	"not supported",
+	"unsupported model",
+}
+
+// IsContextExceeded reports whether the upstream rejected the request because it
+// did not fit the member's context window.
+func IsContextExceeded(status int, body []byte) bool {
+	if status != http.StatusBadRequest && status != http.StatusRequestEntityTooLarge && status != http.StatusUnprocessableEntity {
+		return false
+	}
+	lower := strings.ToLower(string(body))
+	for _, marker := range contextExceededMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsVerificationRequired reports whether the upstream asked the account owner to
+// verify the account. These recover on the order of hours, never seconds.
+func IsVerificationRequired(status int, body []byte) bool {
+	if status < http.StatusBadRequest {
+		return false
+	}
+	lower := strings.ToLower(string(body))
+	for _, marker := range verificationMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsModelMissing reports whether the member's model is unknown to the upstream.
+func IsModelMissing(status int, body []byte) bool {
+	if status != http.StatusNotFound && status != http.StatusBadRequest {
+		return false
+	}
+	lower := strings.ToLower(string(body))
+	for _, marker := range modelMissingMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsPoisonRequest reports a client-side fault that no other member can fix:
+// retrying it only multiplies latency and consumes quota. Poison requests are
+// never cooled and never fall through.
+func IsPoisonRequest(status int, body []byte) bool {
+	if status != http.StatusBadRequest && status != http.StatusUnprocessableEntity {
+		return false
+	}
+	if IsContextExceeded(status, body) {
+		return false // another member with a bigger window may accept it
+	}
+	return !ShouldFallback(status, body)
+}
+
 // ShouldFallback reports whether a failure (status code + response body)
 // warrants trying the next candidate in a combo.
 func ShouldFallback(status int, body []byte) bool {
 	if ShouldFallbackStatus(status) {
 		return true
 	}
+	if IsContextExceeded(status, body) {
+		return true
+	}
+	if IsModelMissing(status, body) {
+		return true
+	}
 	if status == http.StatusBadRequest || status == http.StatusNotFound || status == http.StatusUnprocessableEntity {
 		if len(body) > 0 {
+			// Match credential/quota phrases, not bare words: "rate" also matches
+			// "temperature" and "token" matches "max_tokens", which turned genuine
+			// client mistakes into needless member attempts.
 			lower := strings.ToLower(string(body))
-			if strings.Contains(lower, "not supported") ||
-				strings.Contains(lower, "unsupported") ||
-				strings.Contains(lower, "does not exist") ||
-				strings.Contains(lower, "not found") ||
-				strings.Contains(lower, "not available") ||
-				strings.Contains(lower, "invalid model") ||
-				strings.Contains(lower, "unknown model") ||
-				strings.Contains(lower, "model_not_found") ||
-				strings.Contains(lower, "quota") ||
-				strings.Contains(lower, "capacity") ||
-				strings.Contains(lower, "no_biscuit") ||
-				strings.Contains(lower, "biscuit") ||
-				strings.Contains(lower, "token") ||
-				strings.Contains(lower, "session") ||
-				strings.Contains(lower, "credential") ||
-				strings.Contains(lower, "overloaded") ||
-				strings.Contains(lower, "rate") {
-				return true
+			for _, marker := range fallbackBodyMarkers {
+				if strings.Contains(lower, marker) {
+					return true
+				}
 			}
 		}
 	}
 	return false
 }
 
+// fallbackBodyMarkers are credential/quota/session signals that make a 400/404/422
+// worth retrying on another member.
+var fallbackBodyMarkers = []string{
+	"quota",
+	"capacity",
+	"no_biscuit",
+	"biscuit",
+	"overloaded",
+	"rate limit",
+	"rate_limit",
+	"ratelimit",
+	"rate-limit",
+	"too many requests",
+	"invalid token",
+	"invalid api key",
+	"session expired",
+	"token expired",
+	"token limit",
+	"credential",
+	"unauthorized",
+}
+
+// ExtractRetryAfter reads the retry hint an upstream sent with a failure.
+// It understands the Retry-After header, "retry-after-ms"/"retry_after" JSON
+// fields, and Gemini-style RetryInfo details. Unparseable hints yield zero.
+func ExtractRetryAfter(status int, header string, body []byte) time.Duration {
+	if status < http.StatusBadRequest {
+		return 0
+	}
+	if d := parseRetryAfterHeader(header); d > 0 {
+		return d
+	}
+	if len(body) == 0 {
+		return 0
+	}
+	for _, field := range []string{"retry-after-ms", "retry_after_ms", "retry-after", "retry_after"} {
+		if v := gjson.GetBytes(body, field); v.Exists() {
+			if d := retryAfterFromValue(v.String(), strings.HasSuffix(field, "-ms") || strings.HasSuffix(field, "_ms")); d > 0 {
+				return d
+			}
+		}
+	}
+	// Nested shapes: {"error":{"retry_after":...}} and Gemini RetryInfo.
+	for _, field := range []string{"error.retry-after-ms", "error.retry-after", "error.details"} {
+		if v := gjson.GetBytes(body, field); v.Exists() {
+			if field == "error.details" && v.IsArray() {
+				for _, item := range v.Array() {
+					if strings.Contains(strings.ToLower(item.Get("type").String()), "retryinfo") {
+						if d := parseRetryAfterHeader(item.Get("retryDelay").String()); d > 0 {
+							return d
+						}
+					}
+				}
+				continue
+			}
+			if d := retryAfterFromValue(v.String(), strings.Contains(field, "ms")); d > 0 {
+				return d
+			}
+		}
+	}
+	return 0
+}
+
+func retryAfterFromValue(raw string, milliseconds bool) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	if f, err := strconv.ParseFloat(raw, 64); err == nil {
+		if milliseconds || f > 3600 {
+			return time.Duration(f) * time.Millisecond
+		}
+		return time.Duration(f * float64(time.Second))
+	}
+	return parseRetryAfterHeader(raw)
+}
+
+func parseRetryAfterHeader(raw string) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	if f, err := strconv.ParseFloat(raw, 64); err == nil {
+		if f <= 0 {
+			return 0
+		}
+		return time.Duration(f * float64(time.Second))
+	}
+	if when, err := http.ParseTime(raw); err == nil {
+		if d := time.Until(when); d > 0 {
+			return d
+		}
+	}
+	return 0
+}
 
 // ModelID renders a member reference in "provider/model" form for logs.
 func ModelID(m config.ComboModelRef) string { return m.Provider + "/" + m.Model }

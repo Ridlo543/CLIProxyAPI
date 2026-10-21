@@ -59,7 +59,11 @@ func TestAntigravityDynamicRegistrationLifecycle(t *testing.T) {
 			return
 		}
 		if len(models) != 2 {
-			t.Fatalf("expected alias and prefixed alias, got %v", models)
+			ids := make([]string, 0, len(models))
+			for _, m := range models {
+				ids = append(ids, m.ID)
+			}
+			t.Fatalf("expected alias and prefixed alias, got %v", ids)
 		}
 		for _, m := range models {
 			if m.ID != "my-model" && m.ID != "tenant/my-model" {

@@ -39,6 +39,10 @@ type ComboConfig struct {
 	ContextLength       int             `yaml:"context_length,omitempty" json:"context_length,omitempty"`
 	MaxTokens           int             `yaml:"max_tokens,omitempty" json:"max_tokens,omitempty"`
 	MaxCompletionTokens int             `yaml:"max_completion_tokens,omitempty" json:"max_completion_tokens,omitempty"`
+	// Sticky is the number of consecutive requests the round-robin strategy keeps
+	// on the same member before rotating. 1 (the default) rotates every request;
+	// higher values preserve provider-side prefix/KV caches.
+	Sticky int `yaml:"sticky,omitempty" json:"sticky,omitempty"`
 }
 
 // Normalize trims whitespace and lowercases the strategy.

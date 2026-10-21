@@ -4,9 +4,11 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/combos"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 )
 
@@ -157,4 +159,33 @@ func (h *Handler) UpdateCapacityAdapter(c *gin.Context) {
 	if !h.persistCombos(c, http.StatusOK, saved) {
 		return
 	}
+}
+
+// ListComboHealth handles GET /v0/management/combo-health.
+// It reports the per-member circuit breaker state so the panel can show which
+// combo member is cooling down and when it will be probed again.
+func (h *Handler) ListComboHealth(c *gin.Context) {
+	now := time.Now()
+	members := combos.SnapshotHealth(now)
+	if members == nil {
+		members = []combos.MemberHealth{}
+	}
+	policy := combos.HealthPolicy()
+	c.JSON(http.StatusOK, gin.H{
+		"members":               members,
+		"retry_after_cap":       policy.RetryAfterCap.String(),
+		"request_budget":        policy.RequestBudget.String(),
+		"transient_cooldown":    policy.TransientCooldown.String(),
+		"auth_cooldown":         policy.AuthCooldown.String(),
+		"verification_cooldown": policy.VerificationCooldown.String(),
+	})
+}
+
+// ResetComboHealth handles DELETE /v0/management/combo-health.
+// Query params provider+model reset one member; omitting both resets all.
+func (h *Handler) ResetComboHealth(c *gin.Context) {
+	provider := strings.TrimSpace(c.Query("provider"))
+	model := strings.TrimSpace(c.Query("model"))
+	combos.ResetHealth(provider, model)
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }

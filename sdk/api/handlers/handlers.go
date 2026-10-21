@@ -302,8 +302,26 @@ func requestExecutionMetadata(ctx context.Context) map[string]any {
 	return meta
 }
 
+// headerValue reads a header case-insensitively. net/http canonicalizes
+// server-parsed headers, but headers built in-process (tests, internal callers)
+// may use a non-canonical map key.
+func headerValue(h http.Header, name string) string {
+	if h == nil {
+		return ""
+	}
+	if value := h.Get(name); value != "" {
+		return value
+	}
+	for key, values := range h {
+		if len(values) > 0 && strings.EqualFold(key, name) {
+			return values[0]
+		}
+	}
+	return ""
+}
+
 func contextCompressionOptOut(ctx context.Context, explicit http.Header) bool {
-	value := explicit.Get(contextcompression.OptOutHeader)
+	value := headerValue(explicit, contextcompression.OptOutHeader)
 	if value == "" && ctx != nil {
 		if ginCtx, ok := ctx.Value("gin").(*gin.Context); ok && ginCtx != nil {
 			value = ginCtx.GetHeader(contextcompression.OptOutHeader)

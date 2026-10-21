@@ -103,7 +103,11 @@ func TestAntigravityModelRegistration_AsyncNonBlocking(t *testing.T) {
 
 	models := GlobalModelRegistry().GetModelsForClient(auth.ID)
 	if len(models) != 0 {
-		t.Fatal("unverified models registered before probe completed")
+		ids := make([]string, 0, len(models))
+		for _, m := range models {
+			ids = append(ids, m.ID)
+		}
+		t.Fatalf("unverified models registered before probe completed: %v", ids)
 	}
 }
 

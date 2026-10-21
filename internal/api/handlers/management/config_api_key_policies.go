@@ -147,7 +147,7 @@ func (h *Handler) ImportOpenAICompatModels(c *gin.Context) {
 	// so a keyless/free listing never pulls in paid models by accident.
 	freeOnly := c.Query("free_only") == "true"
 	prune := c.Query("prune") != "false"
-	finalModels, added, pruned, skipped := syncDiscoveredModels(entry.Models, body, freeOnly, prune)
+	finalModels, added, pruned, skipped := syncDiscoveredModels(name, entry.Models, body, freeOnly, prune)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	current := h.cfg.OpenAICompatibility[targetIndex]
@@ -339,7 +339,51 @@ func parseDiscoveredModelIDs(payload []byte) []string {
 	return ids
 }
 
-func syncDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []byte, freeOnly, prune bool) ([]config.OpenAICompatibilityModel, []string, []string, []string) {
+func defaultCatalogContextLength(id string) int {
+	lower := strings.ToLower(strings.TrimSpace(id))
+	switch {
+	case strings.Contains(lower, "deepseek"):
+		return 1000000 // 1M
+	case strings.Contains(lower, "mimo"):
+		return 1000000 // 1M
+	case strings.Contains(lower, "beam"):
+		return 1000000 // 1M
+	case strings.Contains(lower, "space-bunny"):
+		return 1000000 // 1M
+	case strings.Contains(lower, "longcat"):
+		return 1000000 // 1M
+	case strings.Contains(lower, "big-pickle"):
+		return 1000000 // 1M
+	case strings.Contains(lower, "grok"):
+		return 1000000 // 1M
+	case strings.Contains(lower, "step-5") || strings.Contains(lower, "step-3.7"):
+		return 524288 // 512k
+	case strings.Contains(lower, "glm-5"):
+		return 524288 // 512k
+	case strings.Contains(lower, "jev"):
+		return 16384 // 16k
+	case strings.Contains(lower, "claude"):
+		return 200000 // 200k
+	default:
+		return 0
+	}
+}
+
+func isCustomOrProtectedModel(m config.OpenAICompatibilityModel) bool {
+	nameLower := strings.ToLower(strings.TrimSpace(m.Name))
+	aliasLower := strings.ToLower(strings.TrimSpace(m.Alias))
+	if aliasLower != "" {
+		return true
+	}
+	for _, marker := range []string{"-jb", "_jb", "jailbreak", "unrestricted", "custom"} {
+		if strings.Contains(nameLower, marker) || strings.Contains(aliasLower, marker) {
+			return true
+		}
+	}
+	return nameLower == "jb" || strings.HasPrefix(nameLower, "jb-") || strings.HasPrefix(nameLower, "jb_")
+}
+
+func syncDiscoveredModels(providerName string, existing []config.OpenAICompatibilityModel, payload []byte, freeOnly, prune bool) ([]config.OpenAICompatibilityModel, []string, []string, []string) {
 	discovered := parseDiscoveredModelEntries(payload)
 	validUpstream := make(map[string]discoveredModelEntry, len(discovered))
 	for _, entry := range discovered {
@@ -355,6 +399,7 @@ func syncDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []
 
 	for _, m := range existing {
 		nameKey := strings.ToLower(strings.TrimSpace(m.Name))
+		aliasKey := strings.ToLower(strings.TrimSpace(m.Alias))
 		if upEntry, ok := validUpstream[nameKey]; ok {
 			if upEntry.ContextLength > 0 {
 				m.MaxContextLength = upEntry.ContextLength
@@ -369,18 +414,31 @@ func syncDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []
 				m.OutputModalities = upEntry.OutputModalities
 			}
 		}
+		if m.MaxContextLength <= 0 {
+			m.MaxContextLength = defaultCatalogContextLength(m.Name)
+			if m.MaxContextLength <= 0 && aliasKey != "" {
+				m.MaxContextLength = defaultCatalogContextLength(m.Alias)
+			}
+		}
 		if isDiscoveredImageModel(m.Name) && !m.Image {
 			m.Image = true
 		}
 		if isDiscoveredVisionModel(m.Name) && len(m.InputModalities) == 0 {
 			m.InputModalities = []string{"text", "image"}
 		}
+
+		isCustom := isCustomOrProtectedModel(m)
+		_, inUpstream := validUpstream[nameKey]
+		_, aliasInUpstream := validUpstream[aliasKey]
+
 		if prune {
-			if _, exists := validUpstream[nameKey]; exists {
+			if inUpstream || aliasInUpstream || isCustom {
 				kept = append(kept, m)
-				known[nameKey] = struct{}{}
-				if trimmed := strings.TrimSpace(m.Alias); trimmed != "" {
-					known[strings.ToLower(trimmed)] = struct{}{}
+				if nameKey != "" {
+					known[nameKey] = struct{}{}
+				}
+				if aliasKey != "" {
+					known[aliasKey] = struct{}{}
 				}
 			} else {
 				pruned = append(pruned, m.Name)
@@ -390,8 +448,8 @@ func syncDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []
 			if nameKey != "" {
 				known[nameKey] = struct{}{}
 			}
-			if trimmed := strings.TrimSpace(m.Alias); trimmed != "" {
-				known[strings.ToLower(trimmed)] = struct{}{}
+			if aliasKey != "" {
+				known[aliasKey] = struct{}{}
 			}
 		}
 	}
@@ -414,9 +472,13 @@ func syncDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []
 			continue
 		}
 		seenNew[key] = struct{}{}
+		ctxLen := entry.ContextLength
+		if ctxLen <= 0 {
+			ctxLen = defaultCatalogContextLength(entry.ID)
+		}
 		newModel := config.OpenAICompatibilityModel{
 			Name:             entry.ID,
-			MaxContextLength: entry.ContextLength,
+			MaxContextLength: ctxLen,
 			Image:            entry.IsImage,
 			InputModalities:  entry.InputModalities,
 			OutputModalities: entry.OutputModalities,
@@ -430,12 +492,16 @@ func syncDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []
 		added = append(added, newModel)
 		addedNames = append(addedNames, entry.ID)
 	}
+	if strings.Contains(strings.ToLower(providerName), "-jb") || strings.Contains(strings.ToLower(providerName), "jailbreak") {
+		added = nil
+		addedNames = nil
+	}
 	finalList := append(kept, added...)
 	return finalList, addedNames, pruned, skipped
 }
 
 func mergeDiscoveredModels(existing []config.OpenAICompatibilityModel, payload []byte, freeOnly bool) ([]config.OpenAICompatibilityModel, []string) {
-	finalList, addedNames, _, skipped := syncDiscoveredModels(existing, payload, freeOnly, false)
+	finalList, addedNames, _, skipped := syncDiscoveredModels("", existing, payload, freeOnly, false)
 	_ = finalList
 	var added []config.OpenAICompatibilityModel
 	discoveredMap := make(map[string]discoveredModelEntry)

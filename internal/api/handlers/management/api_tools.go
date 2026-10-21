@@ -846,6 +846,44 @@ func (h *Handler) authByIndex(authIndex string) *coreauth.Auth {
 			return auth
 		}
 	}
+	// Fallback lookup: match by exact auth.ID, or by Provider name, or by OpenAI-compatibility prefix
+	lowerTarget := strings.ToLower(authIndex)
+	for _, auth := range auths {
+		if auth == nil {
+			continue
+		}
+		if strings.EqualFold(auth.ID, authIndex) || strings.EqualFold(auth.FileName, authIndex) || strings.EqualFold(auth.Label, authIndex) {
+			return auth
+		}
+		cleanProv := strings.TrimPrefix(strings.TrimPrefix(strings.ToLower(auth.Provider), "openai-compatible-"), "openai-compatibility:")
+		if cleanProv == lowerTarget || strings.EqualFold(auth.Provider, authIndex) {
+			return auth
+		}
+		if strings.HasPrefix(strings.ToLower(auth.ID), "openai-compatibility:"+lowerTarget+":") {
+			return auth
+		}
+	}
+	return nil
+}
+
+// authByIndexStrict resolves an auth by its canonical index only.
+// Destructive endpoints (quota reset) must not accept a file name, auth ID,
+// label, or provider name: those may be ambiguous and would make an operation
+// hit an account the caller did not name.
+func (h *Handler) authByIndexStrict(authIndex string) *coreauth.Auth {
+	authIndex = strings.TrimSpace(authIndex)
+	if authIndex == "" || h == nil || h.authManager == nil {
+		return nil
+	}
+	for _, auth := range h.authManager.List() {
+		if auth == nil {
+			continue
+		}
+		auth.EnsureIndex()
+		if auth.Index == authIndex {
+			return auth
+		}
+	}
 	return nil
 }
 

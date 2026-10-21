@@ -186,6 +186,9 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.POST("/combos", s.mgmt.CreateCombo)
 		mgmt.PUT("/combos/:name", s.mgmt.UpdateCombo)
 		mgmt.DELETE("/combos/:name", s.mgmt.DeleteCombo)
+		// Static path (not /combos/health) so it cannot collide with /combos/:name.
+		mgmt.GET("/combo-health", s.mgmt.ListComboHealth)
+		mgmt.DELETE("/combo-health", s.mgmt.ResetComboHealth)
 		mgmt.GET("/capacity-adapter", s.mgmt.GetCapacityAdapter)
 		mgmt.PUT("/capacity-adapter", s.mgmt.UpdateCapacityAdapter)
 		mgmt.GET("/oauth-model-alias/:channel", s.mgmt.GetOAuthModelAliasChannel)

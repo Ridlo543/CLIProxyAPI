@@ -214,3 +214,90 @@ func TestImportModelsSyncsContextLength(t *testing.T) {
 		t.Fatalf("expected MaxContextLength=524288, got %d", m.MaxContextLength)
 	}
 }
+
+func TestImportModels_PreservesCustomJailbreakModelsAndExistingContext(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Upstream OpenCode returns bare models without context_length and without the custom jb model
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+			{"id": "deepseek-v4.1-flash-free"},
+			{"id": "new-mimo-flash"},
+		}})
+	}))
+	defer upstream.Close()
+
+	initial := "openai-compatibility:\n  - name: opencode-jb\n    base-url: \"" + upstream.URL + "\"\n    models:\n      - name: deepseek-v4.1-flash-free\n        alias: deepseek-v4.1-flash-jb\n        max-context-length: 1000000\n      - name: custom-jb-model\n        max-context-length: 500000\n"
+	h := policiesTestHandler(t, initial)
+
+	resp := performJSON(h, http.MethodPost, "/openai-compatibility/opencode-jb/import-models", nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		Added   []string `json:"added"`
+		Pruned  []string `json:"pruned"`
+		Skipped []string `json:"skipped"`
+	}
+	_ = json.Unmarshal(resp.Body.Bytes(), &payload)
+
+	// custom-jb-model and deepseek-v4.1-flash-free (with alias) must NOT be pruned!
+	if len(payload.Pruned) > 0 {
+		t.Fatalf("expected no models pruned, got pruned: %v", payload.Pruned)
+	}
+
+	// Verify in-memory config preserved context length and models
+	models := h.cfg.OpenAICompatibility[0].Models
+	modelMap := make(map[string]config.OpenAICompatibilityModel)
+	for _, mod := range models {
+		modelMap[mod.Name] = mod
+	}
+
+	jbModel, ok := modelMap["deepseek-v4.1-flash-free"]
+	if !ok {
+		t.Fatal("deepseek-v4.1-flash-free was removed!")
+	}
+	if jbModel.Alias != "deepseek-v4.1-flash-jb" {
+		t.Fatalf("alias was lost: %q", jbModel.Alias)
+	}
+	if jbModel.MaxContextLength != 1000000 {
+		t.Fatalf("context length was overwritten: %d", jbModel.MaxContextLength)
+	}
+
+	customModel, ok := modelMap["custom-jb-model"]
+	if !ok {
+		t.Fatal("custom-jb-model was removed by prune!")
+	}
+	if customModel.MaxContextLength != 500000 {
+		t.Fatalf("custom model context length changed: %d", customModel.MaxContextLength)
+	}
+
+	if _, ok := modelMap["new-mimo-flash"]; ok {
+		t.Fatal("new-mimo-flash should NOT be added to dedicated -jb provider!")
+	}
+}
+
+func TestImportModels_UpstreamContextLengthAlwaysOverrides(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Upstream officially upgraded context to 2M (2097152)
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+			{
+				"id":             "deepseek-v4.1-flash-free",
+				"context_length": 2097152,
+			},
+		}})
+	}))
+	defer upstream.Close()
+
+	initial := "openai-compatibility:\n  - name: opencode-free\n    base-url: \"" + upstream.URL + "\"\n    models:\n      - name: deepseek-v4.1-flash-free\n        max-context-length: 1000000\n"
+	h := policiesTestHandler(t, initial)
+
+	resp := performJSON(h, http.MethodPost, "/openai-compatibility/opencode-free/import-models", nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	m := h.cfg.OpenAICompatibility[0].Models[0]
+	if m.MaxContextLength != 2097152 {
+		t.Fatalf("expected upstream context length 2097152 to override existing 1000000, got %d", m.MaxContextLength)
+	}
+}

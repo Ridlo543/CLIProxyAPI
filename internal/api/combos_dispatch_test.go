@@ -3,9 +3,12 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -541,5 +544,263 @@ func TestCombosContextAwareGuard_BestEffortAndSkip(t *testing.T) {
 		if len(attemptedModels) == 0 {
 			t.Fatalf("expected at least one member attempted as best-effort, got none")
 		}
+	}
+}
+
+func newComboTestServer(t *testing.T, combo config.ComboConfig, cfg config.Config, handler gin.HandlerFunc) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	cfg.Combos = []config.ComboConfig{combo}
+	combos.SyncFromConfig(&cfg)
+	t.Cleanup(func() { combos.SyncFromConfig(&config.Config{}) })
+
+	registry.GetGlobalRegistry().RegisterClient("mock-combo", "antigravity", []*registry.ModelInfo{
+		{ID: "member-a"}, {ID: "member-b"}, {ID: "member-c"},
+	})
+	t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient("mock-combo") })
+
+	r := gin.New()
+	s := &Server{}
+	r.POST("/v1/chat/completions", s.combosChatWrapper(handler))
+	return r
+}
+
+func comboRequest(r *gin.Engine, name string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	body := `{"model":"` + name + `","messages":[{"role":"user","content":"hello"}]}`
+	r.ServeHTTP(w, httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body)))
+	return w
+}
+
+func TestComboBreaker_SkipsFailedMemberOnNextRequest(t *testing.T) {
+	calls := map[string]int{}
+	combo := config.ComboConfig{
+		Name:     "breaker-combo",
+		Strategy: config.ComboStrategyFallback,
+		Models: []config.ComboModelRef{
+			{Provider: "antigravity", Model: "member-a"},
+			{Provider: "antigravity", Model: "member-b"},
+		},
+	}
+	handler := func(c *gin.Context) {
+		var req struct {
+			Model string `json:"model"`
+		}
+		_ = c.ShouldBindJSON(&req)
+		calls[req.Model]++
+		if req.Model == "member-a" {
+			c.JSON(503, gin.H{"error": gin.H{"message": "overloaded"}})
+			return
+		}
+		c.JSON(200, gin.H{"choices": []gin.H{{"message": gin.H{"content": "ok"}}}})
+	}
+	r := newComboTestServer(t, combo, config.Config{}, handler)
+
+	if w := comboRequest(r, "breaker-combo"); w.Code != 200 {
+		t.Fatalf("first request status = %d: %s", w.Code, w.Body.String())
+	}
+	if calls["member-a"] != 1 || calls["member-b"] != 1 {
+		t.Fatalf("first request calls = %v", calls)
+	}
+
+	// Second request must skip the cooling member entirely and answer directly.
+	if w := comboRequest(r, "breaker-combo"); w.Code != 200 {
+		t.Fatalf("second request status = %d: %s", w.Code, w.Body.String())
+	}
+	if calls["member-a"] != 1 {
+		t.Fatalf("cooling member was retried: calls=%v", calls)
+	}
+	if calls["member-b"] != 2 {
+		t.Fatalf("healthy member not used: calls=%v", calls)
+	}
+}
+
+func TestComboBreaker_AllCoolingStillProbesSoonestMember(t *testing.T) {
+	calls := 0
+	combo := config.ComboConfig{
+		Name:     "all-cooling",
+		Strategy: config.ComboStrategyFallback,
+		Models: []config.ComboModelRef{
+			{Provider: "antigravity", Model: "member-a"},
+			{Provider: "antigravity", Model: "member-b"},
+		},
+	}
+	handler := func(c *gin.Context) {
+		calls++
+		c.JSON(503, gin.H{"error": gin.H{"message": "overloaded"}})
+	}
+	r := newComboTestServer(t, combo, config.Config{}, handler)
+
+	if w := comboRequest(r, "all-cooling"); w.Code == 200 {
+		t.Fatal("expected failure when every member is down")
+	}
+	firstRound := calls
+	if firstRound != 2 {
+		t.Fatalf("first request attempts = %d, want 2", firstRound)
+	}
+
+	// Both members are cooling now. The best-effort probe must still reach one
+	// member instead of returning "no attemptable members", and it must never
+	// loop: exactly one extra attempt.
+	if w := comboRequest(r, "all-cooling"); w.Code == 200 {
+		t.Fatal("expected failure while members are still down")
+	}
+	if calls != firstRound+1 {
+		t.Fatalf("probe attempts = %d, want exactly 1", calls-firstRound)
+	}
+}
+
+func TestComboFailure_ReturnsShortestRetryAfterAndClampsIt(t *testing.T) {
+	combo := config.ComboConfig{
+		Name:     "retry-after",
+		Strategy: config.ComboStrategyFallback,
+		Models: []config.ComboModelRef{
+			{Provider: "antigravity", Model: "member-a"},
+			{Provider: "antigravity", Model: "member-b"},
+		},
+	}
+	handler := func(c *gin.Context) {
+		var req struct {
+			Model string `json:"model"`
+		}
+		_ = c.ShouldBindJSON(&req)
+		if req.Model == "member-a" {
+			c.JSON(403, gin.H{"error": gin.H{"message": "Verify your account", "retry-after-ms": 86337000}})
+			return
+		}
+		c.Header("Retry-After", "120")
+		c.JSON(502, gin.H{"error": gin.H{"message": "bad gateway"}})
+	}
+	r := newComboTestServer(t, combo, config.Config{}, handler)
+	policy := combos.DefaultPolicy()
+	policy.RetryAfterCap = 30 * time.Second
+	combos.ConfigureHealth(policy)
+
+	w := comboRequest(r, "retry-after")
+	if w.Code != 502 {
+		t.Fatalf("status = %d, want 502 (shortest wait wins): %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "86337000") {
+		t.Fatalf("multi-hour retry hint leaked to the client: %s", w.Body.String())
+	}
+	if got := w.Header().Get("Retry-After"); got != "" && got != "30" {
+		t.Fatalf("Retry-After = %q, want empty or capped 30", got)
+	}
+}
+
+func TestComboPoisonRequest_DoesNotFallThrough(t *testing.T) {
+	calls := 0
+	combo := config.ComboConfig{
+		Name:     "poison",
+		Strategy: config.ComboStrategyFallback,
+		Models: []config.ComboModelRef{
+			{Provider: "antigravity", Model: "member-a"},
+			{Provider: "antigravity", Model: "member-b"},
+		},
+	}
+	handler := func(c *gin.Context) {
+		calls++
+		c.JSON(400, gin.H{"error": gin.H{"message": "tools.7.custom.input_schema: JSON schema is invalid"}})
+	}
+	r := newComboTestServer(t, combo, config.Config{}, handler)
+
+	if w := comboRequest(r, "poison"); w.Code != 400 {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	if calls != 1 {
+		t.Fatalf("poison request attempted %d members, want 1", calls)
+	}
+}
+
+func TestComboRequestBudget_StopsStartingNewMembers(t *testing.T) {
+	calls := 0
+	combo := config.ComboConfig{
+		Name:     "budget",
+		Strategy: config.ComboStrategyFallback,
+		Models: []config.ComboModelRef{
+			{Provider: "antigravity", Model: "member-a"},
+			{Provider: "antigravity", Model: "member-b"},
+			{Provider: "antigravity", Model: "member-c"},
+		},
+	}
+	handler := func(c *gin.Context) {
+		calls++
+		time.Sleep(40 * time.Millisecond)
+		c.JSON(503, gin.H{"error": gin.H{"message": "overloaded"}})
+	}
+	r := newComboTestServer(t, combo, config.Config{}, handler)
+	policy := combos.DefaultPolicy()
+	policy.RequestBudget = 25 * time.Millisecond
+	combos.ConfigureHealth(policy)
+
+	if w := comboRequest(r, "budget"); w.Code == 200 {
+		t.Fatal("expected failure")
+	}
+	if calls != 1 {
+		t.Fatalf("attempts = %d, want 1 (budget exhausted after the first member)", calls)
+	}
+}
+
+func TestReorderVisionFirst_IsStableAndDropsNothing(t *testing.T) {
+	chain := []config.ComboModelRef{
+		{Provider: "custom", Model: "whisper-1"},
+		{Provider: "antigravity", Model: "gemini-3.8-flash-high"},
+		{Provider: "codex", Model: "gpt-6-luna"},
+	}
+	ordered, hasVision := reorderVisionFirst(chain)
+	if !hasVision {
+		t.Fatal("expected at least one vision-capable member")
+	}
+	if len(ordered) != len(chain) {
+		t.Fatalf("lost members: %d -> %d", len(chain), len(ordered))
+	}
+	if ordered[len(ordered)-1].Model != "whisper-1" {
+		t.Fatalf("non-vision member must sort last, got %+v", ordered)
+	}
+	// Relative order inside each partition is preserved.
+	if ordered[0].Model != "gemini-3.8-flash-high" || ordered[1].Model != "gpt-6-luna" {
+		t.Fatalf("unexpected order: %+v", ordered)
+	}
+}
+
+// A member that asks for a long wait must not pin the client when another member
+// failed without any hint (which is retryable immediately).
+func TestCombosFailureSelection_PrefersRetryNowOverLongHint(t *testing.T) {
+	combo := config.ComboConfig{
+		Name:     "hint-combo",
+		Strategy: config.ComboStrategyFallback,
+		Models: []config.ComboModelRef{
+			{Provider: "antigravity", Model: "member-a"},
+			{Provider: "antigravity", Model: "member-b"},
+		},
+	}
+	handler := func(c *gin.Context) {
+		body, _ := io.ReadAll(c.Request.Body)
+		if strings.Contains(string(body), "member-a") {
+			c.Header("Retry-After", "3600")
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "rate limited"})
+			return
+		}
+		c.JSON(http.StatusBadGateway, gin.H{"error": "upstream blew up"})
+	}
+	r := newComboTestServer(t, combo, config.Config{}, handler)
+	w := comboRequest(r, "hint-combo")
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 (hintless failure wins)", w.Code)
+	}
+	if got := w.Header().Get("Retry-After"); got != "" {
+		t.Fatalf("Retry-After = %q, want empty (client may retry now)", got)
+	}
+}
+
+func TestEstimateComboPromptTokens_IgnoresBase64Media(t *testing.T) {
+	blob := strings.Repeat("A", 8000)
+	raw := []byte(`{"contents":[{"parts":[{"text":"describe this"},{"inlineData":{"mimeType":"image/png","data":"` + blob + `"}}]}],"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,` + blob + `"}}]}]}`)
+	got := estimateComboPromptTokens(raw)
+	if got > 100 {
+		t.Fatalf("estimated %d tokens for a short prompt with inline images", got)
+	}
+	if got == 0 {
+		t.Fatal("expected a non-zero estimate for the text part")
 	}
 }

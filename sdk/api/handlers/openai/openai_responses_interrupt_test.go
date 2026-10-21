@@ -372,6 +372,10 @@ func TestResponsesInterruptStopsHTTPUpstream(t *testing.T) {
 	if got := gjson.GetBytes(interrupted, "response.incomplete_details.reason").String(); got != "interrupted" {
 		t.Fatalf("interrupt reason = %q, payload %s", got, interrupted)
 	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !executor.canceled.Load() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
 	if !executor.canceled.Load() {
 		t.Fatal("http upstream was not canceled")
 	}

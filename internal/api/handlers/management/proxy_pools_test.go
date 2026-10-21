@@ -21,8 +21,8 @@ type managementPoolReporter struct {
 
 func (p managementPoolReporter) RoundTripperFor(*coreauth.Auth) http.RoundTripper { return p.rt }
 func (p managementPoolReporter) ProxyPoolStatuses() []coreauth.ProxyPoolStatus    { return p.statuses }
-func (managementPoolReporter) RecordEntryFailure(string, string) {}
-func (managementPoolReporter) RecordEntrySuccess(string, string) {}
+func (managementPoolReporter) RecordEntryFailure(string, string)                  {}
+func (managementPoolReporter) RecordEntrySuccess(string, string)                  {}
 
 type managementFailingTransport struct{}
 

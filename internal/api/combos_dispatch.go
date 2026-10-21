@@ -10,17 +10,22 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/apikeypolicy"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/clienterror"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/combos"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 )
+
 // combosChatWrapper intercepts /v1/chat/completions when the requested model
 // names a combo. Each member is attempted by rewriting ONLY the "model" field
 // of the request body and invoking the normal handler; failures fall through
@@ -34,7 +39,9 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		raw, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "could not read request body"})
+			// Preserve the status the body limit implies: an oversized chunked
+			// request must surface as 413, not as a generic 400.
+			c.JSON(clienterror.HTTPStatusFromErrorOr(err, http.StatusBadRequest), gin.H{"error": "could not read request body"})
 			return
 		}
 		_ = c.Request.Body.Close()
@@ -46,15 +53,13 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 		combo, found := combos.Find(model)
 		if found {
 			chain = combos.Order(combo)
-			// If request requires vision, prepend vision adapter models if members lack vision
+			// Vision requests get capability-ordered members: everything that can
+			// read images first (stable, no member is dropped), so the chain does
+			// not waste an attempt on a text-only member. Only when no member can
+			// see images is the adapter pool prepended.
 			if requiresVision {
-				hasVisionMember := false
-				for _, m := range chain {
-					if modelSupportsVision(m.Model) {
-						hasVisionMember = true
-						break
-					}
-				}
+				ordered, hasVisionMember := reorderVisionFirst(chain)
+				chain = ordered
 				if !hasVisionMember {
 					visionPool := combos.GetVisionAdapterModels()
 					if len(visionPool) > 0 {
@@ -78,42 +83,46 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 			return
 		}
 		originalWriter := c.Writer
-		var lastWriter *combosResponseWriter
 
-		// Precompute maximum context length among candidate members
+		// Precompute the largest effective context window in the chain. The
+		// registry carries the config-resolved value for openai-compatibility
+		// members, which the static catalog knows nothing about.
 		maxContextInChain := 0
 		for _, m := range chain {
-			if info := registry.LookupStaticModelInfo(m.Model); info != nil && info.ContextLength > maxContextInChain {
-				maxContextInChain = info.ContextLength
+			if ctx := effectiveContextLength(m); ctx > maxContextInChain {
+				maxContextInChain = ctx
 			}
 		}
+		estimatedTokens := estimateComboPromptTokens(raw)
+		policy := combos.HealthPolicy()
+		startedAt := time.Now()
 
-		for _, member := range chain {
-			// OpenAI-compatible entries register bare model ids; routing picks
-			// the serving provider itself. Members nothing can serve are
-			// skipped so an unknown model cannot cut the chain short.
-			providers := registry.GetGlobalRegistry().GetModelProviders(member.Model)
-			if len(providers) == 0 {
+		type attemptFailure struct {
+			writer     *combosResponseWriter
+			member     config.ComboModelRef
+			status     int
+			retryAfter time.Duration
+		}
+		var failures []attemptFailure
+		attempts := 0
+		skippedCooling := 0
+
+		// attemptMember performs one member attempt and returns the held writer.
+		// A nil writer means the member was not attemptable (no serving provider
+		// or an unrewritable body).
+		attemptMember := func(member config.ComboModelRef) (*combosResponseWriter, int, []string) {
+			var providers []string
+			if member.Provider != "" {
 				providers = registry.GetGlobalRegistry().GetModelProviders(combos.ModelID(member))
 			}
 			if len(providers) == 0 {
+				providers = registry.GetGlobalRegistry().GetModelProviders(member.Model)
+			}
+			if len(providers) == 0 {
 				logrus.WithField("combo", combo.Name).Warnf("[router] ⚠️ Combo %q skipping member %s: no provider serves model %q", combo.Name, combos.ModelID(member), member.Model)
-				continue
+				return nil, 0, nil
 			}
 
-			// Context-Aware Guard: skip members whose context window cannot fit the payload,
-			// provided there is a larger member in the chain that can fit it (or if all exceed,
-			// preserve the largest tier models as best-effort so the request is not hard-dropped).
-			if info := registry.LookupStaticModelInfo(member.Model); info != nil && info.ContextLength > 0 {
-				estimatedTokens := len(raw) / 4
-				if estimatedTokens > info.ContextLength {
-					if maxContextInChain >= estimatedTokens || info.ContextLength < (maxContextInChain*9)/10 {
-						logrus.WithField("combo", combo.Name).Warnf("[router] ⏩ Combo %q skipping member %s: estimated prompt tokens (%d) exceeds member context length (%d)", combo.Name, combos.ModelID(member), estimatedTokens, info.ContextLength)
-						continue
-					}
-					logrus.WithField("combo", combo.Name).Infof("[router] ⚠️ Combo %q attempting member %s as best-effort: estimated prompt tokens (%d) exceeds member context length (%d)", combo.Name, combos.ModelID(member), estimatedTokens, info.ContextLength)
-				}
-			}
 			reqEffort := strings.TrimSpace(gjson.GetBytes(raw, "reasoning_effort").String())
 			if reqEffort == "" {
 				reqEffort = strings.TrimSpace(gjson.GetBytes(raw, "reasoning.effort").String())
@@ -122,11 +131,11 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 			if reqEffort != "" {
 				effortInfo = fmt.Sprintf(" [client_reasoning=%s]", reqEffort)
 			}
-			targetModel := member.Model
 			logrus.Infof("[router] 🔀 Combo %q (%s)%s -> routing request to %s (candidates: %v)", combo.Name, combo.Strategy, effortInfo, combos.ModelID(member), providers)
-			body, mErr := rewriteModelField(raw, targetModel)
+			body, mErr := rewriteModelField(raw, member.Model)
 			if mErr != nil {
-				continue
+				logrus.WithField("combo", combo.Name).Warnf("[router] ⚠️ Combo %q could not rewrite body for %s: %v", combo.Name, combos.ModelID(member), mErr)
+				return nil, 0, providers
 			}
 			req2 := c.Request.Clone(c.Request.Context())
 			if member.Provider != "" {
@@ -136,33 +145,171 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 			req2.ContentLength = int64(len(body))
 			c.Request = req2
 
+			// Headers live on the shared underlying writer; a stale Retry-After
+			// from the previous member must not be attributed to this one.
+			originalWriter.Header().Del("Retry-After")
+
 			w := newCombosWriter(originalWriter)
 			c.Writer = w
 			next(c)
 			c.Writer = originalWriter
+			return w, w.StatusCode(), providers
+		}
 
-			status := w.StatusCode()
+		for _, member := range chain {
+			// Context-Aware Guard: skip members whose context window cannot fit
+			// the payload, provided a larger member in the chain can fit it (or
+			// if all exceed, keep the largest tier as best-effort so the request
+			// is not hard-dropped).
+			if memberCtx := effectiveContextLength(member); memberCtx > 0 && estimatedTokens > memberCtx {
+				if maxContextInChain >= estimatedTokens || memberCtx < (maxContextInChain*9)/10 {
+					logrus.WithField("combo", combo.Name).Warnf("[router] ⏩ Combo %q skipping member %s: estimated prompt tokens (%d) exceeds member context length (%d)", combo.Name, combos.ModelID(member), estimatedTokens, memberCtx)
+					continue
+				}
+				logrus.WithField("combo", combo.Name).Infof("[router] ⚠️ Combo %q attempting member %s as best-effort: estimated prompt tokens (%d) exceeds member context length (%d)", combo.Name, combos.ModelID(member), estimatedTokens, memberCtx)
+			}
+
+			// Budget guard: never abort an attempt already in flight, but stop
+			// stacking new attempts once the request budget is spent.
+			if attempts > 0 && policy.RequestBudget > 0 && time.Since(startedAt) >= policy.RequestBudget {
+				logrus.WithField("combo", combo.Name).Warnf("[router] ⏱️ Combo %q request budget %s exhausted after %d attempt(s); not starting more members", combo.Name, policy.RequestBudget, attempts)
+				break
+			}
+
+			// Circuit breaker: an open member is skipped in microseconds instead
+			// of burning another first-token timeout.
+			allowed, remaining := combos.AllowAttempt(member.Provider, member.Model, time.Now())
+			if !allowed {
+				skippedCooling++
+				logrus.WithField("combo", combo.Name).Warnf("[router] 🧊 Combo %q skipping member %s: cooling down (%s left)", combo.Name, combos.ModelID(member), remaining.Round(time.Second))
+				continue
+			}
+
+			w, status, _ := attemptMember(member)
+			if w == nil {
+				// The member could not be attempted (no serving provider or an
+				// unrewritable body). Release the half-open reservation so it is
+				// not stuck skipping that member forever.
+				combos.RecordSuccess(member.Provider, member.Model)
+				continue
+			}
+			attempts++
+
 			if status < http.StatusBadRequest {
 				logrus.Infof("[router] ✅ Combo %q completed via %s (HTTP %d)", combo.Name, combos.ModelID(member), status)
+				combos.RecordSuccess(member.Provider, member.Model)
 				w.FlushHeld() // success: deliver whatever was streamed/buffered
 				return
 			}
-			if !combos.ShouldFallback(status, w.held.Bytes()) {
-				logrus.Warnf("[router] ❌ Combo %q client error on %s (HTTP %d): %s", combo.Name, combos.ModelID(member), status, string(w.held.Bytes()))
+			bodyBytes := w.held.Bytes()
+
+			// A client-side fault no other member can fix: return it as-is and
+			// never open the member (another request may still succeed).
+			if combos.IsPoisonRequest(status, bodyBytes) {
+				logrus.Warnf("[router] ❌ Combo %q request rejected by %s (HTTP %d, request-scoped): %s", combo.Name, combos.ModelID(member), status, string(bodyBytes))
+				combos.RecordSuccess(member.Provider, member.Model)
+				w.FlushHeld()
+				return
+			}
+			if !combos.ShouldFallback(status, bodyBytes) {
+				logrus.Warnf("[router] ❌ Combo %q client error on %s (HTTP %d): %s", combo.Name, combos.ModelID(member), status, string(bodyBytes))
 				w.FlushHeld() // definite client error: do not mask it
 				return
 			}
-			logrus.Warnf("[router] ⚠️ Combo %q member %s returned HTTP %d -> falling back to next member", combo.Name, combos.ModelID(member), status)
+
+			retryAfter := combos.ExtractRetryAfter(status, w.ResponseWriter.Header().Get("Retry-After"), bodyBytes)
+			cooldown := combos.RecordFailure(member.Provider, member.Model, status, bodyBytes, time.Now(), retryAfter)
+			if cooldown > 0 {
+				logrus.Warnf("[router] ⚠️ Combo %q member %s returned HTTP %d -> cooling %s, falling back to next member", combo.Name, combos.ModelID(member), status, cooldown)
+			} else {
+				logrus.Warnf("[router] ⚠️ Combo %q member %s returned HTTP %d -> falling back to next member (no cooldown: provider opts out)", combo.Name, combos.ModelID(member), status)
+			}
+			failures = append(failures, attemptFailure{writer: w, member: member, status: status, retryAfter: retryAfter})
 			if w.Passthrough() {
 				// Bytes already reached the client; cannot retry cleanly.
 				return
 			}
-			lastWriter = w
 		}
 
-		if lastWriter != nil {
-			lastWriter.FlushHeld() // expose the final upstream failure
-		} else if len(chain) > 0 {
+		// Every member was cooling down. Instead of failing outright, probe the
+		// member that recovers first so a chain never gets stuck behind a single
+		// cooled member (the probe result decides whether it reopens).
+		if attempts == 0 && skippedCooling > 0 && policy.BestEffortWhenAllOpen {
+			if rescue, until, ok := combos.SoonestCooling(chain, time.Now()); ok {
+				logrus.WithField("combo", combo.Name).Warnf("[router] 🩺 Combo %q all members cooling; best-effort probe of %s (recovers in %s)", combo.Name, combos.ModelID(rescue), time.Until(until).Round(time.Second))
+				combos.ForceAttempt(rescue.Provider, rescue.Model)
+				w, status, _ := attemptMember(rescue)
+				if w == nil {
+					combos.RecordSuccess(rescue.Provider, rescue.Model)
+				}
+				if w != nil {
+					attempts++
+					if status < http.StatusBadRequest {
+						logrus.Infof("[router] ✅ Combo %q recovered via %s (HTTP %d)", combo.Name, combos.ModelID(rescue), status)
+						combos.RecordSuccess(rescue.Provider, rescue.Model)
+						w.FlushHeld()
+						return
+					}
+					bodyBytes := w.held.Bytes()
+					if !combos.ShouldFallback(status, bodyBytes) {
+						// Request-scoped fault: the member itself is fine.
+						combos.RecordSuccess(rescue.Provider, rescue.Model)
+						w.FlushHeld()
+						return
+					}
+					retryAfter := combos.ExtractRetryAfter(status, w.ResponseWriter.Header().Get("Retry-After"), bodyBytes)
+					cooldown := combos.RecordFailure(rescue.Provider, rescue.Model, status, bodyBytes, time.Now(), retryAfter)
+					logrus.Warnf("[router] ⚠️ Combo %q probe of %s failed (HTTP %d), reopened for %s", combo.Name, combos.ModelID(rescue), status, cooldown)
+					failures = append(failures, attemptFailure{writer: w, member: rescue, status: status, retryAfter: retryAfter})
+				}
+			}
+		}
+
+		if len(failures) > 0 {
+			// Surface the failure that asks for the shortest wait: returning the
+			// last member's multi-hour retry hint would pin the client for hours
+			// even though another member could serve it minutes from now.
+			// A member that sent no hint is retryable immediately, so it is the
+			// shortest wait of all; otherwise pick the smallest hint. Never surface
+			// the longest one just because it was last.
+			chosen := failures[len(failures)-1]
+			for _, f := range failures {
+				if f.retryAfter == 0 {
+					chosen = f
+					continue
+				}
+				if chosen.retryAfter > 0 && f.retryAfter < chosen.retryAfter {
+					chosen = f
+				}
+			}
+			writeHeldFailure(c, chosen.writer, chosen.retryAfter, policy.RetryAfterCap)
+			return
+		}
+
+		if attempts == 0 {
+			// Nothing was even attemptable (cooldowns disabled the chain and the
+			// rescue probe was skipped). Tell the client when to come back.
+			if _, until, ok := combos.SoonestCooling(chain, time.Now()); ok {
+				retry := time.Until(until)
+				if retry < 0 {
+					retry = 0
+				}
+				if policy.RetryAfterCap > 0 && retry > policy.RetryAfterCap {
+					retry = policy.RetryAfterCap
+				}
+				c.Header("Retry-After", strconv.FormatInt(int64(retry.Seconds()), 10))
+				c.JSON(http.StatusServiceUnavailable, gin.H{
+					"error": gin.H{
+						"message":        "combo \"" + combo.Name + "\": every member is cooling down",
+						"type":           "server_error",
+						"retry_after_ms": retry.Milliseconds(),
+					},
+				})
+				return
+			}
+		}
+
+		if len(chain) > 0 {
 			c.JSON(http.StatusBadGateway, gin.H{
 				"error": gin.H{"message": "combo \"" + combo.Name + "\" had no attemptable members", "type": "server_error"},
 			})
@@ -478,12 +625,24 @@ func (w *combosResponseWriter) WriteHeader(code int) {
 	}
 }
 
+// maxHeldErrorBytes bounds the buffered error body. Fallback inspection only
+// needs the status and a short prefix; buffering an unbounded upstream error (or
+// a proxy HTML page) would let one bad member grow memory per request.
+const maxHeldErrorBytes = 1 << 20
+
 func (w *combosResponseWriter) Write(b []byte) (int, error) {
 	if !w.wroteHeader {
 		w.decide(http.StatusOK)
 	}
 	if w.passthrough {
 		return w.ResponseWriter.Write(b)
+	}
+	written := len(b)
+	if remaining := maxHeldErrorBytes - w.held.Len(); remaining <= 0 {
+		return written, nil // discard the tail but report success to the caller
+	} else if len(b) > remaining {
+		_, _ = w.held.Write(b[:remaining])
+		return written, nil
 	}
 	return w.held.Write(b)
 }
@@ -596,4 +755,166 @@ func modelSupportsVision(model string) bool {
 
 	// 2. Model family heuristics for dynamic/unregistered/custom models
 	return combos.HasVisionCapability(model) || combos.HasVisionCapability(bare)
+}
+
+// effectiveContextLength resolves the context window a member can actually
+// accept. The static catalog covers OAuth channels only, so the registry (which
+// is built from config, including openai-compatibility max-context-length) is
+// consulted first and the static catalog is the fallback.
+func effectiveContextLength(member config.ComboModelRef) int {
+	bare := member.Model
+	if _, after, ok := strings.Cut(bare, "/"); ok {
+		bare = after
+	}
+	best := 0
+	consider := func(info *registry.ModelInfo) {
+		if info == nil {
+			return
+		}
+		if info.ContextLength > best {
+			best = info.ContextLength
+		}
+		if info.MaxContextLength > best {
+			best = info.MaxContextLength
+		}
+	}
+	reg := registry.GetGlobalRegistry()
+	if reg != nil {
+		consider(reg.GetModelInfo(member.Model, member.Provider))
+		if bare != member.Model {
+			consider(reg.GetModelInfo(bare, member.Provider))
+		}
+	}
+	consider(registry.LookupStaticModelInfo(member.Model))
+	if bare != member.Model {
+		consider(registry.LookupStaticModelInfo(bare))
+	}
+	return best
+}
+
+// estimateComboPromptTokens estimates the prompt size for the context guard.
+// It counts extractable text conservatively (low bytes-per-token) so a member is
+// only skipped when the payload clearly exceeds its window.
+func estimateComboPromptTokens(raw []byte) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var chars int64
+	var addText func(v gjson.Result, key string)
+	addText = func(v gjson.Result, key string) {
+		if mediaPayloadKeys[strings.ToLower(key)] {
+			return // inline image/audio bytes are not prompt text
+		}
+		if v.Type == gjson.String {
+			text := v.String()
+			if strings.HasPrefix(text, "data:") {
+				return // data URI carrying inline media
+			}
+			chars += int64(len(text))
+		}
+		if v.IsArray() {
+			for _, item := range v.Array() {
+				addText(item, key)
+			}
+		}
+		if v.IsObject() {
+			for k, item := range v.Map() {
+				addText(item, k)
+			}
+		}
+	}
+	addText(gjson.GetBytes(raw, "messages"), "messages")
+	addText(gjson.GetBytes(raw, "input"), "input")
+	addText(gjson.GetBytes(raw, "system"), "system")
+	addText(gjson.GetBytes(raw, "contents"), "contents")
+	if chars == 0 {
+		// Fall back to the raw body size when the shape is unknown.
+		return len(raw) / 4
+	}
+	// ~3.5 chars per token for mixed ASCII/JSON, rounded up.
+	return int(chars/3) + 1
+}
+
+// mediaPayloadKeys are field names whose string values carry inline binary media
+// instead of prompt text. Counting them as text made every image request look
+// like it exceeded every member's context window.
+var mediaPayloadKeys = map[string]bool{
+	"data":        true,
+	"b64":         true,
+	"b64_json":    true,
+	"url":         true,
+	"image_url":   true,
+	"input_image": true,
+	"inline_data": true,
+	"inlinedata":  true,
+	"file_data":   true,
+	"filedata":    true,
+	"audio":       true,
+	"video":       true,
+}
+
+// writeHeldFailure releases a buffered error response to the client, clamping an
+// oversized retry hint so one member's multi-hour Retry-After cannot pin the
+// client when another member only needs a few minutes.
+func writeHeldFailure(c *gin.Context, w *combosResponseWriter, retryAfter, cap time.Duration) {
+	body := append([]byte(nil), w.held.Bytes()...)
+	effective := retryAfter
+	if cap > 0 && effective > cap {
+		effective = cap
+		body = clampRetryAfterJSON(body, cap)
+	}
+	if effective > 0 {
+		// Make the wait deterministic: the header always matches the member whose
+		// failure was surfaced, even if another member set it earlier.
+		c.Writer.Header().Set("Retry-After", strconv.FormatInt(int64((effective+time.Second-1)/time.Second), 10))
+	}
+	status := w.code
+	if status <= 0 {
+		status = http.StatusBadGateway
+	}
+	c.Writer.WriteHeader(status)
+	if len(body) > 0 {
+		_, _ = c.Writer.Write(body)
+	}
+}
+
+// clampRetryAfterJSON rewrites oversized retry hints inside an error body.
+func clampRetryAfterJSON(body []byte, cap time.Duration) []byte {
+	out := body
+	clampMS := cap.Milliseconds()
+	clampSec := int64(cap.Seconds())
+	for _, field := range []string{"retry-after-ms", "retry_after_ms", "error.retry-after-ms", "error.retry_after_ms"} {
+		if v := gjson.GetBytes(out, field); v.Exists() && v.Type == gjson.Number && v.Int() > clampMS {
+			if next, err := sjson.SetBytes(out, field, clampMS); err == nil {
+				out = next
+			}
+		}
+	}
+	for _, field := range []string{"retry_after", "error.retry_after"} {
+		if v := gjson.GetBytes(out, field); v.Exists() && v.Type == gjson.Number && v.Int() > clampSec {
+			if next, err := sjson.SetBytes(out, field, clampSec); err == nil {
+				out = next
+			}
+		}
+	}
+	return out
+}
+
+// reorderVisionFirst stably partitions a chain into image-capable members
+// followed by the rest. No member is dropped, so fallback coverage is unchanged,
+// and the relative order inside each partition is preserved.
+func reorderVisionFirst(chain []config.ComboModelRef) ([]config.ComboModelRef, bool) {
+	capable := make([]config.ComboModelRef, 0, len(chain))
+	rest := make([]config.ComboModelRef, 0, len(chain))
+	for _, m := range chain {
+		if modelSupportsVision(m.Model) {
+			capable = append(capable, m)
+			continue
+		}
+		rest = append(rest, m)
+	}
+	if len(capable) == 0 {
+		return chain, false
+	}
+	return append(capable, rest...), true
 }

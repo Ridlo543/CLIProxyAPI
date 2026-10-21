@@ -132,6 +132,12 @@ func (s *Service) registerModelsForAuthWithConfigAndCache(ctx context.Context, c
 				s.asyncProbeAntigravityCapabilities(ctx, a, provider)
 				return
 			}
+			// No verified catalog yet (fresh account, no persisted hints). Probe
+			// asynchronously and publish nothing in the meantime: advertising the
+			// full static catalog would offer models the account is not entitled
+			// to, and the upstream rejects them on first use.
+			s.asyncProbeAntigravityCapabilities(ctx, a, provider)
+			return
 		}
 		models = applyExcludedModels(models, excluded)
 	case "claude":
