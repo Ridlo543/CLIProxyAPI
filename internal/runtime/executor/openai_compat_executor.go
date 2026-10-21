@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/cache"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking"
@@ -177,6 +178,9 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 
 	url := upstreamURL(baseURL, endpoint)
 	translated = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", translated, originalTranslated, requestedModel, requestPath, opts.Headers)
+	if endpoint == chatCompletionsEndpoint {
+		translated = injectReplayedReasoning(translated, e.Identifier())
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(translated))
 	if err != nil {
 		return resp, err
@@ -223,6 +227,29 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		}
 	}()
 	helps.RecordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
+	if httpResp.StatusCode == http.StatusBadRequest && endpoint == chatCompletionsEndpoint {
+		b, _ := io.ReadAll(httpResp.Body)
+		if reasoningReplayRequired(httpResp.StatusCode, b) {
+			// The upstream demanded reasoning_content we never cached (cold start
+			// or a session that predates this process). Mark the provider and
+			// replay once with empty markers so the turn is not lost.
+			if errClose := httpResp.Body.Close(); errClose != nil {
+				log.Errorf("openai compat executor: close response body error: %v", errClose)
+			}
+			helps.AppendAPIResponseChunk(ctx, e.cfg, b)
+			cache.MarkReasoningCapable(e.Identifier())
+			translated = injectReplayedReasoningForce(translated, e.Identifier())
+			if retryResp, retryErr := doWithTransientRetry(httpClient, replayRequestWithPayload(ctx, httpReq, translated)); retryErr == nil {
+				httpResp = retryResp
+				helps.RecordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
+			}
+		} else {
+			helps.AppendAPIResponseChunk(ctx, e.cfg, b)
+			helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
+			err = newOpenAICompatStatusError(httpResp.StatusCode, httpResp.Header, b)
+			return resp, err
+		}
+	}
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		b, _ := io.ReadAll(httpResp.Body)
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
@@ -252,6 +279,9 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	}
 	if endpoint == systemOneEndpoint {
 		body = wrapSystemOneAsChatCompletion(body, baseModel)
+	}
+	if endpoint == chatCompletionsEndpoint || endpoint == systemOneEndpoint {
+		rememberReasoningFromChatCompletion(body, e.Identifier())
 	}
 	reporter.ObserveResponseModel(body)
 	if endpoint == responsesEndpoint {
@@ -443,6 +473,9 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 
 	url := upstreamURL(baseURL, endpoint)
 	translated = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", translated, originalTranslated, requestedModel, requestPath, opts.Headers)
+	if endpoint == chatCompletionsEndpoint {
+		translated = injectReplayedReasoning(translated, e.Identifier())
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(translated))
 	if err != nil {
 		return nil, err
@@ -487,6 +520,29 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		return nil, err
 	}
 	helps.RecordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
+	if httpResp.StatusCode == http.StatusBadRequest && endpoint == chatCompletionsEndpoint {
+		b, _ := io.ReadAll(httpResp.Body)
+		if reasoningReplayRequired(httpResp.StatusCode, b) {
+			if errClose := httpResp.Body.Close(); errClose != nil {
+				log.Errorf("openai compat executor: close response body error: %v", errClose)
+			}
+			helps.AppendAPIResponseChunk(ctx, e.cfg, b)
+			cache.MarkReasoningCapable(e.Identifier())
+			translated = injectReplayedReasoningForce(translated, e.Identifier())
+			if retryResp, retryErr := doWithTransientRetry(httpClient, replayRequestWithPayload(ctx, httpReq, translated)); retryErr == nil {
+				httpResp = retryResp
+				helps.RecordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
+			}
+		} else {
+			helps.AppendAPIResponseChunk(ctx, e.cfg, b)
+			helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
+			if errClose := httpResp.Body.Close(); errClose != nil {
+				log.Errorf("openai compat executor: close response body error: %v", errClose)
+			}
+			err = newOpenAICompatStatusError(httpResp.StatusCode, httpResp.Header, b)
+			return nil, err
+		}
+	}
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		b, _ := io.ReadAll(httpResp.Body)
 		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
@@ -500,6 +556,8 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	out := make(chan cliproxyexecutor.StreamChunk)
 	go func() {
 		defer close(out)
+		reasoningReplay := reasoningReplayTracker{provider: e.Identifier()}
+		defer reasoningReplay.commit()
 		defer func() {
 			if errClose := httpResp.Body.Close(); errClose != nil {
 				log.Errorf("openai compat executor: close response body error: %v", errClose)
@@ -581,6 +639,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 				}
 			}
 			if !isDone {
+				reasoningReplay.observeFrame(dataPayload)
 				if id := gjson.GetBytes(dataPayload, "id").String(); id != "" {
 					lastResponseID = id
 				}
