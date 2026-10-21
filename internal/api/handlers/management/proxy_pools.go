@@ -5,6 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/proxyutil"
 	"io"
 	"net/http"
 	"net/url"
@@ -13,10 +17,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
-	"github.com/router-for-me/CLIProxyAPI/v8/sdk/proxyutil"
 )
 
 type proxyPoolReporter interface {
@@ -335,16 +335,16 @@ func (h *Handler) GetProxyPools(c *gin.Context) {
 			}
 
 			results = append(results, ProxyPoolResponseItem{
-				Name:          name,
-				Strategy:      cp.Strategy,
-				Strict:        cp.Strict,
-				Cooldown:      cp.Cooldown,
-				EntryCount:    entryCount,
-				Healthy:       healthy,
-				Cooling:       cooling,
-				FailureCount:  failCount,
-				URLs:          urls,
-				CoolingURLs:   coolingURLs,
+				Name:           name,
+				Strategy:       cp.Strategy,
+				Strict:         cp.Strict,
+				Cooldown:       cp.Cooldown,
+				EntryCount:     entryCount,
+				Healthy:        healthy,
+				Cooling:        cooling,
+				FailureCount:   failCount,
+				URLs:           urls,
+				CoolingURLs:    coolingURLs,
 				BoundAccounts:  h.collectBoundAccounts(name),
 				BoundProviders: h.collectBoundProviders(name),
 			})
@@ -362,15 +362,15 @@ func (h *Handler) GetProxyPools(c *gin.Context) {
 			urls = append(urls, sanitizeProxyURL(u))
 		}
 		results = append(results, ProxyPoolResponseItem{
-			Name:          name,
-			Strategy:      p.Strategy,
-			Strict:        p.Strict,
-			EntryCount:    p.EntryCount,
-			Healthy:       p.Healthy,
-			Cooling:       p.Cooling,
-			FailureCount:  p.FailureCount,
-			URLs:          urls,
-			CoolingURLs:   p.CoolingURLs,
+			Name:           name,
+			Strategy:       p.Strategy,
+			Strict:         p.Strict,
+			EntryCount:     p.EntryCount,
+			Healthy:        p.Healthy,
+			Cooling:        p.Cooling,
+			FailureCount:   p.FailureCount,
+			URLs:           urls,
+			CoolingURLs:    p.CoolingURLs,
 			BoundAccounts:  h.collectBoundAccounts(name),
 			BoundProviders: h.collectBoundProviders(name),
 		})
@@ -384,11 +384,11 @@ func (h *Handler) GetProxyPools(c *gin.Context) {
 }
 
 type ProxyPoolPayload struct {
-	Name     string   `json:"name"`
-	Strategy string   `json:"strategy"`
-	Strict   bool     `json:"strict"`
-	Cooldown string   `json:"cooldown"`
-	Entries  []any    `json:"entries"`
+	Name     string `json:"name"`
+	Strategy string `json:"strategy"`
+	Strict   bool   `json:"strict"`
+	Cooldown string `json:"cooldown"`
+	Entries  []any  `json:"entries"`
 }
 
 func parseEntries(rawEntries []any) []config.ProxyPoolEntry {
@@ -732,16 +732,27 @@ func (h *Handler) VerifyProxy(c *gin.Context) {
 		Transport: transport,
 		Timeout:   8 * time.Second,
 	}
-	// 1. Resolve exit IP
+	// 1. Resolve exit IP. Ask for IPv6 first: an IPv6-pinned entry still answers
+	// IPv4 echo services through its IPv4 path, so an IPv4-only probe would
+	// report the host address and hide the fact that the entry egresses on a
+	// different family. Fall back to IPv4 for entries with no IPv6 path.
 	exitIP := ""
-	reqIP, errIP := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, "http://api.ipify.org", nil)
-	if errIP == nil {
+	for _, probe := range []string{"https://ipv6.icanhazip.com", "https://ipv4.icanhazip.com"} {
+		reqIP, errIP := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, probe, nil)
+		if errIP != nil {
+			continue
+		}
 		reqIP.Header.Set("User-Agent", "curl/7.88.1")
-		if respIP, errDoIP := client.Do(reqIP); errDoIP == nil {
-			if b, errRead := io.ReadAll(respIP.Body); errRead == nil {
-				exitIP = strings.TrimSpace(string(b))
-			}
-			_ = respIP.Body.Close()
+		respIP, errDoIP := client.Do(reqIP)
+		if errDoIP != nil {
+			continue
+		}
+		if b, errRead := io.ReadAll(respIP.Body); errRead == nil {
+			exitIP = strings.TrimSpace(string(b))
+		}
+		_ = respIP.Body.Close()
+		if exitIP != "" {
+			break
 		}
 	}
 
@@ -773,6 +784,7 @@ func (h *Handler) VerifyProxy(c *gin.Context) {
 					"error":       "Terbanned Cloudflare/OpenCode (403)",
 					"endpoint":    sanitizeProxyURL(rawURL),
 					"exit_ip":     exitIP,
+					"is_ipv6":     strings.Contains(exitIP, ":"),
 					"latency_ms":  latency,
 				})
 				return
@@ -787,6 +799,7 @@ func (h *Handler) VerifyProxy(c *gin.Context) {
 					"error":       "Upstream Capacity / Rate Limit (429)",
 					"endpoint":    sanitizeProxyURL(rawURL),
 					"exit_ip":     exitIP,
+					"is_ipv6":     strings.Contains(exitIP, ":"),
 					"latency_ms":  latency,
 				})
 				return
@@ -801,6 +814,7 @@ func (h *Handler) VerifyProxy(c *gin.Context) {
 					"status_code": respProbe.StatusCode,
 					"endpoint":    sanitizeProxyURL(rawURL),
 					"exit_ip":     exitIP,
+					"is_ipv6":     strings.Contains(exitIP, ":"),
 					"latency_ms":  latency,
 				})
 				return
@@ -826,6 +840,7 @@ func (h *Handler) VerifyProxy(c *gin.Context) {
 			"error":      errDo.Error(),
 			"endpoint":   sanitizeProxyURL(rawURL),
 			"exit_ip":    exitIP,
+			"is_ipv6":    strings.Contains(exitIP, ":"),
 			"latency_ms": latency,
 		})
 		return
@@ -847,6 +862,7 @@ func (h *Handler) VerifyProxy(c *gin.Context) {
 		"status_code": resp.StatusCode,
 		"endpoint":    sanitizeProxyURL(rawURL),
 		"exit_ip":     exitIP,
+		"is_ipv6":     strings.Contains(exitIP, ":"),
 		"latency_ms":  latency,
 	})
 }
