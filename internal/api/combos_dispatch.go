@@ -83,6 +83,10 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 			return
 		}
 		originalWriter := c.Writer
+		// One response stream is shared by every attempt. Keep-alive heartbeats may
+		// commit it before a member produces payload, and that fact must survive the
+		// per-attempt writers.
+		commit := &comboCommitState{}
 
 		// Precompute the largest effective context window in the chain. The
 		// registry carries the config-resolved value for openai-compatibility
@@ -149,7 +153,7 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 			// from the previous member must not be attributed to this one.
 			originalWriter.Header().Del("Retry-After")
 
-			w := newCombosWriter(originalWriter)
+			w := newCombosWriter(originalWriter, commit)
 			c.Writer = w
 			next(c)
 			c.Writer = originalWriter
@@ -281,6 +285,13 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 				if chosen.retryAfter > 0 && f.retryAfter < chosen.retryAfter {
 					chosen = f
 				}
+			}
+			if commit.committed {
+				// Keep-alives already flushed the headers, so the status is locked
+				// at 200; report the failure as a stream error instead of silently
+				// pretending the member succeeded.
+				writeCommittedFailure(c, chosen.writer, chosen.retryAfter, policy.RetryAfterCap)
+				return
 			}
 			writeHeldFailure(c, chosen.writer, chosen.retryAfter, policy.RetryAfterCap)
 			return
@@ -589,39 +600,52 @@ func rewriteModelField(raw []byte, model string) ([]byte, error) {
 	return json.Marshal(top)
 }
 
+// comboCommitState records whether the shared response headers have been
+// flushed to the client. A pre-first-token keep-alive flushes them early, so a
+// later member failure can no longer be expressed as an HTTP status — but the
+// stream itself is still usable for failover, because only SSE comments have
+// been delivered.
+type comboCommitState struct {
+	committed bool
+}
+
 // combosResponseWriter defers delivery while a fallback decision might still
-// be made. Once a non-fallback status is observed it becomes passthrough so
-// streaming members keep their live behaviour.
+// be made. Non-comment payload is held until a member is accepted; SSE comment
+// heartbeats are forwarded immediately (they keep idle proxies alive) without
+// counting as delivered content, so the chain can still switch members.
 type combosResponseWriter struct {
 	gin.ResponseWriter
+	state       *comboCommitState
 	held        bytes.Buffer
 	code        int
+	hasCode     bool
 	passthrough bool
-	wroteHeader bool
 }
 
-func newCombosWriter(w gin.ResponseWriter) *combosResponseWriter {
-	return &combosResponseWriter{ResponseWriter: w}
-}
-
-func (w *combosResponseWriter) decide(code int) {
-	w.code = code
-	w.wroteHeader = true
-	// Hold all error responses (HTTP >= 400) so fallback inspection can evaluate status and body.
-	// Only successful responses (< 400) passthrough immediately for streaming.
-	w.passthrough = code < http.StatusBadRequest
-	if w.passthrough {
-		w.ResponseWriter.WriteHeader(code)
+func newCombosWriter(w gin.ResponseWriter, state *comboCommitState) *combosResponseWriter {
+	if state == nil {
+		state = &comboCommitState{}
 	}
+	return &combosResponseWriter{ResponseWriter: w, state: state}
 }
 
-func (w *combosResponseWriter) WriteHeader(code int) {
-	if w.wroteHeader {
+func (w *combosResponseWriter) commitHeader(code int) {
+	if w.state.committed {
 		return
 	}
-	w.decide(code)
-	if !w.passthrough {
-		return // hold headers until flushed
+	w.state.committed = true
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// WriteHeader records the member status. Only the first status that is not a
+// fallback candidate is forwarded: later statuses describe a member that was
+// discarded.
+func (w *combosResponseWriter) WriteHeader(code int) {
+	w.code = code
+	w.hasCode = true
+	if code < http.StatusBadRequest {
+		w.passthrough = true
+		w.commitHeader(code)
 	}
 }
 
@@ -630,12 +654,39 @@ func (w *combosResponseWriter) WriteHeader(code int) {
 // a proxy HTML page) would let one bad member grow memory per request.
 const maxHeldErrorBytes = 1 << 20
 
-func (w *combosResponseWriter) Write(b []byte) (int, error) {
-	if !w.wroteHeader {
-		w.decide(http.StatusOK)
+// isSSECommentChunk reports whether a write carries only SSE comments and blank
+// lines (`: keep-alive\n\n`). Those never carry model output.
+func isSSECommentChunk(b []byte) bool {
+	if len(b) == 0 {
+		return false
 	}
+	hasComment := false
+	for _, line := range bytes.Split(b, []byte("\n")) {
+		line = bytes.TrimRight(line, "\r")
+		if len(line) == 0 {
+			continue
+		}
+		if line[0] != ':' {
+			return false
+		}
+		hasComment = true
+	}
+	return hasComment
+}
+
+func (w *combosResponseWriter) Write(b []byte) (int, error) {
 	if w.passthrough {
 		return w.ResponseWriter.Write(b)
+	}
+	if isSSECommentChunk(b) {
+		// Heartbeat: flush headers on the first one so Cloudflare's 100s timer
+		// never fires, but keep the attempt discardable.
+		w.commitHeader(http.StatusOK)
+		return w.ResponseWriter.Write(b)
+	}
+	if !w.hasCode {
+		w.code = http.StatusOK
+		w.hasCode = true
 	}
 	written := len(b)
 	if remaining := maxHeldErrorBytes - w.held.Len(); remaining <= 0 {
@@ -651,8 +702,17 @@ func (w *combosResponseWriter) WriteString(s string) (int, error) {
 	return w.Write([]byte(s))
 }
 
+// Flush must not commit the response on its own: a flush without payload is
+// just a heartbeat with nothing to say. Once a member's data is passing
+// through, flushing is the handler's business again.
+func (w *combosResponseWriter) Flush() {
+	if w.passthrough || w.state.committed {
+		w.ResponseWriter.Flush()
+	}
+}
+
 func (w *combosResponseWriter) StatusCode() int {
-	if !w.wroteHeader {
+	if !w.hasCode {
 		return http.StatusOK
 	}
 	return w.code
@@ -660,15 +720,20 @@ func (w *combosResponseWriter) StatusCode() int {
 
 func (w *combosResponseWriter) Passthrough() bool { return w.passthrough }
 
+// Committed reports whether response headers already reached the client.
+func (w *combosResponseWriter) Committed() bool { return w.state.committed }
+
 // FlushHeld releases held status+bytes to the real client (final accept).
 func (w *combosResponseWriter) FlushHeld() {
-	if w.passthrough {
-		return
-	}
 	w.passthrough = true
-	w.ResponseWriter.WriteHeader(w.code)
+	code := w.code
+	if code <= 0 {
+		code = http.StatusOK
+	}
+	w.commitHeader(code)
 	if w.held.Len() > 0 {
 		_, _ = w.ResponseWriter.Write(w.held.Bytes())
+		w.held.Reset()
 	}
 }
 
@@ -876,6 +941,55 @@ func writeHeldFailure(c *gin.Context, w *combosResponseWriter, retryAfter, cap t
 	if len(body) > 0 {
 		_, _ = c.Writer.Write(body)
 	}
+}
+
+// writeCommittedFailure reports a chain failure on a stream whose headers are
+// already on the wire (a pre-first-token keep-alive committed them). The HTTP
+// status is locked at 200 by then, so the failure is delivered as an SSE error
+// frame — the only honest signal left to a streaming client.
+func writeCommittedFailure(c *gin.Context, w *combosResponseWriter, retryAfter, cap time.Duration) {
+	body := append([]byte(nil), w.held.Bytes()...)
+	effective := retryAfter
+	if cap > 0 && effective > cap {
+		effective = cap
+		body = clampRetryAfterJSON(body, cap)
+	}
+	status := w.code
+	if status <= 0 {
+		status = http.StatusBadGateway
+	}
+	message := strings.TrimSpace(gjson.GetBytes(body, "error.message").String())
+	if message == "" {
+		message = strings.TrimSpace(gjson.GetBytes(body, "message").String())
+	}
+	if message == "" {
+		message = "combo exhausted every member after the stream was committed"
+	}
+	payload := gin.H{
+		"error": gin.H{
+			"message":            message,
+			"type":               "server_error",
+			"code":               "combo_exhausted",
+			"status":             status,
+			"retry_after_ms":     effective.Milliseconds(),
+			"response_committed": true,
+		},
+	}
+	encoded, errMarshal := json.Marshal(payload)
+	if errMarshal != nil {
+		encoded = []byte(`{"error":{"message":"combo exhausted every member","type":"server_error"}}`)
+	}
+	contentType := c.Writer.Header().Get("Content-Type")
+	if strings.Contains(contentType, "text/event-stream") {
+		_, _ = c.Writer.Write([]byte("data: " + string(encoded) + "\n\ndata: [DONE]\n\n"))
+		if flusher, ok := c.Writer.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		return
+	}
+	// Non-streaming callers cannot be re-signalled: keep the payload shape they
+	// already parse and let the error field carry the failure.
+	_, _ = c.Writer.Write(encoded)
 }
 
 // clampRetryAfterJSON rewrites oversized retry hints inside an error body.
