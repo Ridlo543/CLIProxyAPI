@@ -925,6 +925,16 @@ func (h *Handler) AssignProxyPool(c *gin.Context) {
 		if req.Action == "remove" {
 			return replacePoolInList(current, targetPool, "")
 		}
+		if req.Action == "add" {
+			if poolContains(current, targetPool) {
+				return current
+			}
+			trimmed := strings.TrimSpace(current)
+			if trimmed == "" || strings.EqualFold(trimmed, "direct") || strings.EqualFold(trimmed, "none") {
+				return targetPool
+			}
+			return trimmed + "," + targetPool
+		}
 		// Default action: toggle inclusion in list
 		return togglePoolInList(current, targetPool)
 	}

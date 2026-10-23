@@ -197,6 +197,33 @@ func TestProxyPoolsAssign(t *testing.T) {
 		t.Fatalf("updated.ProxyPool = %v, want webshare", updated)
 	}
 
+	// Combine with a second pool (pool-b) using action: add
+	cfg.ProxyPools = append(cfg.ProxyPools, config.ProxyPool{Name: "pool-b", Entries: []config.ProxyPoolEntry{{URL: "direct"}}})
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/proxy-pools/assign", strings.NewReader(`{"pool":"pool-b","provider":"antigravity","action":"add"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("assign add status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	updated, _ = manager.GetByID("test-auth.json")
+	if updated == nil || updated.ProxyPool != "webshare,pool-b" {
+		t.Fatalf("updated.ProxyPool = %v, want 'webshare,pool-b'", updated)
+	}
+
+	// Remove first pool (webshare) leaving pool-b intact
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/proxy-pools/assign", strings.NewReader(`{"pool":"webshare","provider":"antigravity","action":"remove"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("assign remove status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	updated, _ = manager.GetByID("test-auth.json")
+	if updated == nil || updated.ProxyPool != "pool-b" {
+		t.Fatalf("updated.ProxyPool = %v, want 'pool-b'", updated)
+	}
+
 	// Toggle back to direct (none)
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/proxy-pools/assign", strings.NewReader(`{"pool":"direct","provider":"antigravity"}`))

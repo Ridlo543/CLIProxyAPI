@@ -73,7 +73,14 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 			visionPool := combos.GetVisionAdapterModels()
 			if len(visionPool) > 0 {
 				logrus.Infof("[router] 👁️ Vision adapter triggered for single model %q -> auto-switching to %v", model, visionPool)
-				chain = append(visionPool, config.ComboModelRef{Model: model})
+				ref := config.ComboModelRef{Model: model}
+				if prov, m, ok := strings.Cut(model, "/"); ok {
+					ref.Provider = strings.TrimSpace(prov)
+					ref.Model = strings.TrimSpace(m)
+				}
+				chain = append(visionPool, ref)
+				combo.Name = model + " (vision-adapter)"
+				combo.Strategy = config.ComboStrategyFallback
 			}
 		}
 
@@ -115,15 +122,40 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 		// A nil writer means the member was not attemptable (no serving provider
 		// or an unrewritable body).
 		attemptMember := func(member config.ComboModelRef) (*combosResponseWriter, int, []string) {
+			targetProvider := strings.TrimSpace(member.Provider)
+			targetModel := strings.TrimSpace(member.Model)
+			if targetProvider == "" {
+				if prov, m, ok := strings.Cut(targetModel, "/"); ok {
+					targetProvider = strings.TrimSpace(prov)
+					targetModel = strings.TrimSpace(m)
+				}
+			}
+
 			var providers []string
-			if member.Provider != "" {
-				providers = registry.GetGlobalRegistry().GetModelProviders(combos.ModelID(member))
+			if targetProvider != "" {
+				providers = registry.GetGlobalRegistry().GetModelProviders(targetProvider + "/" + targetModel)
+				if len(providers) == 0 {
+					cleanTarget := strings.ToLower(strings.TrimPrefix(strings.TrimPrefix(targetProvider, "openai-compatibility:"), "openai-compatible-"))
+					for _, p := range registry.GetGlobalRegistry().GetModelProviders(targetModel) {
+						cleanP := strings.ToLower(strings.TrimPrefix(strings.TrimPrefix(p, "openai-compatibility:"), "openai-compatible-"))
+						if cleanP == cleanTarget || strings.EqualFold(p, targetProvider) {
+							providers = append(providers, p)
+						}
+					}
+				}
 			}
 			if len(providers) == 0 {
+				providers = registry.GetGlobalRegistry().GetModelProviders(targetModel)
+			}
+			if len(providers) == 0 && targetModel != member.Model {
 				providers = registry.GetGlobalRegistry().GetModelProviders(member.Model)
 			}
 			if len(providers) == 0 {
-				logrus.WithField("combo", combo.Name).Warnf("[router] ⚠️ Combo %q skipping member %s: no provider serves model %q", combo.Name, combos.ModelID(member), member.Model)
+				comboLabel := combo.Name
+				if comboLabel == "" {
+					comboLabel = model
+				}
+				logrus.WithField("combo", comboLabel).Warnf("[router] ⚠️ Combo %q skipping member %s: no provider serves model %q", comboLabel, combos.ModelID(member), member.Model)
 				return nil, 0, nil
 			}
 
@@ -135,20 +167,27 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 			if reqEffort != "" {
 				effortInfo = fmt.Sprintf(" [client_reasoning=%s]", reqEffort)
 			}
-			logrus.Infof("[router] 🔀 Combo %q (%s)%s -> routing request to %s (candidates: %v)", combo.Name, combo.Strategy, effortInfo, combos.ModelID(member), providers)
-			body, mErr := rewriteModelField(raw, member.Model)
+			comboLabel := combo.Name
+			if comboLabel == "" {
+				comboLabel = model
+			}
+			comboStrategy := combo.Strategy
+			if comboStrategy == "" {
+				comboStrategy = config.ComboStrategyFallback
+			}
+			logrus.Infof("[router] 🔀 Combo %q (%s)%s -> routing request to %s (candidates: %v)", comboLabel, comboStrategy, effortInfo, combos.ModelID(member), providers)
+			body, mErr := rewriteModelField(raw, targetModel)
 			if mErr != nil {
-				logrus.WithField("combo", combo.Name).Warnf("[router] ⚠️ Combo %q could not rewrite body for %s: %v", combo.Name, combos.ModelID(member), mErr)
+				logrus.WithField("combo", comboLabel).Warnf("[router] ⚠️ Combo %q could not rewrite body for %s: %v", comboLabel, combos.ModelID(member), mErr)
 				return nil, 0, providers
 			}
 			req2 := c.Request.Clone(c.Request.Context())
-			if member.Provider != "" {
-				req2.Header.Set("X-Provider", member.Provider)
+			if targetProvider != "" {
+				req2.Header.Set("X-Provider", targetProvider)
 			}
 			req2.Body = io.NopCloser(bytes.NewReader(body))
 			req2.ContentLength = int64(len(body))
 			c.Request = req2
-
 			// Headers live on the shared underlying writer; a stale Retry-After
 			// from the previous member must not be attributed to this one.
 			originalWriter.Header().Del("Retry-After")

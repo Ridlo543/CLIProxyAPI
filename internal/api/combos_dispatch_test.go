@@ -804,3 +804,67 @@ func TestEstimateComboPromptTokens_IgnoresBase64Media(t *testing.T) {
 		t.Fatal("expected a non-zero estimate for the text part")
 	}
 }
+
+func TestSingleModelVisionAdapterRoutesPrefixedModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	combos.SyncFromConfig(&config.Config{
+		CapacityAdapter: config.CapacityAdapterConfig{
+			Vision: config.CapacityAdapterPoolConfig{
+				Enabled: true,
+				Models: []config.ComboModelRef{
+					{Provider: "antigravity", Model: "gemini-vision-helper"},
+				},
+			},
+		},
+	})
+	defer combos.SyncFromConfig(&config.Config{})
+
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient("mock-ag", "antigravity", []*registry.ModelInfo{
+		{ID: "gemini-vision-helper", SupportedInputModalities: []string{"text", "image"}},
+	})
+	reg.RegisterClient("mock-opencode", "openai-compatibility:opencode-free", []*registry.ModelInfo{
+		{ID: "deepseek-v4.1-flash-free", SupportedInputModalities: []string{"text"}},
+	})
+	defer reg.UnregisterClient("mock-ag")
+	defer reg.UnregisterClient("mock-opencode")
+
+	r := gin.New()
+	s := &Server{}
+	var attemptedModels []string
+	var attemptedProviders []string
+	r.POST("/v1/chat/completions", s.combosChatWrapper(func(c *gin.Context) {
+		var req struct {
+			Model string `json:"model"`
+		}
+		_ = c.ShouldBindJSON(&req)
+		attemptedModels = append(attemptedModels, req.Model)
+		attemptedProviders = append(attemptedProviders, c.GetHeader("X-Provider"))
+		if req.Model == "gemini-vision-helper" {
+			// Vision helper fails -> should fall back to original model
+			c.JSON(500, gin.H{"error": "vision helper failed"})
+			return
+		}
+		c.JSON(200, gin.H{"choices": []gin.H{{"message": gin.H{"content": "fallback succeeded"}}}})
+	}))
+
+	w := httptest.NewRecorder()
+	reqBody := `{"model":"opencode-free/deepseek-v4.1-flash-free","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,abc"}}]}]}`
+	r.ServeHTTP(w, httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(reqBody)))
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200 after fallback to original model, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(attemptedModels) != 2 {
+		t.Fatalf("expected 2 attempts (vision helper then original), got %v", attemptedModels)
+	}
+	if attemptedModels[0] != "gemini-vision-helper" {
+		t.Fatalf("attempt 0 = %q, want gemini-vision-helper", attemptedModels[0])
+	}
+	if attemptedModels[1] != "deepseek-v4.1-flash-free" {
+		t.Fatalf("attempt 1 = %q, want deepseek-v4.1-flash-free (bare model name, not prefixed)", attemptedModels[1])
+	}
+	if attemptedProviders[1] != "opencode-free" {
+		t.Fatalf("attempt 1 provider = %q, want opencode-free", attemptedProviders[1])
+	}
+}

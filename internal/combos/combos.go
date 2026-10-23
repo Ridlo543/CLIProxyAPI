@@ -506,4 +506,9 @@ func parseRetryAfterHeader(raw string) time.Duration {
 }
 
 // ModelID renders a member reference in "provider/model" form for logs.
-func ModelID(m config.ComboModelRef) string { return m.Provider + "/" + m.Model }
+func ModelID(m config.ComboModelRef) string {
+	if m.Provider == "" {
+		return m.Model
+	}
+	return m.Provider + "/" + m.Model
+}
