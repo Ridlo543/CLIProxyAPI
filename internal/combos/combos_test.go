@@ -184,7 +184,17 @@ func TestRequestRequiresVision(t *testing.T) {
 		t.Fatal("expected Gemini inline_data to trigger RequestRequiresVision")
 	}
 
-	// Text talking about data URI or image_url must NOT trigger vision
+	// Anthropic tool_result with image block (e.g. screenshot tool output)
+	toolResultVision := []byte(`{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":[{"type":"image","source":{"type":"base64","data":"abc"}}]}]}]}`)
+	if !RequestRequiresVision(toolResultVision) {
+		t.Fatal("expected tool_result containing image to trigger RequestRequiresVision")
+	}
+
+	// OpenAI Responses API input array with input_image
+	responsesAPIVision := []byte(`{"input":[{"type":"message","role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,abc"}]}]}`)
+	if !RequestRequiresVision(responsesAPIVision) {
+		t.Fatal("expected Responses API input with input_image to trigger RequestRequiresVision")
+	}
 	promptDiscussingImage := []byte(`{"messages":[{"role":"user","content":"How do I embed data:image/png;base64 in CSS background?"}]}`)
 	if RequestRequiresVision(promptDiscussingImage) {
 		t.Fatal("expected prompt text discussing CSS data:image/png NOT to trigger RequestRequiresVision")

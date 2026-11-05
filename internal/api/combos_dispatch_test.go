@@ -763,6 +763,38 @@ func TestReorderVisionFirst_IsStableAndDropsNothing(t *testing.T) {
 	}
 }
 
+func TestOrderMultimodalChain_InsertsVisionAdapterBeforeNonVision(t *testing.T) {
+	chain := []config.ComboModelRef{
+		{Provider: "antigravity", Model: "gemini-3.8-flash-high"},
+		{Provider: "custom", Model: "whisper-1"},
+	}
+	ordered := orderMultimodalChain(chain, true, false, "test-combo")
+	if len(ordered) < 2 {
+		t.Fatalf("unexpected ordered length: %d", len(ordered))
+	}
+	if ordered[0].Model != "gemini-3.8-flash-high" {
+		t.Fatalf("expected vision model first, got %s", ordered[0].Model)
+	}
+	if ordered[len(ordered)-1].Model != "whisper-1" {
+		t.Fatalf("expected non-vision model last, got %s", ordered[len(ordered)-1].Model)
+	}
+}
+
+func TestOrderMultimodalChain_PrioritizesBothCapabilities(t *testing.T) {
+	chain := []config.ComboModelRef{
+		{Provider: "codex", Model: "gpt-6-luna"}, // vision only
+		{Provider: "custom", Model: "whisper-1"},  // audio only
+		{Provider: "antigravity", Model: "gemini-3.8-flash-high"}, // both vision and audio
+	}
+	ordered := orderMultimodalChain(chain, true, true, "multimodal-combo")
+	if len(ordered) != 3 {
+		t.Fatalf("expected 3 models, got %d", len(ordered))
+	}
+	if ordered[0].Model != "gemini-3.8-flash-high" {
+		t.Fatalf("expected model supporting both vision and audio to be first, got %s", ordered[0].Model)
+	}
+}
+
 // A member that asks for a long wait must not pin the client when another member
 // failed without any hint (which is retryable immediately).
 func TestCombosFailureSelection_PrefersRetryNowOverLongHint(t *testing.T) {

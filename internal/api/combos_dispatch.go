@@ -54,27 +54,8 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 		combo, found := combos.Find(model)
 		if found {
 			chain = combos.Order(combo)
-			// Vision requests get capability-ordered members: everything that can
-			// read images first (stable, no member is dropped), so the chain does
-			// not waste an attempt on a text-only member. Only when no member can
-			// see images is the adapter pool prepended.
-			if requiresVision {
-				ordered, hasVisionMember := reorderVisionFirst(chain)
-				chain = ordered
-				if !hasVisionMember {
-					visionPool := combos.GetVisionAdapterModels()
-					if len(visionPool) > 0 {
-						logrus.Infof("[router] 👁️ Vision adapter triggered for combo %q -> routing to %v first", combo.Name, visionPool)
-						chain = append(visionPool, chain...)
-					}
-				}
-			}
-			if requiresAudio {
-				ordered, hasAudioMember := reorderAudioFirst(chain)
-				chain = ordered
-				if !hasAudioMember {
-					logrus.Warnf("[router] ⚠️ Audio request for combo %q but no member declares audio capability", combo.Name)
-				}
+			if requiresVision || requiresAudio {
+				chain = orderMultimodalChain(chain, requiresVision, requiresAudio, combo.Name)
 			}
 		} else if requiresVision && !modelSupportsVision(model) {
 			// Single model request that cannot process vision -> auto-route to Vision Adapter Pool
@@ -432,6 +413,7 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 					"max_tokens":            maxTok,
 					"max_completion_tokens": maxTok,
 					"input_modalities":      inputMods,
+					"input":                 inputMods,
 				}
 			} else {
 				entry = map[string]any{
@@ -894,6 +876,54 @@ func modelSupportsAudio(model string) bool {
 	}
 	m := strings.ToLower(strings.TrimSpace(bare))
 	return strings.Contains(m, "gemini") || strings.Contains(m, "whisper") || strings.Contains(m, "audio")
+}
+func orderMultimodalChain(chain []config.ComboModelRef, requiresVision, requiresAudio bool, comboName string) []config.ComboModelRef {
+	var fullyCapable []config.ComboModelRef
+	var partiallyCapable []config.ComboModelRef
+	var nonCapable []config.ComboModelRef
+
+	for _, m := range chain {
+		hasV := !requiresVision || modelSupportsVision(m.Model)
+		hasA := !requiresAudio || modelSupportsAudio(m.Model)
+
+		if hasV && hasA {
+			fullyCapable = append(fullyCapable, m)
+		} else if hasV || hasA {
+			partiallyCapable = append(partiallyCapable, m)
+		} else {
+			nonCapable = append(nonCapable, m)
+		}
+	}
+
+	result := append([]config.ComboModelRef(nil), fullyCapable...)
+
+	visionPool := combos.GetVisionAdapterModels()
+	if requiresVision && len(visionPool) > 0 {
+		existing := make(map[string]bool)
+		for _, m := range result {
+			existing[strings.ToLower(m.Provider+"/"+m.Model)] = true
+			existing[strings.ToLower(m.Model)] = true
+		}
+		var neededAdapters []config.ComboModelRef
+		for _, vm := range visionPool {
+			key1 := strings.ToLower(vm.Provider + "/" + vm.Model)
+			key2 := strings.ToLower(vm.Model)
+			if !existing[key1] && !existing[key2] {
+				neededAdapters = append(neededAdapters, vm)
+			}
+		}
+
+		if len(fullyCapable) == 0 {
+			logrus.Infof("[router] 👁️ Vision adapter triggered for combo %q -> routing to %v first", comboName, neededAdapters)
+			result = append(neededAdapters, result...)
+		} else {
+			result = append(result, neededAdapters...)
+		}
+	}
+
+	result = append(result, partiallyCapable...)
+	result = append(result, nonCapable...)
+	return result
 }
 
 func reorderAudioFirst(chain []config.ComboModelRef) ([]config.ComboModelRef, bool) {

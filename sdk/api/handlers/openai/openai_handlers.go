@@ -127,8 +127,16 @@ func (h *OpenAIAPIHandler) OpenAIModels(c *gin.Context) {
 		}
 		if inputMod, exists := model["input_modalities"]; exists {
 			filteredModel["input_modalities"] = inputMod
+			if _, hasInput := filteredModel["input"]; !hasInput {
+				filteredModel["input"] = inputMod
+			}
 		}
-
+		if input, exists := model["input"]; exists {
+			filteredModel["input"] = input
+			if _, hasInputMod := filteredModel["input_modalities"]; !hasInputMod {
+				filteredModel["input_modalities"] = input
+			}
+		}
 		filteredModels[i] = filteredModel
 	}
 

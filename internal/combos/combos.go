@@ -145,6 +145,25 @@ func ComboSupportsVision(combo config.ComboConfig) bool {
 	return len(GetVisionAdapterModels()) > 0
 }
 
+// isImagePart checks if a JSON object represents an image block, including nested tool_result content.
+func isImagePart(part gjson.Result) bool {
+	partType := strings.ToLower(strings.TrimSpace(part.Get("type").String()))
+	if partType == "image_url" || partType == "image" || partType == "input_image" {
+		return true
+	}
+	if partType == "tool_result" {
+		nested := part.Get("content")
+		if nested.IsArray() {
+			for _, sub := range nested.Array() {
+				if isImagePart(sub) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // RequestRequiresVision inspects request payload structurally for real image blocks.
 // It checks message parts structurally rather than doing raw substring matching on prompt text,
 // preventing false positives when prompts discuss code, MIME types, or HTML tags.
@@ -160,8 +179,7 @@ func RequestRequiresVision(rawJSON []byte) bool {
 			content := msg.Get("content")
 			if content.IsArray() {
 				for _, part := range content.Array() {
-					partType := strings.ToLower(strings.TrimSpace(part.Get("type").String()))
-					if partType == "image_url" || partType == "image" || partType == "input_image" {
+					if isImagePart(part) {
 						return true
 					}
 				}
@@ -194,18 +212,35 @@ func RequestRequiresVision(rawJSON []byte) bool {
 		}
 	}
 
-	// 3. Responses API / multimodal prompt
+	// 3. Responses API: check input array
+	input := gjson.GetBytes(rawJSON, "input")
+	if input.IsArray() {
+		for _, item := range input.Array() {
+			if isImagePart(item) {
+				return true
+			}
+			content := item.Get("content")
+			if content.IsArray() {
+				for _, part := range content.Array() {
+					if isImagePart(part) {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	// 4. Multimodal prompt array (legacy / custom)
 	prompt := gjson.GetBytes(rawJSON, "prompt")
 	if prompt.IsArray() {
 		for _, part := range prompt.Array() {
-			partType := strings.ToLower(strings.TrimSpace(part.Get("type").String()))
-			if partType == "image_url" || partType == "image" || partType == "input_image" {
+			if isImagePart(part) {
 				return true
 			}
 		}
 	}
 
-	// 4. Input images at root (e.g. specialized multimodal endpoints)
+	// 5. Input images at root (e.g. specialized multimodal endpoints)
 	if gjson.GetBytes(rawJSON, "input_image").Exists() || gjson.GetBytes(rawJSON, "image").IsObject() {
 		return true
 	}
