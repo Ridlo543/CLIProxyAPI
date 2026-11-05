@@ -1008,3 +1008,96 @@ func TestConvertOpenAIRequestToAntigravity_SanitizesClaudeToolIDs_MissingRespons
 		t.Fatalf("ValidateGeminiFunctionCallPairing failed: %v; output=%s", errPairing, out)
 	}
 }
+
+func TestConvertOpenAIRequestToAntigravity_MultimodalFormats(t *testing.T) {
+	// 1. Tool result containing image
+	toolResultJSON := `{
+		"model": "gemini-3.8-flash-high",
+		"messages": [
+			{
+				"role": "user",
+				"content": [
+					{
+						"type": "tool_result",
+						"tool_use_id": "call_1",
+						"content": [
+							{
+								"type": "image",
+								"data": "aGVsbG8=",
+								"mimeType": "image/png"
+							},
+							{
+								"type": "text",
+								"text": "Screenshot result"
+							}
+						]
+					}
+				]
+			}
+		]
+	}`
+	out, err := ConvertOpenAIRequestToAntigravity("gemini-3.8-flash-high", []byte(toolResultJSON), false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	inlineData := ojson.GetBytesNoCopy(out, "request.contents.0.parts.0.inlineData")
+	if inlineData.Get("mimeType").String() != "image/png" || inlineData.Get("data").String() != "aGVsbG8=" {
+		t.Fatalf("expected inlineData image part, got: %s", inlineData.Raw)
+	}
+	textPart := ojson.GetBytesNoCopy(out, "request.contents.0.parts.1.text").String()
+	if textPart != "Screenshot result" {
+		t.Fatalf("expected text part, got: %s", textPart)
+	}
+
+	// 2. Direct Anthropic source base64 image
+	anthropicImgJSON := `{
+		"model": "gemini-3.8-flash-high",
+		"messages": [
+			{
+				"role": "user",
+				"content": [
+					{
+						"type": "image",
+						"source": {
+							"type": "base64",
+							"media_type": "image/webp",
+							"data": "d2VicA=="
+						}
+					}
+				]
+			}
+		]
+	}`
+	out2, err2 := ConvertOpenAIRequestToAntigravity("gemini-3.8-flash-high", []byte(anthropicImgJSON), false)
+	if err2 != nil {
+		t.Fatalf("unexpected error: %v", err2)
+	}
+	inlineData2 := ojson.GetBytesNoCopy(out2, "request.contents.0.parts.0.inlineData")
+	if inlineData2.Get("mimeType").String() != "image/webp" || inlineData2.Get("data").String() != "d2VicA==" {
+		t.Fatalf("expected inlineData image/webp, got: %s", inlineData2.Raw)
+	}
+
+	// 3. String image_url
+	strImgJSON := `{
+		"model": "gemini-3.8-flash-high",
+		"messages": [
+			{
+				"role": "user",
+				"content": [
+					{
+						"type": "image_url",
+						"image_url": "data:image/jpeg;base64,anBlZw=="
+					}
+				]
+			}
+		]
+	}`
+	out3, err3 := ConvertOpenAIRequestToAntigravity("gemini-3.8-flash-high", []byte(strImgJSON), false)
+	if err3 != nil {
+		t.Fatalf("unexpected error: %v", err3)
+	}
+	inlineData3 := ojson.GetBytesNoCopy(out3, "request.contents.0.parts.0.inlineData")
+	if inlineData3.Get("mimeType").String() != "image/jpeg" || inlineData3.Get("data").String() != "anBlZw==" {
+		t.Fatalf("expected inlineData image/jpeg, got: %s", inlineData3.Raw)
+	}
+}

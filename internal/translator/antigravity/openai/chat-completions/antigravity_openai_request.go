@@ -168,17 +168,35 @@ func convertOpenAIRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 					partItems = append(partItems, antigravityOpenAITextPart(antigravityDemotedSystemText(content.Get("text").String(), isDemotedSystem)))
 				} else if content.IsArray() {
 					for _, item := range content.Array() {
-						switch item.Get("type").String() {
+						itemType := strings.ToLower(strings.TrimSpace(item.Get("type").String()))
+						switch itemType {
 						case "text":
 							if text := item.Get("text").String(); text != "" {
 								partItems = append(partItems, antigravityOpenAITextPart(antigravityDemotedSystemText(text, isDemotedSystem)))
 							}
-						case "image_url":
-							// Only a base64 data URL can be inlined; a remote URL has no equivalent here.
-							if mimeType, data, ok := translatorcommon.NormalizeOpenAIFileData("", "", item.Get("image_url.url").String()); ok {
+						case "image_url", "image", "input_image":
+							if mimeType, data, ok := translatorcommon.ExtractMultimodalImagePayload(item); ok {
 								partItems = append(partItems, antigravityOpenAIInlineDataPart(mimeType, data, false))
 							} else {
 								drops.Drop("image_url")
+							}
+						case "tool_result":
+							innerContent := item.Get("content")
+							if innerContent.IsArray() {
+								for _, sub := range innerContent.Array() {
+									subType := strings.ToLower(strings.TrimSpace(sub.Get("type").String()))
+									if subType == "text" {
+										if text := sub.Get("text").String(); text != "" {
+											partItems = append(partItems, antigravityOpenAITextPart(text))
+										}
+									} else if mimeType, data, ok := translatorcommon.ExtractMultimodalImagePayload(sub); ok {
+										partItems = append(partItems, antigravityOpenAIInlineDataPart(mimeType, data, false))
+									}
+								}
+							} else if innerContent.Type == ojson.String {
+								if text := innerContent.String(); text != "" {
+									partItems = append(partItems, antigravityOpenAITextPart(text))
+								}
 							}
 						case "video_url":
 							if mimeType, data, ok := translatorcommon.NormalizeOpenAIFileData("", "", item.Get("video_url.url").String()); ok {
@@ -202,6 +220,12 @@ func convertOpenAIRequestToAntigravity(modelName string, inputRawJSON []byte, _ 
 								partItems = append(partItems, antigravityOpenAIInlineDataPart(mimeType, audioData, true))
 							} else {
 								drops.Drop("input_audio")
+							}
+						default:
+							if mimeType, data, ok := translatorcommon.ExtractMultimodalImagePayload(item); ok {
+								partItems = append(partItems, antigravityOpenAIInlineDataPart(mimeType, data, false))
+							} else if text := item.Get("text").String(); text != "" {
+								partItems = append(partItems, antigravityOpenAITextPart(antigravityDemotedSystemText(text, isDemotedSystem)))
 							}
 						}
 					}
