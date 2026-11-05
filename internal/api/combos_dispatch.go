@@ -410,6 +410,10 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 		}
 		for _, cmb := range combos.Snapshot() {
 			ctxLen, maxTok := ResolveComboDefaults(cmb)
+			inputMods := []string{"text"}
+			if combos.ComboSupportsVision(cmb) {
+				inputMods = []string{"text", "image"}
+			}
 
 			var entry map[string]any
 			if isAnthropic {
@@ -423,6 +427,7 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 					"max_input_tokens":      ctxLen,
 					"max_tokens":            maxTok,
 					"max_completion_tokens": maxTok,
+					"input_modalities":      inputMods,
 				}
 			} else {
 				entry = map[string]any{
@@ -436,6 +441,8 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 					"max_completion_tokens": maxTok,
 					"max_tokens":            maxTok,
 					"outputTokenLimit":      maxTok,
+					"input_modalities":      inputMods,
+					"input":                 inputMods,
 				}
 			}
 			data = append(data, entry)

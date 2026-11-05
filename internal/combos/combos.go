@@ -135,6 +135,16 @@ func HasVisionCapability(model string) bool {
 	return false
 }
 
+// ComboSupportsVision reports whether a combo can process visual/image inputs.
+func ComboSupportsVision(combo config.ComboConfig) bool {
+	for _, ref := range combo.Models {
+		if HasVisionCapability(ref.Model) {
+			return true
+		}
+	}
+	return len(GetVisionAdapterModels()) > 0
+}
+
 // RequestRequiresVision inspects request payload structurally for real image blocks.
 // It checks message parts structurally rather than doing raw substring matching on prompt text,
 // preventing false positives when prompts discuss code, MIME types, or HTML tags.

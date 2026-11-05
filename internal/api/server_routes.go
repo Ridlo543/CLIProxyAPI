@@ -697,6 +697,11 @@ func (s *Server) getModelHandler(openaiHandler *openai.OpenAIAPIHandler, claudeH
 			}
 			ctxLen, maxTok := ResolveComboDefaults(cmb)
 
+			inputMods := []string{"text"}
+			if combos.ComboSupportsVision(cmb) {
+				inputMods = []string{"text", "image"}
+			}
+
 			if isAnthropicModelsRequest(c) {
 				c.JSON(http.StatusOK, gin.H{
 					"type":                  "model",
@@ -708,6 +713,7 @@ func (s *Server) getModelHandler(openaiHandler *openai.OpenAIAPIHandler, claudeH
 					"max_input_tokens":      ctxLen,
 					"max_tokens":            maxTok,
 					"max_completion_tokens": maxTok,
+					"input_modalities":      inputMods,
 				})
 				return
 			}
@@ -725,6 +731,8 @@ func (s *Server) getModelHandler(openaiHandler *openai.OpenAIAPIHandler, claudeH
 				"max_completion_tokens": maxTok,
 				"max_tokens":            maxTok,
 				"outputTokenLimit":      maxTok,
+				"input_modalities":      inputMods,
+				"input":                 inputMods,
 			})
 			return
 		}
