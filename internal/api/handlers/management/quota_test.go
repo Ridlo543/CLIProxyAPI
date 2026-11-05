@@ -132,3 +132,46 @@ func TestResetQuota_DoesNotAcceptAuthIDOrFileName(t *testing.T) {
 		})
 	}
 }
+
+func TestResetQuota_AcceptsProviderName(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "")
+
+	manager := coreauth.NewManager(nil, nil, nil)
+	auth := &coreauth.Auth{
+		ID:       "openai-compatibility:opencode-free:custom123",
+		FileName: "opencode-free.json",
+		Provider: "openai-compatible-opencode-free",
+		Label:    "opencode-free",
+		Status:   coreauth.StatusError,
+		ModelStates: map[string]*coreauth.ModelState{
+			"deepseek-v4.1-flash-free": {
+				Status: coreauth.StatusError,
+				Unavailable: true,
+			},
+		},
+	}
+	if _, errRegister := manager.Register(context.Background(), auth); errRegister != nil {
+		t.Fatalf("failed to register auth record: %v", errRegister)
+	}
+
+	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir()}, manager)
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	req := httptest.NewRequest(http.MethodPost, "/v8/management/routing/cooldown/reset", strings.NewReader(`{"auth_index":"opencode-free"}`))
+	req.Header.Set("Content-Type", "application/json")
+	ctx.Request = req
+	h.ResetQuota(ctx)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	updated, ok := manager.GetByID(auth.ID)
+	if !ok || updated == nil {
+		t.Fatalf("expected auth record to exist after reset")
+	}
+	if updated.Status != coreauth.StatusActive {
+		t.Fatalf("updated status = %q, want active", updated.Status)
+	}
+}
