@@ -48,6 +48,7 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 
 		model := gjson.GetBytes(raw, "model").String()
 		requiresVision := combos.RequestRequiresVision(raw)
+		requiresAudio := combos.RequestRequiresAudio(raw)
 		var chain []config.ComboModelRef
 
 		combo, found := combos.Find(model)
@@ -66,6 +67,13 @@ func (s *Server) combosChatWrapper(next gin.HandlerFunc) gin.HandlerFunc {
 						logrus.Infof("[router] 👁️ Vision adapter triggered for combo %q -> routing to %v first", combo.Name, visionPool)
 						chain = append(visionPool, chain...)
 					}
+				}
+			}
+			if requiresAudio {
+				ordered, hasAudioMember := reorderAudioFirst(chain)
+				chain = ordered
+				if !hasAudioMember {
+					logrus.Warnf("[router] ⚠️ Audio request for combo %q but no member declares audio capability", combo.Name)
 				}
 			}
 		} else if requiresVision && !modelSupportsVision(model) {
@@ -410,11 +418,7 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 		}
 		for _, cmb := range combos.Snapshot() {
 			ctxLen, maxTok := ResolveComboDefaults(cmb)
-			inputMods := []string{"text"}
-			if combos.ComboSupportsVision(cmb) {
-				inputMods = []string{"text", "image"}
-			}
-
+			inputMods := ResolveComboInputModalities(cmb)
 			var entry map[string]any
 			if isAnthropic {
 				entry = map[string]any{
@@ -867,8 +871,102 @@ func modelSupportsVision(model string) bool {
 	// 2. Model family heuristics for dynamic/unregistered/custom models
 	return combos.HasVisionCapability(model) || combos.HasVisionCapability(bare)
 }
+func modelSupportsAudio(model string) bool {
+	bare := model
+	if _, after, ok := strings.Cut(model, "/"); ok {
+		bare = after
+	}
+	if info := registry.LookupStaticModelInfo(bare); info != nil && len(info.SupportedInputModalities) > 0 {
+		for _, mod := range info.SupportedInputModalities {
+			if strings.EqualFold(mod, "audio") {
+				return true
+			}
+		}
+		return false
+	}
+	if info := registry.GetGlobalRegistry().GetModelInfo(bare, ""); info != nil && len(info.SupportedInputModalities) > 0 {
+		for _, mod := range info.SupportedInputModalities {
+			if strings.EqualFold(mod, "audio") {
+				return true
+			}
+		}
+		return false
+	}
+	m := strings.ToLower(strings.TrimSpace(bare))
+	return strings.Contains(m, "gemini") || strings.Contains(m, "whisper") || strings.Contains(m, "audio")
+}
 
-// effectiveContextLength resolves the context window a member can actually
+func reorderAudioFirst(chain []config.ComboModelRef) ([]config.ComboModelRef, bool) {
+	capable := make([]config.ComboModelRef, 0, len(chain))
+	rest := make([]config.ComboModelRef, 0, len(chain))
+	for _, m := range chain {
+		if modelSupportsAudio(m.Model) {
+			capable = append(capable, m)
+			continue
+		}
+		rest = append(rest, m)
+	}
+	if len(capable) == 0 {
+		return chain, false
+	}
+	return append(capable, rest...), true
+}
+
+// ResolveComboInputModalities aggregates the input modalities supported across member models.
+func ResolveComboInputModalities(cmb config.ComboConfig) []string {
+	modalities := make(map[string]struct{})
+	modalities["text"] = struct{}{}
+
+	for _, ref := range cmb.Models {
+		model := ref.Model
+		bare := model
+		if _, after, ok := strings.Cut(model, "/"); ok {
+			bare = after
+		}
+
+		var supported []string
+		if info := registry.LookupStaticModelInfo(bare); info != nil && len(info.SupportedInputModalities) > 0 {
+			supported = info.SupportedInputModalities
+		} else if info := registry.GetGlobalRegistry().GetModelInfo(bare, ref.Provider); info != nil && len(info.SupportedInputModalities) > 0 {
+			supported = info.SupportedInputModalities
+		} else if info := registry.GetGlobalRegistry().GetModelInfo(bare, ""); info != nil && len(info.SupportedInputModalities) > 0 {
+			supported = info.SupportedInputModalities
+		}
+
+		for _, mod := range supported {
+			modalities[strings.ToLower(strings.TrimSpace(mod))] = struct{}{}
+		}
+
+		if len(supported) == 0 {
+			if combos.HasVisionCapability(model) || combos.HasVisionCapability(bare) {
+				modalities["image"] = struct{}{}
+			}
+			if strings.Contains(strings.ToLower(bare), "gemini") {
+				modalities["image"] = struct{}{}
+				modalities["audio"] = struct{}{}
+				modalities["video"] = struct{}{}
+			}
+		}
+	}
+
+	if len(combos.GetVisionAdapterModels()) > 0 {
+		modalities["image"] = struct{}{}
+	}
+
+	order := []string{"text", "image", "audio", "video"}
+	var result []string
+	for _, mod := range order {
+		if _, ok := modalities[mod]; ok {
+			result = append(result, mod)
+			delete(modalities, mod)
+		}
+	}
+	for mod := range modalities {
+		result = append(result, mod)
+	}
+	return result
+}
+
 // accept. The static catalog covers OAuth channels only, so the registry (which
 // is built from config, including openai-compatibility max-context-length) is
 // consulted first and the static catalog is the fallback.

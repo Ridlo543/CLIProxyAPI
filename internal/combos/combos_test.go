@@ -190,3 +190,23 @@ func TestRequestRequiresVision(t *testing.T) {
 		t.Fatal("expected prompt text discussing CSS data:image/png NOT to trigger RequestRequiresVision")
 	}
 }
+
+func TestRequestRequiresAudio(t *testing.T) {
+	// Plain text talking about audio must NOT trigger audio
+	plainAudioText := []byte(`{"messages":[{"role":"user","content":"How do I play audio/wav in JavaScript?"}]}`)
+	if RequestRequiresAudio(plainAudioText) {
+		t.Fatal("expected plain text discussing audio NOT to trigger RequestRequiresAudio")
+	}
+
+	// True audio payload (OpenAI input_audio)
+	openAIAudio := []byte(`{"messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"UklGRg==","format":"wav"}}]}]}`)
+	if !RequestRequiresAudio(openAIAudio) {
+		t.Fatal("expected OpenAI input_audio to trigger RequestRequiresAudio")
+	}
+
+	// Gemini file_data with audio/wav mime
+	geminiAudio := []byte(`{"contents":[{"role":"user","parts":[{"file_data":{"mime_type":"audio/wav","file_uri":"http://example.com/audio.wav"}}]}]}`)
+	if !RequestRequiresAudio(geminiAudio) {
+		t.Fatal("expected Gemini audio file_data to trigger RequestRequiresAudio")
+	}
+}

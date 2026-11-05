@@ -213,6 +213,78 @@ func RequestRequiresVision(rawJSON []byte) bool {
 	return false
 }
 
+// RequestRequiresAudio inspects request payload structurally for audio content parts.
+func RequestRequiresAudio(rawJSON []byte) bool {
+	if len(rawJSON) == 0 {
+		return false
+	}
+
+	// 1. OpenAI: check messages content for input_audio / audio
+	messages := gjson.GetBytes(rawJSON, "messages")
+	if messages.IsArray() {
+		for _, msg := range messages.Array() {
+			content := msg.Get("content")
+			if content.IsArray() {
+				for _, part := range content.Array() {
+					partType := strings.ToLower(strings.TrimSpace(part.Get("type").String()))
+					if partType == "input_audio" || partType == "audio" {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Google Gemini: check contents parts for audio mime types
+	contents := gjson.GetBytes(rawJSON, "contents")
+	if contents.IsArray() {
+		for _, c := range contents.Array() {
+			parts := c.Get("parts")
+			if parts.IsArray() {
+				for _, part := range parts.Array() {
+					if fileData := part.Get("file_data"); fileData.Exists() {
+						if strings.HasPrefix(strings.ToLower(fileData.Get("mime_type").String()), "audio/") {
+							return true
+						}
+					}
+					if fileData := part.Get("fileData"); fileData.Exists() {
+						if strings.HasPrefix(strings.ToLower(fileData.Get("mimeType").String()), "audio/") {
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Responses API input
+	input := gjson.GetBytes(rawJSON, "input")
+	if input.IsArray() {
+		for _, item := range input.Array() {
+			partType := strings.ToLower(strings.TrimSpace(item.Get("type").String()))
+			if partType == "input_audio" || partType == "audio" {
+				return true
+			}
+			content := item.Get("content")
+			if content.IsArray() {
+				for _, part := range content.Array() {
+					partType := strings.ToLower(strings.TrimSpace(part.Get("type").String()))
+					if partType == "input_audio" || partType == "audio" {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	// 4. Root input_audio
+	if gjson.GetBytes(rawJSON, "input_audio").Exists() {
+		return true
+	}
+
+	return false
+}
+
 func Snapshot() []config.ComboConfig {
 	mu.RLock()
 	defer mu.RUnlock()

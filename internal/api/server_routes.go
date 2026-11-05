@@ -697,10 +697,7 @@ func (s *Server) getModelHandler(openaiHandler *openai.OpenAIAPIHandler, claudeH
 			}
 			ctxLen, maxTok := ResolveComboDefaults(cmb)
 
-			inputMods := []string{"text"}
-			if combos.ComboSupportsVision(cmb) {
-				inputMods = []string{"text", "image"}
-			}
+			inputMods := ResolveComboInputModalities(cmb)
 
 			if isAnthropicModelsRequest(c) {
 				c.JSON(http.StatusOK, gin.H{
