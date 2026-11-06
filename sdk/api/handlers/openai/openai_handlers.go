@@ -185,6 +185,58 @@ func (h *OpenAIAPIHandler) ChatCompletions(c *gin.Context) {
 
 }
 
+// SystemOne handles the dedicated TypeSafe SystemOne decision endpoint (POST /v1/systemone).
+// It supports native TypeSafe question requests (state, questions) as well as chat-like queries,
+// forwarding them to the SystemOne decision engine without forcing them into chat completions.
+func (h *OpenAIAPIHandler) SystemOne(c *gin.Context) {
+	rawJSON, err := handlers.ReadRequestBody(c)
+	if err != nil {
+		c.JSON(clienterror.HTTPStatusFromErrorOr(err, http.StatusBadRequest), handlers.ErrorResponse{
+			Error: handlers.ErrorDetail{
+				Message: fmt.Sprintf("Invalid request: %v", err),
+				Type:    "invalid_request_error",
+			},
+		})
+		return
+	}
+
+	modelName := strings.TrimSpace(ojson.GetBytesNoCopy(rawJSON, "model").String())
+	if modelName == "" {
+		modelName = "systemone"
+		rawJSON, _ = ojson.SetBytes(rawJSON, "model", modelName)
+	}
+	// If the payload has state & questions (TypeSafe format) but no messages array,
+	// synthesize messages so general LLM fallback providers (Gemini, Claude) can also process it cleanly.
+	if !ojson.GetBytesNoCopy(rawJSON, "messages").Exists() {
+		state := ojson.GetBytesNoCopy(rawJSON, "state").String()
+		questionsResult := ojson.GetBytesNoCopy(rawJSON, "questions")
+		qSummary := ""
+		if questionsResult.Exists() {
+			qSummary = questionsResult.Raw
+		}
+		promptText := fmt.Sprintf("SystemOne Evaluation Request:\nContext / State:\n%s\n\nQuestions to evaluate:\n%s\n\nProvide evaluation in valid JSON.", state, qSummary)
+		msgDoc := ojson.NewDoc([]byte(`[{"role":"user","content":""}]`))
+		_ = msgDoc.Set("0.content", promptText)
+		rawJSON, _ = ojson.SetRawBytes(rawJSON, "messages", msgDoc.Bytes())
+	}
+
+	c.Header("Content-Type", "application/json")
+	cliCtx, cliCancel := h.GetContextWithCancel(h, c, context.Background())
+	stopKeepAlive := h.StartNonStreamingKeepAlive(c, cliCtx)
+	resp, upstreamHeaders, errMsg := h.ExecuteWithAuthManager(cliCtx, h.HandlerType(), modelName, rawJSON, h.GetAlt(c))
+	stopKeepAlive()
+	if errMsg != nil {
+		h.WriteErrorResponse(c, errMsg)
+		cliCancel(errMsg.Error)
+		return
+	}
+	handlers.WriteUpstreamHeaders(c.Writer.Header(), upstreamHeaders)
+	c.Writer.WriteHeader(http.StatusOK)
+	_, _ = c.Writer.Write(resp)
+	c.Writer.Flush()
+	cliCancel()
+}
+
 // shouldTreatAsResponsesFormat detects OpenAI Responses-style payloads that are
 // accidentally sent to the Chat Completions endpoint.
 func shouldTreatAsResponsesFormat(rawJSON []byte) bool {
@@ -195,7 +247,6 @@ func shouldTreatAsResponsesFormat(rawJSON []byte) bool {
 	}
 	return fields[1].Exists() || fields[2].Exists()
 }
-
 // Completions handles the /v1/completions endpoint.
 // It determines whether the request is for a streaming or non-streaming response
 // and calls the appropriate handler based on the model provider.
