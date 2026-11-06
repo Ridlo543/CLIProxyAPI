@@ -579,11 +579,13 @@ func (s *Server) combosAugmentModels(next gin.HandlerFunc) gin.HandlerFunc {
 				data = filtered
 			}
 		}
+		for _, d := range data {
+			EnrichModelCapabilities(d)
+		}
 
 		topMap["data"] = data
 		out, _ := json.Marshal(topMap)
 		if c.Writer.Header().Get("Content-Type") == "" {
-			c.Writer.Header().Set("Content-Type", "application/json")
 		}
 		c.Writer.WriteHeader(http.StatusOK)
 		_, _ = c.Writer.Write(out)
@@ -1205,4 +1207,73 @@ func reorderVisionFirst(chain []config.ComboModelRef) ([]config.ComboModelRef, b
 		return chain, false
 	}
 	return append(capable, rest...), true
+}
+
+// EnrichModelCapabilities decorates a model map with category, endpoints, and capabilities
+// so clients (OMP, Claude Code, curl) and the Web UI immediately recognize embedding, systemone, and image generation models.
+func EnrichModelCapabilities(d map[string]any) {
+	if d == nil {
+		return
+	}
+	id, _ := d["id"].(string)
+	if id == "" {
+		return
+	}
+	lower := strings.ToLower(id)
+
+	// 1. Embedding Models (POST /v1/embeddings)
+	if strings.Contains(lower, "embedding") ||
+		strings.Contains(lower, "bge-") ||
+		strings.Contains(lower, "bge_") ||
+		strings.Contains(lower, "embed") {
+		d["category"] = "embedding"
+		d["endpoints"] = []string{"/v1/embeddings"}
+		d["capabilities"] = map[string]any{
+			"embeddings":       true,
+			"chat_completions": false,
+		}
+		d["output_modalities"] = []string{"embedding"}
+		d["output"] = []string{"embedding"}
+		return
+	}
+
+	// 2. System One / Decision / Jev Models (POST /v1/systemone)
+	if lower == "systemone" ||
+		strings.HasPrefix(lower, "systemone") ||
+		strings.Contains(lower, "jev") ||
+		strings.Contains(lower, "openjev") {
+		d["category"] = "systemone"
+		d["endpoints"] = []string{"/v1/systemone", "/v1/chat/completions"}
+		d["capabilities"] = map[string]any{
+			"system_one":       true,
+			"decision":         true,
+			"chat_completions": true,
+		}
+		return
+	}
+
+	// 3. Image Generation Models (POST /v1/images/generations)
+	if lower == "ig" || lower == "100%" ||
+		strings.Contains(lower, "image-gen") ||
+		strings.Contains(lower, "image_gen") ||
+		strings.Contains(lower, "flux") ||
+		strings.Contains(lower, "dall-e") ||
+		strings.Contains(lower, "imagen") {
+		d["category"] = "image_generation"
+		d["endpoints"] = []string{"/v1/images/generations"}
+		d["capabilities"] = map[string]any{
+			"image_generation": true,
+			"chat_completions": false,
+		}
+		d["output_modalities"] = []string{"image"}
+		d["output"] = []string{"image"}
+		return
+	}
+
+	// 4. Default Chat / Text Models
+	d["category"] = "chat"
+	d["endpoints"] = []string{"/v1/chat/completions"}
+	d["capabilities"] = map[string]any{
+		"chat_completions": true,
+	}
 }

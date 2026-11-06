@@ -716,7 +716,7 @@ func (s *Server) getModelHandler(openaiHandler *openai.OpenAIAPIHandler, claudeH
 				return
 			}
 
-			c.JSON(http.StatusOK, gin.H{
+			entry := gin.H{
 				"id":                    cmb.Name,
 				"object":                "model",
 				"created":               1700000000,
@@ -731,7 +731,9 @@ func (s *Server) getModelHandler(openaiHandler *openai.OpenAIAPIHandler, claudeH
 				"outputTokenLimit":      maxTok,
 				"input_modalities":      inputMods,
 				"input":                 inputMods,
-			})
+			}
+			EnrichModelCapabilities(entry)
+			c.JSON(http.StatusOK, entry)
 			return
 		}
 
@@ -827,7 +829,7 @@ func (s *Server) getModelHandler(openaiHandler *openai.OpenAIAPIHandler, claudeH
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{
+		entry := gin.H{
 			"id":                    info.ID,
 			"object":                "model",
 			"created":               info.Created,
@@ -839,7 +841,9 @@ func (s *Server) getModelHandler(openaiHandler *openai.OpenAIAPIHandler, claudeH
 			"max_completion_tokens": maxTok,
 			"max_tokens":            maxTok,
 			"outputTokenLimit":      maxTok,
-		})
+		}
+		EnrichModelCapabilities(entry)
+		c.JSON(http.StatusOK, entry)
 	}
 }
 
