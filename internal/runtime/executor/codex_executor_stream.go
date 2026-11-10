@@ -120,7 +120,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 		return nil, err
 	}
 	body = upstreamBody
-	upstreamModel := strings.TrimSpace(doc.Get("model").String())
+upstreamModel = strings.TrimSpace(doc.Get("model").String())
 	if upstreamModel != "" && upstreamModel != baseModel {
 		reporter.SetUpstreamModel(upstreamModel)
 	}
