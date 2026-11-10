@@ -180,12 +180,39 @@ func (h *Handler) ImportAntigravityModels(c *gin.Context) {
 
 	added := registry.AppendAntigravityModels(newModels)
 
-	// Re-register models for all active Antigravity auths so the new models are immediately usable
-	reg := registry.GetGlobalRegistry()
-	allAntigravity := registry.GetAntigravityModels()
-	for _, a := range candidates {
-		reg.RegisterClient(a.ID, a.Provider, allAntigravity)
+// Re-register models for all active Antigravity auths so the new models are immediately usable.
+// Preserve models already registered for each credential: this includes configured fork aliases
+// such as the isolated *-jb entity, which is not returned by Google's upstream catalog.
+reg := registry.GetGlobalRegistry()
+allAntigravity := registry.GetAntigravityModels()
+for _, a := range candidates {
+	current := reg.GetModelsForClient(a.ID)
+	merged := make([]*registry.ModelInfo, 0, len(allAntigravity)+len(current))
+	seen := make(map[string]struct{}, len(allAntigravity)+len(current))
+	for _, model := range allAntigravity {
+		if model == nil || strings.TrimSpace(model.ID) == "" {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(model.ID))
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		merged = append(merged, model)
 	}
+	for _, model := range current {
+		if model == nil || strings.TrimSpace(model.ID) == "" {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(model.ID))
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		merged = append(merged, model)
+	}
+	reg.RegisterClient(a.ID, a.Provider, merged)
+}
 
 	log.Infof("[management] imported %d new Antigravity models from upstream: %v", len(added), added)
 

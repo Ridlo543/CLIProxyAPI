@@ -1241,7 +1241,8 @@ func EnrichModelCapabilities(d map[string]any) {
 	if lower == "systemone" ||
 		strings.HasPrefix(lower, "systemone") ||
 		strings.Contains(lower, "jev") ||
-		strings.Contains(lower, "openjev") {
+		strings.Contains(lower, "openjev") ||
+		strings.Contains(lower, "laya") {
 		d["category"] = "systemone"
 		d["endpoints"] = []string{"/v1/systemone", "/v1/chat/completions"}
 		d["capabilities"] = map[string]any{

@@ -25,6 +25,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	cliproxyusage "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/usage"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/httptransport"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/proxyutil"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
@@ -76,12 +77,22 @@ func (e *AntigravityExecutor) obfuscateSensitiveWords(payload []byte) []byte {
 // injectSystemInstruction prepends the operator-configured persona/system
 // instruction for models listed in antigravity.system-instruction-models.
 // It runs after sensitive-word obfuscation so the injected text is not
-// itself obfuscated.
-func (e *AntigravityExecutor) injectSystemInstruction(modelName string, payload []byte) []byte {
+func (e *AntigravityExecutor) injectSystemInstruction(ctx context.Context, opts cliproxyexecutor.Options, modelName string, payload []byte) []byte {
 	if e == nil || e.cfg == nil {
 		return payload
 	}
-	return antigravitygemini.InjectSystemInstruction(modelName, payload, &e.cfg.Antigravity)
+	alias := helps.PayloadRequestedModel(opts, "")
+	if alias == "" {
+		alias = cliproxyusage.RequestedModelAliasFromContext(ctx)
+	}
+	target := modelName
+	if alias != "" {
+		if _, after, ok := strings.Cut(alias, "/"); ok && after != "" {
+			alias = after
+		}
+		target = alias
+	}
+	return antigravitygemini.InjectSystemInstruction(target, payload, &e.cfg.Antigravity)
 }
 
 func (e *AntigravityExecutor) obfuscateSensitiveWordsDoc(doc *ojson.Doc) bool {

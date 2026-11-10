@@ -98,7 +98,7 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 	finalize := helps.NewPayloadFinalizer(e.cfg, e.Identifier(), baseModel, "antigravity", "request", originalTranslated, req, opts)
 	ctx = helps.WithPayloadFinalizer(ctx, finalize)
 	e.obfuscateSensitiveWordsDoc(doc)
-	if modified := e.injectSystemInstruction(baseModel, doc.Bytes()); len(modified) > 0 {
+	if modified := e.injectSystemInstruction(ctx, opts, baseModel, doc.Bytes()); len(modified) > 0 {
 		doc = ojson.NewDoc(modified)
 	}
 	sanitizeAntigravityGeminiRequestSignaturesDoc(baseModel, doc)
