@@ -374,12 +374,6 @@ func (h *Handler) GetAuthFileModels(c *gin.Context) {
 		if m.OwnedBy != "" {
 			entry["owned_by"] = m.OwnedBy
 		}
-		if len(m.SupportedInputModalities) > 0 {
-			entry["input_modalities"] = m.SupportedInputModalities
-		}
-		if m.Thinking != nil {
-			entry["supports_thinking"] = true
-		}
 		result = append(result, entry)
 	}
 
@@ -438,25 +432,6 @@ func (h *Handler) listAuthFilesFromDisk(c *gin.Context, pagination authFilesPagi
 			if projectID := strings.TrimSpace(fields[2].String()); projectID != "" {
 				fileData["project_id"] = strings.Clone(projectID)
 			}
-			if planType := strings.TrimSpace(ojson.GetBytes(data, "plan_type").String()); planType != "" {
-				fileData["plan_type"] = planType
-			}
-			if exp := strings.TrimSpace(ojson.GetBytes(data, "expired").String()); exp != "" {
-				fileData["expired"] = exp
-			}
-			if idToken := strings.TrimSpace(ojson.GetBytes(data, "id_token").String()); idToken != "" {
-				if claims, errJwt := codex.ParseJWTToken(idToken); errJwt == nil && claims != nil {
-					if claims.CodexAuthInfo.ChatgptPlanType != "" && fileData["plan_type"] == nil {
-						fileData["plan_type"] = claims.CodexAuthInfo.ChatgptPlanType
-					}
-					if claims.CodexAuthInfo.ChatgptSubscriptionActiveUntil != nil {
-						fileData["subscription_active_until"] = claims.CodexAuthInfo.ChatgptSubscriptionActiveUntil
-					}
-					if claims.CodexAuthInfo.ChatgptSubscriptionActiveStart != nil {
-						fileData["subscription_active_start"] = claims.CodexAuthInfo.ChatgptSubscriptionActiveStart
-					}
-				}
-			}
 			if pv := fields[3]; pv.Exists() {
 				switch pv.Type {
 				case ojson.Number:
@@ -508,37 +483,6 @@ func (h *Handler) listAuthFilesFromDisk(c *gin.Context, pagination authFilesPagi
 	c.JSON(200, authFilesListResponse(observedAt, files, pagination, total, end))
 }
 
-func extractValidationURLFromText(msg string) string {
-	if len(msg) == 0 {
-		return ""
-	}
-	if ojson.Valid(msg) {
-		parsed := ojson.Parse(msg)
-		details := parsed.Get("error.details")
-		if details.IsArray() {
-			for _, d := range details.Array() {
-				if d.Get("reason").String() == "VALIDATION_REQUIRED" {
-					if u := d.Get("metadata.validation_url").String(); u != "" {
-						return u
-					}
-				}
-			}
-		}
-	}
-	start := strings.Index(msg, "https://accounts.google.com")
-	if start < 0 {
-		return ""
-	}
-	sub := msg[start:]
-	end := strings.IndexFunc(sub, func(r rune) bool {
-		return r == '"' || r == '\'' || r == ' ' || r == '\t' || r == '\r' || r == '\n' || r == '\\'
-	})
-	if end > 0 {
-		return sub[:end]
-	}
-	return sub
-}
-
 // authFileQuotaContext carries request-scoped quota capability data for auth file entries.
 type authFileQuotaContext struct {
 	// pluginIDs maps normalized provider keys to the quota plugin selected for them.
@@ -568,11 +512,6 @@ func isPersistentAuthFailure(auth *coreauth.Auth, now time.Time) bool {
 	}
 	// An explicit token expiration status.
 	if strings.EqualFold(strings.TrimSpace(auth.StatusMessage), "token expired") {
-		return true
-	}
-	if (auth.Attributes != nil && auth.Attributes["validation_url"] != "") ||
-		strings.Contains(auth.StatusMessage, "verification_required") ||
-		strings.Contains(auth.StatusMessage, "VALIDATION_REQUIRED") {
 		return true
 	}
 	return false
@@ -744,48 +683,6 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quota authFileQu
 		"runtime_only":   runtimeOnly,
 		"source":         "memory",
 		"size":           int64(0),
-		"proxy_pool":     auth.ProxyPool,
-		"proxy_url":      auth.ProxyURL,
-	}
-	if auth.Attributes != nil {
-		if valURL := strings.TrimSpace(auth.Attributes["validation_url"]); valURL != "" {
-			entry["validation_url"] = valURL
-			entry["needs_verification"] = true
-		}
-	}
-	if auth.Metadata != nil && entry["validation_url"] == nil {
-		if valURL, ok := auth.Metadata["validation_url"].(string); ok && strings.TrimSpace(valURL) != "" {
-			entry["validation_url"] = strings.TrimSpace(valURL)
-			entry["needs_verification"] = true
-		}
-	}
-	rawMsg := auth.StatusMessage
-	if auth.LastError != nil && strings.Contains(auth.LastError.Message, "validation_url") {
-		rawMsg = auth.LastError.Message
-	}
-	if strings.Contains(rawMsg, "VALIDATION_REQUIRED") || strings.Contains(rawMsg, "verification_required") {
-		entry["needs_verification"] = true
-		entry["status_message"] = "verification_required"
-		if entry["validation_url"] == nil {
-			if valURL := extractValidationURLFromText(rawMsg); valURL != "" {
-				entry["validation_url"] = valURL
-			}
-		}
-	}
-	if statusMessage == "verification_required" {
-		entry["needs_verification"] = true
-		entry["status_message"] = "verification_required"
-	}
-	if !nextRetryAfter.IsZero() {
-		entry["next_retry_after"] = nextRetryAfter
-	}
-	if !auth.Quota.NextRecoverAt.IsZero() {
-		// Expose the credential's cooldown expiry so management clients can
-		// render a countdown instead of guessing from status alone.
-		entry["quota_next_recover_at"] = auth.Quota.NextRecoverAt
-		if auth.Quota.Reason != "" {
-			entry["quota_reason"] = auth.Quota.Reason
-		}
 	}
 	entry["success"] = auth.Success
 	entry["failed"] = auth.Failed
@@ -813,12 +710,6 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quota authFileQu
 	}
 	if projectID := authProjectID(auth); projectID != "" {
 		entry["project_id"] = projectID
-	}
-	if planType := authPlanType(auth); planType != "" {
-		entry["plan_type"] = planType
-	}
-	if exp := authExpired(auth); exp != "" {
-		entry["expired"] = exp
 	}
 	if accountType, account := auth.AccountInfo(); accountType != "" || account != "" {
 		if accountType != "" {
@@ -859,12 +750,6 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quota authFileQu
 	}
 	if claims := extractCodexIDTokenClaims(auth); claims != nil {
 		entry["id_token"] = claims
-		if v, ok := claims["chatgpt_subscription_active_until"]; ok && v != nil {
-			entry["subscription_active_until"] = v
-		}
-		if v, ok := claims["chatgpt_subscription_active_start"]; ok && v != nil {
-			entry["subscription_active_start"] = v
-		}
 	}
 	// Expose priority from Attributes (set by synthesizer from JSON "priority" field).
 	// Fall back to Metadata for auths registered via UploadAuthFile (no synthesizer).
@@ -907,6 +792,11 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quota authFileQu
 		entry["request_retry"] = requestRetry
 	}
 	if quota.v8 {
+		// OAuth login entry the credential was signed in through; multi-entry plugins store it
+		// next to the provider, and the deprecated v0 route keeps its frozen response shape.
+		if oauthProvider := authOAuthProvider(auth); oauthProvider != "" {
+			entry["oauth_provider"] = oauthProvider
+		}
 		nowUTC := time.Now().UTC()
 		if exp, okExp := auth.AccessTokenExpirationTime(); okExp && !exp.IsZero() && exp.Unix() > 0 {
 			entry["access_token_expires_at"] = exp.UTC().Format(time.RFC3339)
@@ -1094,68 +984,38 @@ func authProjectID(auth *coreauth.Auth) string {
 	}
 	return ""
 }
-func authPlanType(auth *coreauth.Auth) string {
+
+func authOAuthProvider(auth *coreauth.Auth) string {
 	if auth == nil {
 		return ""
 	}
-	if auth.Metadata != nil {
-		if v, ok := auth.Metadata["plan_type"].(string); ok && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
+	for _, key := range []string{"oauth_provider", "portal"} {
+		if auth.Attributes != nil {
+			if v := strings.ToLower(strings.TrimSpace(auth.Attributes[key])); v != "" {
+				return v
+			}
 		}
-		if v, ok := auth.Metadata["tier"].(string); ok && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	if auth.Attributes != nil {
-		if v := strings.TrimSpace(auth.Attributes["plan_type"]); v != "" {
-			return v
-		}
-		if v := strings.TrimSpace(auth.Attributes["tier"]); v != "" {
-			return v
-		}
-	}
-	// Antigravity reports no tier during OAuth, so nothing is stored on disk for
-	// most credentials. loadCodeAssist does report one, and the executor already
-	// caches it while refreshing AI credits -- use that rather than leaving every
-	// account blank or, worse, labelling them all from a hardcoded string.
-	if strings.EqualFold(strings.TrimSpace(auth.Provider), "antigravity") {
-		if hint, ok := coreauth.GetAntigravityCreditsHint(strings.TrimSpace(auth.ID)); ok {
-			if tier := strings.TrimSpace(hint.PaidTierID); tier != "" {
-				return tier
+		if auth.Metadata != nil {
+			if raw, ok := auth.Metadata[key].(string); ok {
+				if v := strings.ToLower(strings.TrimSpace(raw)); v != "" {
+					return v
+				}
 			}
 		}
 	}
 	return ""
 }
 
-func authExpired(auth *coreauth.Auth) string {
-	if auth == nil {
-		return ""
-	}
-	if auth.Metadata != nil {
-		if v, ok := auth.Metadata["expired"].(string); ok && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	if auth.Attributes != nil {
-		if v := strings.TrimSpace(auth.Attributes["expired"]); v != "" {
-			return v
-		}
-	}
-	return ""
-}
 func extractCodexIDTokenClaims(auth *coreauth.Auth) gin.H {
-	if auth == nil {
+	if auth == nil || auth.Metadata == nil {
 		return nil
 	}
-	idTokenRaw := ""
-	if auth.Metadata != nil {
-		if v, ok := auth.Metadata["id_token"].(string); ok {
-			idTokenRaw = v
-		}
+	if !strings.EqualFold(strings.TrimSpace(auth.Provider), "codex") {
+		return nil
 	}
-	if idTokenRaw == "" && auth.Attributes != nil {
-		idTokenRaw = auth.Attributes["id_token"]
+	idTokenRaw, ok := auth.Metadata["id_token"].(string)
+	if !ok {
+		return nil
 	}
 	idToken := strings.TrimSpace(idTokenRaw)
 	if idToken == "" {

@@ -74,6 +74,7 @@ func ConvertOpenAIResponsesRequestToCodex(modelName string, inputRawJSON []byte,
 	inputResult = convertSystemRoleToDeveloperDoc(inputResult, ensureDoc)
 	normalizeCodexBuiltinToolsDoc(rawJSON, ensureDoc)
 	normalizeEmptyFunctionCallArgumentsDoc(inputResult, ensureDoc)
+	translatorcommon.SanitizeOrphanResponsesToolOutputsInputDoc(inputResult, ensureDoc)
 
 	// Map virtual Codex review models to upstream models (e.g. gpt-5.6-sol-review -> gpt-5.6-sol)
 	if strings.HasSuffix(modelName, "-review") {
