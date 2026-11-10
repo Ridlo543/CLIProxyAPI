@@ -539,6 +539,36 @@ func isModelStateBlocked(state *coreauth.ModelState, now time.Time) bool {
 	}
 	return true
 }
+func authPlanType(auth *coreauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	if auth.Metadata != nil {
+		if v, ok := auth.Metadata["plan_type"].(string); ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+		if v, ok := auth.Metadata["tier"].(string); ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	if auth.Attributes != nil {
+		if v := strings.TrimSpace(auth.Attributes["plan_type"]); v != "" {
+			return v
+		}
+		if v := strings.TrimSpace(auth.Attributes["tier"]); v != "" {
+			return v
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(auth.Provider), "antigravity") {
+		if hint, ok := coreauth.GetAntigravityCreditsHint(strings.TrimSpace(auth.ID)); ok {
+			if tier := strings.TrimSpace(hint.PaidTierID); tier != "" {
+				return tier
+			}
+		}
+	}
+	return ""
+}
+
 
 func reconcileAuthFileCooldownState(auth *coreauth.Auth, now time.Time) (unavailable bool, status coreauth.Status, statusMessage string, nextRetry time.Time) {
 	if auth == nil {
