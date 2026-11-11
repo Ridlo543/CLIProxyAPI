@@ -1,14 +1,17 @@
 package management
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -108,18 +111,30 @@ func (h *Handler) GetLatestVersion(c *gin.Context) {
 }
 
 func WriteConfig(path string, data []byte) error {
+	prepared, err := prepareConfigBytes(data)
+	if err != nil {
+		return err
+	}
+	return writeConfigBytes(path, prepared)
+}
+
+// prepareConfigBytes returns the exact bytes WriteConfig stores for data.
+func prepareConfigBytes(data []byte) ([]byte, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return err
+		return nil, err
 	}
 	if len(doc.Content) > 0 && config.IsV8ConfigLayout(doc.Content[0]) {
 		var err error
 		data, _, err = config.NormalizeConfigLayout(data, true)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
-	data = config.NormalizeCommentIndentation(data)
+	return config.NormalizeCommentIndentation(data), nil
+}
+
+func writeConfigBytes(path string, data []byte) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
@@ -212,6 +227,470 @@ func (h *Handler) PutConfigYAML(c *gin.Context) {
 		c.Header("ETag", configETag(body))
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "changed": []string{"config"}})
+}
+
+// configPathOperation is one targeted config mutation. Expect, when present,
+// is the value the client read at Path; the mutation is refused unless the
+// server reads the same value, so a client-side YAML parser that disagrees
+// with this one cannot write back a misread subtree.
+type configPathOperation struct {
+	Path    []string        `json:"path"`
+	Value   json.RawMessage `json:"value"`
+	Delete  bool            `json:"delete"`
+	Replace bool            `json:"replace"`
+	Expect  json.RawMessage `json:"expect"`
+}
+
+// PatchConfigYAMLPath applies one validated mutation to a YAML mapping path while
+// preserving every unrelated YAML node, including fields unknown to this build.
+func (h *Handler) PatchConfigYAMLPath(c *gin.Context) {
+	var request struct {
+		Operations []configPathOperation `json:"operations"`
+		configPathOperation
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_patch"})
+		return
+	}
+	if len(request.Operations) == 0 && len(request.Path) > 0 {
+		request.Operations = append(request.Operations, request.configPathOperation)
+	}
+	if len(request.Operations) == 0 || len(request.Operations) > 128 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_patch"})
+		return
+	}
+	if len(c.Request.Header.Values("If-Match")) == 0 {
+		c.JSON(http.StatusPreconditionRequired, gin.H{"error": "if_match_required"})
+		return
+	}
+	values := make([]*yaml.Node, len(request.Operations))
+	for index, operation := range request.Operations {
+		if len(operation.Path) == 0 || len(operation.Value) == 0 && !operation.Delete {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_patch", "index": index})
+			return
+		}
+		// Path segments are literal mapping keys, so a model name such as
+		// "nvidia/llama" is a valid segment.
+		for _, part := range operation.Path {
+			if strings.TrimSpace(part) == "" || strings.ContainsRune(part, '\x00') {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_path", "index": index})
+				return
+			}
+		}
+		for previous := 0; previous < index; previous++ {
+			if configPathsOverlap(request.Operations[previous].Path, operation.Path) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "overlapping_paths", "index": index})
+				return
+			}
+		}
+		if !operation.Delete {
+			var value yaml.Node
+			if err := yaml.Unmarshal(operation.Value, &value); err != nil || len(value.Content) == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_patch_value", "index": index})
+				return
+			}
+			blockStyleConfigYAMLValue(value.Content[0])
+			values[index] = value.Content[0]
+		}
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	current, errRead := os.ReadFile(h.configFilePath)
+	if errRead != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "read_failed", "message": errRead.Error()})
+		return
+	}
+	currentETag := configETag(current)
+	if !ifMatchSatisfied(c.Request.Header.Values("If-Match"), currentETag) {
+		c.Header("ETag", currentETag)
+		c.JSON(http.StatusPreconditionFailed, gin.H{"error": "config_changed"})
+		return
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal(current, &document); err != nil || len(document.Content) == 0 || document.Content[0].Kind != yaml.MappingNode {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "invalid_config", "message": "config root must be a YAML mapping"})
+		return
+	}
+	var currentDecoded any
+	if err := yaml.Unmarshal(current, &currentDecoded); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "invalid_config", "message": err.Error()})
+		return
+	}
+	for index, operation := range request.Operations {
+		if len(operation.Expect) == 0 {
+			continue
+		}
+		var expected any
+		if err := yaml.Unmarshal(operation.Expect, &expected); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_expect", "index": index})
+			return
+		}
+		stored, found := configValueAt(currentDecoded, operation.Path)
+		if !found || !configValuesEquivalent(expected, stored) {
+			c.JSON(http.StatusConflict, gin.H{"error": "expect_mismatch", "index": index, "path": operation.Path})
+			return
+		}
+	}
+	merged := make([]bool, len(request.Operations))
+	for index, operation := range request.Operations {
+		parent := document.Content[0]
+		for _, part := range operation.Path[:len(operation.Path)-1] {
+			next := configYAMLMappingValue(parent, part)
+			if next == nil {
+				next = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+				parent.Content = append(parent.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: part}, next)
+			}
+			if next.Kind != yaml.MappingNode {
+				c.JSON(http.StatusConflict, gin.H{"error": "path_not_mapping", "index": index})
+				return
+			}
+			parent = next
+		}
+		key := operation.Path[len(operation.Path)-1]
+		if operation.Delete {
+			if !configYAMLDeleteMappingValue(parent, key) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "path_not_found", "index": index})
+				return
+			}
+			continue
+		}
+		currentValue := configYAMLMappingValue(parent, key)
+		updatedValue := values[index]
+		if currentValue == nil {
+			parent.Content = append(parent.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, updatedValue)
+		} else if !operation.Replace && currentValue.Kind == yaml.MappingNode && updatedValue.Kind == yaml.MappingNode {
+			mergeConfigYAMLMapping(currentValue, updatedValue)
+			merged[index] = true
+		} else {
+			updatedValue.HeadComment, updatedValue.LineComment, updatedValue.FootComment = currentValue.HeadComment, currentValue.LineComment, currentValue.FootComment
+			parent.Content[indexYAMLMappingValue(parent, key)+1] = updatedValue
+		}
+	}
+	var output bytes.Buffer
+	encoder := yaml.NewEncoder(&output)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(&document); err != nil {
+		_ = encoder.Close()
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "invalid_config", "message": err.Error()})
+		return
+	}
+	if err := encoder.Close(); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "invalid_config", "message": err.Error()})
+		return
+	}
+	updatedBytes, err := prepareConfigBytes(output.Bytes())
+	if err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "invalid_config", "message": err.Error()})
+		return
+	}
+	validated, err := config.ParseConfigBytes(updatedBytes)
+	if err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "invalid_config", "message": err.Error()})
+		return
+	}
+	paths := make([][]string, len(request.Operations))
+	deletes := make([]bool, len(request.Operations))
+	for index, operation := range request.Operations {
+		paths[index], deletes[index] = operation.Path, operation.Delete
+	}
+	if err := verifyConfigYAMLPatch(current, updatedBytes, paths, deletes, merged, values); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "patch_not_preserved", "message": err.Error()})
+		return
+	}
+	if err := writeConfigBytes(h.configFilePath, updatedBytes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "write_failed", "message": err.Error()})
+		return
+	}
+	h.cfg = validated
+	snapshot := h.reloadSnapshotConfigLocked()
+	if stored, err := os.ReadFile(h.configFilePath); err == nil {
+		c.Header("ETag", configETag(stored))
+	}
+	h.reloadConfigAfterManagementSaveAsync(c.Request.Context(), snapshot)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// configPathsOverlap reports whether one path equals or contains the other.
+func configPathsOverlap(a, b []string) bool {
+	if len(a) > len(b) {
+		a, b = b, a
+	}
+	for index := range a {
+		if a[index] != b[index] {
+			return false
+		}
+	}
+	return true
+}
+
+// blockStyleConfigYAMLValue drops the JSON flow and double-quoted styles a
+// patch value carries, so it is written like the rest of the document. The
+// encoder still quotes any string that would otherwise read as another type.
+func blockStyleConfigYAMLValue(node *yaml.Node) {
+	switch node.Kind {
+	case yaml.MappingNode:
+		node.Style = 0
+		if len(node.Content) == 0 {
+			node.Style = yaml.FlowStyle
+		}
+	case yaml.SequenceNode:
+		node.Style = 0
+		if len(node.Content) == 0 {
+			node.Style = yaml.FlowStyle
+		}
+	case yaml.ScalarNode:
+		if node.Style == yaml.DoubleQuotedStyle {
+			node.Style = 0
+		}
+	}
+	for _, child := range node.Content {
+		blockStyleConfigYAMLValue(child)
+	}
+}
+
+// verifyConfigYAMLPatch re-reads the bytes about to be written and checks that
+// every target holds exactly the requested value (or is gone, for a delete)
+// and that everything outside the targets reads the same as before.
+func verifyConfigYAMLPatch(before, after []byte, paths [][]string, deletes, merged []bool, values []*yaml.Node) error {
+	var original, updated any
+	if err := yaml.Unmarshal(before, &original); err != nil {
+		return fmt.Errorf("read current config: %w", err)
+	}
+	if err := yaml.Unmarshal(after, &updated); err != nil {
+		return fmt.Errorf("read updated config: %w", err)
+	}
+	for index, path := range paths {
+		got, found := configValueAt(updated, path)
+		if deletes[index] {
+			if found {
+				return fmt.Errorf("operation %d: %s was not deleted", index, strings.Join(path, "."))
+			}
+			continue
+		}
+		var want any
+		if err := values[index].Decode(&want); err != nil {
+			return fmt.Errorf("operation %d: decode value: %w", index, err)
+		}
+		if !found || !configValueMatches(want, got, merged[index]) {
+			return fmt.Errorf("operation %d: %s does not read back as the requested value", index, strings.Join(path, "."))
+		}
+	}
+	for _, path := range paths {
+		// A target may have created parent mappings; drop from the first new one.
+		prefix := path
+		for length := 1; length <= len(path); length++ {
+			if _, found := configValueAt(original, path[:length]); !found {
+				prefix = path[:length]
+				break
+			}
+		}
+		configDeleteValueAt(original, prefix)
+		configDeleteValueAt(updated, prefix)
+	}
+	if !reflect.DeepEqual(original, updated) {
+		return fmt.Errorf("a section outside the requested paths changed")
+	}
+	return nil
+}
+
+// configValueMatches compares a requested value with the stored one. A merged
+// mapping only has to contain the requested keys.
+func configValueMatches(want, got any, merge bool) bool {
+	if !merge {
+		return reflect.DeepEqual(want, got)
+	}
+	wantMap, okWant := want.(map[string]any)
+	gotMap, okGot := got.(map[string]any)
+	if !okWant || !okGot {
+		return reflect.DeepEqual(want, got)
+	}
+	for key, value := range wantMap {
+		stored, found := gotMap[key]
+		if !found || !configValueMatches(value, stored, true) {
+			return false
+		}
+	}
+	return true
+}
+
+// configValuesEquivalent compares a JSON-sourced value with a YAML-sourced
+// one. JSON cannot tell 1 from 1.0, so a float equals an integer of the same
+// value; two integers must match exactly, which catches precision loss.
+func configValuesEquivalent(a, b any) bool {
+	if ai, ok := configInteger(a); ok {
+		if bi, okB := configInteger(b); okB {
+			return ai.Cmp(bi) == 0
+		}
+	}
+	if af, ok := configNumber(a); ok {
+		bf, okB := configNumber(b)
+		return okB && af == bf
+	}
+	switch left := a.(type) {
+	case []any:
+		right, ok := b.([]any)
+		if !ok || len(left) != len(right) {
+			return false
+		}
+		for index := range left {
+			if !configValuesEquivalent(left[index], right[index]) {
+				return false
+			}
+		}
+		return true
+	case map[string]any, map[any]any:
+		leftMap, rightMap := configStringKeyMap(a), configStringKeyMap(b)
+		if rightMap == nil || len(leftMap) != len(rightMap) {
+			return false
+		}
+		for key, value := range leftMap {
+			other, found := rightMap[key]
+			if !found || !configValuesEquivalent(value, other) {
+				return false
+			}
+		}
+		return true
+	}
+	return reflect.DeepEqual(a, b)
+}
+
+func configInteger(value any) (*big.Int, bool) {
+	switch number := value.(type) {
+	case int:
+		return big.NewInt(int64(number)), true
+	case int64:
+		return big.NewInt(number), true
+	case uint64:
+		return new(big.Int).SetUint64(number), true
+	}
+	return nil, false
+}
+
+func configNumber(value any) (float64, bool) {
+	switch number := value.(type) {
+	case int:
+		return float64(number), true
+	case int64:
+		return float64(number), true
+	case uint64:
+		return float64(number), true
+	case float64:
+		return number, true
+	}
+	return 0, false
+}
+
+func configStringKeyMap(value any) map[string]any {
+	switch mapping := value.(type) {
+	case map[string]any:
+		return mapping
+	case map[any]any:
+		out := make(map[string]any, len(mapping))
+		for key, item := range mapping {
+			out[fmt.Sprint(key)] = item
+		}
+		return out
+	}
+	return nil
+}
+
+func configValueAt(root any, path []string) (any, bool) {
+	current := root
+	for _, part := range path {
+		switch mapping := current.(type) {
+		case map[string]any:
+			next, found := mapping[part]
+			if !found {
+				return nil, false
+			}
+			current = next
+		case map[any]any:
+			next, found := configAnyKeyValue(mapping, part)
+			if !found {
+				return nil, false
+			}
+			current = next
+		default:
+			return nil, false
+		}
+	}
+	return current, true
+}
+
+func configAnyKeyValue(mapping map[any]any, key string) (any, bool) {
+	for candidate, value := range mapping {
+		if fmt.Sprint(candidate) == key {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+func configDeleteValueAt(root any, path []string) {
+	if len(path) == 0 {
+		return
+	}
+	parent, found := configValueAt(root, path[:len(path)-1])
+	if !found {
+		return
+	}
+	key := path[len(path)-1]
+	switch mapping := parent.(type) {
+	case map[string]any:
+		delete(mapping, key)
+	case map[any]any:
+		for candidate := range mapping {
+			if fmt.Sprint(candidate) == key {
+				delete(mapping, candidate)
+			}
+		}
+	}
+}
+
+func configYAMLMappingValue(mapping *yaml.Node, key string) *yaml.Node {
+	index := indexYAMLMappingValue(mapping, key)
+	if index < 0 || index+1 >= len(mapping.Content) {
+		return nil
+	}
+	return mapping.Content[index+1]
+}
+
+func indexYAMLMappingValue(mapping *yaml.Node, key string) int {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return -1
+	}
+	for index := 0; index+1 < len(mapping.Content); index += 2 {
+		if mapping.Content[index].Value == key {
+			return index
+		}
+	}
+	return -1
+}
+
+func configYAMLDeleteMappingValue(mapping *yaml.Node, key string) bool {
+	index := indexYAMLMappingValue(mapping, key)
+	if index < 0 {
+		return false
+	}
+	mapping.Content = append(mapping.Content[:index], mapping.Content[index+2:]...)
+	return true
+}
+
+func mergeConfigYAMLMapping(destination, patch *yaml.Node) {
+	for index := 0; index+1 < len(patch.Content); index += 2 {
+		key := patch.Content[index].Value
+		current := configYAMLMappingValue(destination, key)
+		updated := patch.Content[index+1]
+		if current == nil {
+			destination.Content = append(destination.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, updated)
+		} else if current.Kind == yaml.MappingNode && updated.Kind == yaml.MappingNode {
+			mergeConfigYAMLMapping(current, updated)
+		} else {
+			updated.HeadComment, updated.LineComment, updated.FootComment = current.HeadComment, current.LineComment, current.FootComment
+			destination.Content[indexYAMLMappingValue(destination, key)+1] = updated
+		}
+	}
 }
 
 // GetConfigYAML returns the raw config.yaml file bytes without re-encoding.

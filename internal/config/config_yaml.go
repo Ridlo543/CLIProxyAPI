@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -80,6 +81,8 @@ func SaveConfigPreserveComments(configFile string, cfg *Config, migrateV8 ...boo
 	pruneMappingToGeneratedKeys(original.Content[0], generated.Content[0], "oauth-model-alias")
 	pruneMappingToGeneratedKeys(original.Content[0], generated.Content[0], "oauth-request-scoped-errors")
 	pruneMappingToGeneratedKeys(original.Content[0], generated.Content[0], "oauth-settings")
+	pruneMappingToGeneratedKeys(original.Content[0], generated.Content[0], "antigravity", "sensitive-words-replace")
+	pruneMappingToGeneratedKeys(original.Content[0], generated.Content[0], "devin", "sensitive-words-replace")
 	replacePluginConfigsSubtree(original.Content[0], generated.Content[0])
 	if len(persistCfg.ProxyPools) == 0 {
 		removeMapKey(original.Content[0], "proxy-pools")
@@ -200,8 +203,16 @@ func updateNestedScalarYAML(data []byte, path []string, value string) ([]byte, e
 }
 
 // NormalizeCommentIndentation removes indentation from standalone YAML comment lines to keep them left aligned.
+// It is cosmetic only: when the input cannot be analysed, or when the result
+// would read back as a different document, the input is returned unchanged.
 func NormalizeCommentIndentation(data []byte) []byte {
 	lines := bytes.Split(data, []byte("\n"))
+	// A continuation line of a multi-line quoted scalar may start with '#'.
+	// It is data, and moving it to column 0 makes the document invalid YAML.
+	inQuoted, ok := quotedScalarContinuationLines(data, len(lines))
+	if !ok {
+		return data
+	}
 	changed := false
 	// Block scalar content (| and >) is data, not comments. A line starting with
 	// '#' inside such a block must keep its indentation, otherwise the value
@@ -229,7 +240,7 @@ func NormalizeCommentIndentation(data []byte) []byte {
 		if len(trimmed) == 0 || trimmed[0] != '#' {
 			continue
 		}
-		if indent == 0 {
+		if indent == 0 || inQuoted[i] {
 			continue
 		}
 		lines[i] = append([]byte(nil), trimmed...)
@@ -238,7 +249,87 @@ func NormalizeCommentIndentation(data []byte) []byte {
 	if !changed {
 		return data
 	}
-	return bytes.Join(lines, []byte("\n"))
+	normalized := bytes.Join(lines, []byte("\n"))
+	if !sameYAMLDocumentValue(data, normalized) {
+		return data
+	}
+	return normalized
+}
+
+// quotedScalarContinuationLines marks the lines (0-based) that continue a
+// single- or double-quoted scalar started on an earlier line. ok is false when
+// the document cannot be parsed or a scalar position cannot be confirmed.
+func quotedScalarContinuationLines(data []byte, lineCount int) (marked []bool, ok bool) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, false
+	}
+	marked = make([]bool, lineCount)
+	lines := strings.Split(string(data), "\n")
+	ok = true
+	var walk func(node *yaml.Node)
+	walk = func(node *yaml.Node) {
+		if node == nil || !ok {
+			return
+		}
+		if node.Kind == yaml.ScalarNode && node.Style&(yaml.DoubleQuotedStyle|yaml.SingleQuotedStyle) != 0 {
+			end, found := quotedScalarEndLine(lines, node.Line-1, node.Column-1)
+			if !found {
+				ok = false
+				return
+			}
+			for line := node.Line; line <= end && line < lineCount; line++ {
+				marked[line] = true
+			}
+		}
+		for _, child := range node.Content {
+			walk(child)
+		}
+	}
+	walk(&doc)
+	return marked, ok
+}
+
+// quotedScalarEndLine returns the 0-based line holding the closing quote of
+// the scalar whose opening quote is at (line, column); column counts runes.
+func quotedScalarEndLine(lines []string, line, column int) (int, bool) {
+	if line < 0 || line >= len(lines) || column < 0 {
+		return 0, false
+	}
+	runes := []rune(lines[line])
+	if column >= len(runes) || (runes[column] != '"' && runes[column] != '\'') {
+		return 0, false
+	}
+	quote := runes[column]
+	i := column + 1
+	for {
+		for i < len(runes) {
+			switch {
+			case quote == '"' && runes[i] == '\\':
+				i += 2
+			case quote == '\'' && runes[i] == '\'' && i+1 < len(runes) && runes[i+1] == '\'':
+				i += 2
+			case runes[i] == quote:
+				return line, true
+			default:
+				i++
+			}
+		}
+		line++
+		if line >= len(lines) {
+			return 0, false
+		}
+		runes, i = []rune(lines[line]), 0
+	}
+}
+
+// sameYAMLDocumentValue reports whether both inputs parse to the same value.
+func sameYAMLDocumentValue(a, b []byte) bool {
+	var left, right any
+	if yaml.Unmarshal(a, &left) != nil || yaml.Unmarshal(b, &right) != nil {
+		return false
+	}
+	return reflect.DeepEqual(left, right)
 }
 
 // opensBlockScalar reports whether a line opens a literal or folded block scalar,
@@ -442,8 +533,49 @@ func appendPath(path []string, key string) []string {
 // an SDK embedder adds through sdk/config.SaveConfigPreserveComments to a file that
 // never carried it: pruning drops those zero-valued sub-keys. No management
 // endpoint mutates ProxyConnectionPool, so that path is reachable only from code.
+func isSensitiveWordsReplaceEntryPath(path []string) bool {
+	for i, part := range path {
+		if part == "sensitive-words-replace" && i < len(path)-1 {
+			return true
+		}
+	}
+	return false
+}
+
+func hasNonEmptySensitiveWordsReplace(node *yaml.Node) bool {
+	if node == nil {
+		return false
+	}
+	switch node.Kind {
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			k := node.Content[i]
+			v := node.Content[i+1]
+			if k != nil && k.Value == "sensitive-words-replace" && v != nil && v.Kind == yaml.MappingNode && len(v.Content) > 0 {
+				return true
+			}
+			if hasNonEmptySensitiveWordsReplace(v) {
+				return true
+			}
+		}
+	case yaml.SequenceNode:
+		for _, child := range node.Content {
+			if hasNonEmptySensitiveWordsReplace(child) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func isKnownDefaultValue(path []string, node *yaml.Node) bool {
-	if isPluginConfigsSubtreePath(path) {
+	if isPluginConfigsSubtreePath(path) || isSensitiveWordsReplaceEntryPath(path) {
+		return false
+	}
+	if len(path) > 0 && path[len(path)-1] == "sensitive-words-replace" && node != nil && node.Kind == yaml.MappingNode && len(node.Content) > 0 {
+		return false
+	}
+	if hasNonEmptySensitiveWordsReplace(node) {
 		return false
 	}
 	if len(path) == 1 && path[0] == "plugins" && node != nil && node.Kind == yaml.MappingNode {
@@ -522,7 +654,10 @@ func isKnownDefaultValue(path []string, node *yaml.Node) bool {
 // pruneKnownDefaultsInNewNode removes default-valued descendants from a new node
 // before it is appended into the destination YAML tree.
 func pruneKnownDefaultsInNewNode(path []string, node *yaml.Node) {
-	if node == nil || isPluginConfigsSubtreePath(path) {
+	if node == nil || isPluginConfigsSubtreePath(path) || isSensitiveWordsReplaceEntryPath(path) {
+		return
+	}
+	if len(path) > 0 && path[len(path)-1] == "sensitive-words-replace" {
 		return
 	}
 
@@ -937,6 +1072,9 @@ func shouldPruneNestedMappingKeys(path []string) bool {
 	}
 	parent := path[len(path)-2]
 	last := path[len(path)-1]
+	if last == "sensitive-words-replace" && (parent == "antigravity" || parent == "devin" || parent == "cloak") {
+		return true
+	}
 	switch parent {
 	case "claude-api-key":
 		return last == "cloak" || last == "headers"
